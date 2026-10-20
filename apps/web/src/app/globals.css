@@ -146,11 +146,21 @@ a { color: inherit; text-decoration: none; }
 .selected-food-form .field input, .selected-food-form .field select, .custom-food-form .field input, .custom-food-form .field select, .activity-entry-panel .field input, .activity-entry-panel .field select { background: var(--surface); }
 .source-note { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
 .workout-exercise-builder, .workout-exercise-card, .workout-set-list { display: grid; gap: 12px; }
+.starter-template-box { display: grid; gap: 11px; padding: 14px; border: 1px solid rgba(54, 91, 54, .16); border-radius: 17px; background: var(--green-soft); }
+.starter-template-box > div:first-child { display: grid; gap: 5px; }
+.starter-template-box > div:first-child > strong { color: var(--ink); font-size: 12px; }
+.starter-template-box > div:first-child > p, .exercise-guidance p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.starter-template-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.starter-template-list li { display: flex; justify-content: space-between; gap: 8px; color: var(--ink); font-size: 9px; }
+.starter-template-list small { color: var(--muted); font-size: 8px; text-align: right; }
+.starter-template-box .field-note { margin: -4px 0 0; }
 .workout-exercise-card { padding: 13px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-soft); }
+.exercise-guidance { display: grid; gap: 4px; padding: 8px 10px; border-radius: 12px; background: var(--surface); }
 .workout-exercise-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--ink); font-size: 11px; }
 .workout-exercise-heading .quiet-button { min-height: 32px; }
 .workout-set-list { gap: 9px; }
 .workout-set-row { display: grid; grid-template-columns: 38px repeat(2, minmax(0, 1fr)); align-items: end; gap: 8px; }
+.workout-set-row-timed { grid-template-columns: 38px minmax(0, 1fr); }
 .set-number { align-self: center; color: var(--muted); font-size: 9px; font-weight: 700; }
 .workout-set-row .quiet-button { grid-column: 2 / -1; justify-self: end; min-height: 30px; }
 .workout-exercise-card > .text-button { justify-self: start; min-height: 34px; margin: 0; }

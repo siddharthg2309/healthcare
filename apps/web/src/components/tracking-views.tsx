@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { WorkoutExercise } from "@healthcare/contracts";
-import { exerciseCatalog } from "@healthcare/domain";
+import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
 import {
   postJson,
   requestJson,
@@ -382,10 +382,15 @@ function FoodLogEntry({ item, onChanged }: { item: FoodLog; onChanged: () => Pro
   </div>;
 }
 
-type ExerciseDraft = { exerciseId: string | null; exerciseName: string; sets: Array<{ reps: string; loadKg: string }> };
+type ExerciseDraft = {
+  exerciseId: string | null;
+  exerciseName: string;
+  trackingMode: "reps" | "time";
+  sets: Array<{ reps: string; durationSeconds: string; loadKg: string }>;
+};
 
 function emptyExercise(): ExerciseDraft {
-  return { exerciseId: null, exerciseName: "", sets: [{ reps: "", loadKg: "" }] };
+  return { exerciseId: null, exerciseName: "", trackingMode: "reps", sets: [{ reps: "", durationSeconds: "", loadKg: "" }] };
 }
 
 export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { unitSystem: "metric" | "imperial" }) {
@@ -400,6 +405,8 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
   const [notes, setNotes] = useState("");
   const [workoutTitle, setWorkoutTitle] = useState("");
   const [exercises, setExercises] = useState<ExerciseDraft[]>([emptyExercise()]);
+  const [templateId, setTemplateId] = useState(workoutTemplates[0]?.id ?? "");
+  const [templateSessionIndex, setTemplateSessionIndex] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingVersion, setEditingVersion] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -435,6 +442,10 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
 
   const workoutIsReady = workoutTitle.trim().length > 0 && exercises.length > 0 && exercises.every((exercise) =>
     exercise.exerciseName.trim().length > 0 && exercise.sets.length > 0 && exercise.sets.every((set) => {
+      if (exercise.trackingMode === "time") {
+        const seconds = Number(set.durationSeconds);
+        return Number.isInteger(seconds) && seconds >= 1 && seconds <= 7200;
+      }
       const reps = Number(set.reps);
       const load = set.loadKg.trim() ? Number(set.loadKg) : null;
       const loadKg = load === null ? null : unitSystem === "imperial" ? load / poundsPerKilogram : load;
@@ -442,9 +453,29 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     }),
   );
   const totalSets = exercises.reduce((total, exercise) => total + exercise.sets.length, 0);
+  const selectedTemplate = workoutTemplates.find((template) => template.id === templateId) ?? workoutTemplates[0];
+  const selectedTemplateSession = selectedTemplate?.sessions[templateSessionIndex] ?? selectedTemplate?.sessions[0];
 
   function updateExercise(index: number, update: (exercise: ExerciseDraft) => ExerciseDraft) {
     setExercises((current) => current.map((exercise, exerciseIndex) => exerciseIndex === index ? update(exercise) : exercise));
+  }
+
+  function applySelectedTemplate() {
+    if (!selectedTemplate || !selectedTemplateSession) return;
+    setActivityType("strength");
+    setWorkoutTitle(`${selectedTemplate.name} · ${selectedTemplateSession.label}`);
+    setExercises(selectedTemplateSession.exercises.flatMap((target) => {
+      const exercise = findExerciseById(target.exerciseId);
+      if (!exercise) return [];
+      return [{
+        exerciseId: exercise.id,
+        exerciseName: exercise.name,
+        trackingMode: exercise.trackingMode,
+        sets: Array.from({ length: target.sets }, () => ({ reps: "", durationSeconds: "", loadKg: "" })),
+      }];
+    }));
+    setMessage("Session loaded. Enter the reps, hold times, and loads you actually complete.");
+    setError("");
   }
 
   function resetForm() {
@@ -471,8 +502,10 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setExercises(item.data.exercises?.map((exercise) => ({
       exerciseId: exercise.exerciseId ?? null,
       exerciseName: exercise.exerciseName,
+      trackingMode: exercise.sets.some((set) => set.durationSeconds !== null && set.durationSeconds !== undefined) ? "time" : "reps",
       sets: exercise.sets.map((set) => ({
-        reps: String(set.reps),
+        reps: set.reps === null || set.reps === undefined ? "" : String(set.reps),
+        durationSeconds: set.durationSeconds === null || set.durationSeconds === undefined ? "" : String(set.durationSeconds),
         loadKg: set.loadKg === null ? "" : String(unitSystem === "imperial" ? set.loadKg * poundsPerKilogram : set.loadKg),
       })),
     })) ?? [emptyExercise()]);
@@ -519,7 +552,11 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
             exerciseName: exercise.exerciseName.trim(),
             sets: exercise.sets.map((set) => {
               const load = set.loadKg.trim() ? Number(set.loadKg) : null;
-              return { reps: Number(set.reps), loadKg: load === null ? null : unitSystem === "imperial" ? load / poundsPerKilogram : load };
+            return {
+              reps: exercise.trackingMode === "reps" ? Number(set.reps) : null,
+              durationSeconds: exercise.trackingMode === "time" ? Number(set.durationSeconds) : null,
+              loadKg: exercise.trackingMode === "time" || load === null ? null : unitSystem === "imperial" ? load / poundsPerKilogram : load,
+            };
             }),
           })),
         } : {}),
@@ -563,24 +600,58 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
         {activityType === "strength" ? <>
           <label className="field"><span>Workout name</span><input value={workoutTitle} onChange={(event) => setWorkoutTitle(event.target.value)} maxLength={100} placeholder="e.g. Upper body" required /></label>
           <label className="field"><span>Duration (minutes · optional)</span><input type="number" min="1" max="1440" step="1" value={durationMinutes} onChange={(event) => setDurationMinutes(event.target.value)} placeholder="How long you trained" /></label>
+          {!editingId && selectedTemplate && selectedTemplateSession ? <div className="starter-template-box">
+            <div><span className="eyebrow">STARTER SESSION</span><strong>{selectedTemplate.name}</strong><p>{selectedTemplate.summary} About {selectedTemplateSession.estimatedMinutes} minutes · {selectedTemplate.equipment.length ? selectedTemplate.equipment.join(", ") : "no workout equipment"}.</p></div>
+            <div className="form-grid">
+              <label className="field"><span>Routine</span><select value={templateId} onChange={(event) => { setTemplateId(event.target.value); setTemplateSessionIndex(0); }}>
+                {workoutTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select></label>
+              <label className="field"><span>Session</span><select value={templateSessionIndex} onChange={(event) => setTemplateSessionIndex(Number(event.target.value))}>
+                {selectedTemplate.sessions.map((session, index) => <option key={session.label} value={index}>{session.label}</option>)}
+              </select></label>
+            </div>
+            <ul className="starter-template-list">{selectedTemplateSession.exercises.map((target) => {
+              const libraryExercise = findExerciseById(target.exerciseId);
+              const range = target.repRange ? `${target.repRange[0]}–${target.repRange[1]} reps` : `${target.durationSecondsRange?.[0]}–${target.durationSecondsRange?.[1]} sec`;
+              return <li key={target.exerciseId}><span>{libraryExercise?.name ?? target.exerciseId}</span><small>{target.sets} × {range} · {target.restSeconds}s rest</small></li>;
+            })}</ul>
+            <button type="button" className="button button-secondary" onClick={applySelectedTemplate}>Load this session</button>
+            <p className="field-note">Loading adds blank workout fields. Record what you actually complete; targets are not saved as completed sets.</p>
+          </div> : null}
           <div className="workout-exercise-builder">
             {exercises.map((exercise, exerciseIndex) => {
               const catalogExercise = exercise.exerciseId ? exerciseCatalog.find((candidate) => candidate.id === exercise.exerciseId) : undefined;
+              const easierAlternative = catalogExercise?.easierAlternativeId ? findExerciseById(catalogExercise.easierAlternativeId) : undefined;
               return <article className="workout-exercise-card" key={exerciseIndex}>
               <div className="workout-exercise-heading"><strong>Exercise {exerciseIndex + 1}</strong>{exercises.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => setExercises((current) => current.filter((_, index) => index !== exerciseIndex))}>Remove</button> : null}</div>
               <label className="field"><span>Exercise</span><input list="exercise-library" value={exercise.exerciseName} onChange={(event) => {
                 const value = event.target.value;
                 const match = exerciseCatalog.find((candidate) => candidate.name.toLocaleLowerCase() === value.trim().toLocaleLowerCase());
-                updateExercise(exerciseIndex, (current) => ({ ...current, exerciseId: match?.id ?? null, exerciseName: match?.name ?? value }));
+                updateExercise(exerciseIndex, (current) => ({
+                  ...current,
+                  exerciseId: match?.id ?? null,
+                  exerciseName: match?.name ?? value,
+                  trackingMode: match?.trackingMode ?? current.trackingMode,
+                  sets: match && match.trackingMode !== current.trackingMode
+                    ? current.sets.map(() => ({ reps: "", durationSeconds: "", loadKg: "" }))
+                    : current.sets,
+                }));
               }} maxLength={100} placeholder="Search or enter an exercise" required /></label>
-              {catalogExercise ? <p className="source-note">{catalogExercise.movementPattern} · {catalogExercise.primaryMuscles.join(", ")} · {catalogExercise.equipment.length ? catalogExercise.equipment.join(", ") : "no added equipment"}</p> : null}
-              <div className="workout-set-list">{exercise.sets.map((set, setIndex) => <div className="workout-set-row" key={setIndex}>
+              {catalogExercise ? <div className="exercise-guidance"><p>{catalogExercise.movementPattern} · {catalogExercise.primaryMuscles.join(", ")} · {catalogExercise.equipment.length ? catalogExercise.equipment.join(", ") : "no added equipment"} · typical rest {catalogExercise.typicalRestSeconds}s</p><p>{catalogExercise.techniqueCue}</p>{easierAlternative ? <p>Easier option: {easierAlternative.name}</p> : null}</div> : null}
+              <label className="field"><span>Track each set by</span><select value={exercise.trackingMode} onChange={(event) => updateExercise(exerciseIndex, (current) => ({
+                ...current,
+                trackingMode: event.target.value as ExerciseDraft["trackingMode"],
+                sets: current.sets.map(() => ({ reps: "", durationSeconds: "", loadKg: "" })),
+              }))}><option value="reps">Reps</option><option value="time">Timed hold</option></select></label>
+              <div className="workout-set-list">{exercise.sets.map((set, setIndex) => <div className={`workout-set-row${exercise.trackingMode === "time" ? " workout-set-row-timed" : ""}`} key={setIndex}>
                 <span className="set-number">Set {setIndex + 1}</span>
-                <label className="field"><span>Reps</span><input type="number" min="1" max="200" step="1" value={set.reps} onChange={(event) => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.map((item, index) => index === setIndex ? { ...item, reps: event.target.value } : item) }))} required /></label>
-                <label className="field"><span>Load ({unitSystem === "imperial" ? "lb" : "kg"})</span><input type="number" min="0" max={unitSystem === "imperial" ? 2204.62 : 1000} step="0.5" value={set.loadKg} onChange={(event) => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.map((item, index) => index === setIndex ? { ...item, loadKg: event.target.value } : item) }))} placeholder="Bodyweight or none" /></label>
+                {exercise.trackingMode === "reps" ? <>
+                  <label className="field"><span>Reps</span><input type="number" min="1" max="200" step="1" value={set.reps} onChange={(event) => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.map((item, index) => index === setIndex ? { ...item, reps: event.target.value } : item) }))} required /></label>
+                  <label className="field"><span>Load ({unitSystem === "imperial" ? "lb" : "kg"})</span><input type="number" min="0" max={unitSystem === "imperial" ? 2204.62 : 1000} step="0.5" value={set.loadKg} onChange={(event) => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.map((item, index) => index === setIndex ? { ...item, loadKg: event.target.value } : item) }))} placeholder="Bodyweight or none" /></label>
+                </> : <label className="field"><span>Hold (seconds)</span><input type="number" min="1" max="7200" step="1" value={set.durationSeconds} onChange={(event) => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.map((item, index) => index === setIndex ? { ...item, durationSeconds: event.target.value } : item) }))} required /></label>}
                 {exercise.sets.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.filter((_, index) => index !== setIndex) }))}>Remove set</button> : null}
               </div>)}</div>
-              <button type="button" className="text-button" disabled={exercise.sets.length >= 20 || totalSets >= 100} onClick={() => updateExercise(exerciseIndex, (current) => ({ ...current, sets: [...current.sets, { reps: "", loadKg: "" }] }))}>＋ Add set</button>
+              <button type="button" className="text-button" disabled={exercise.sets.length >= 20 || totalSets >= 100} onClick={() => updateExercise(exerciseIndex, (current) => ({ ...current, sets: [...current.sets, { reps: "", durationSeconds: "", loadKg: "" }] }))}>＋ Add set</button>
               </article>;
             })}
             <datalist id="exercise-library">{exerciseCatalog.map((exercise) => <option key={exercise.id} value={exercise.name} />)}</datalist>
@@ -591,7 +662,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
           <label className="field"><span>Steps</span><input type="number" min="0" max="200000" step="1" value={steps} onChange={(event) => setSteps(event.target.value)} placeholder={activityType === "steps" ? "Required for step entry" : "Optional"} required={activityType === "steps"} /></label>
         </div>}
         <label className="field"><span>Notes</span><input value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} placeholder="Optional details" /></label>
-        <p className="source-note">{activityType === "strength" ? "Strength sessions save each exercise, set, rep count, and optional load. Calories burned are not estimated." : "Steps and duration are entered manually. Calories burned are not estimated."}</p>
+        <p className="source-note">{activityType === "strength" ? "Strength sessions save reps or timed holds, optional load, and your actual session duration. Calories burned are not estimated." : "Steps and duration are entered manually. Calories burned are not estimated."}</p>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {message ? <p className="form-message" role="status">{message}</p> : null}
         <div className="activity-form-actions">
@@ -615,7 +686,11 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
         {historyError ? <p className="form-error" role="alert">{historyError}</p> : null}
         {historyLoading ? <p className="muted-copy" role="status">Loading activity history…</p> : viewDay.activityLogs.length ? <div className="daily-entry-list">{[...viewDay.activityLogs].reverse().map((item) => {
           const title = item.data.workoutTitle ?? (item.data.activityType === "steps" ? "Step count" : item.data.activityType[0].toUpperCase() + item.data.activityType.slice(1));
-          const exerciseDetails = item.data.exercises?.map((exercise) => `${exercise.exerciseName} (${exercise.sets.map((set) => `${set.reps} reps${set.loadKg === null ? "" : ` @ ${formatNumber(unitSystem === "imperial" ? set.loadKg * poundsPerKilogram : set.loadKg, 1)} ${unitSystem === "imperial" ? "lb" : "kg"}`}`).join(", ")})`).join(" · ");
+          const exerciseDetails = item.data.exercises?.map((exercise) => `${exercise.exerciseName} (${exercise.sets.map((set) => {
+            if (set.durationSeconds !== null && set.durationSeconds !== undefined) return `${set.durationSeconds} sec`;
+            const loadText = set.loadKg === null ? "" : ` @ ${formatNumber(unitSystem === "imperial" ? set.loadKg * poundsPerKilogram : set.loadKg, 1)} ${unitSystem === "imperial" ? "lb" : "kg"}`;
+            return `${set.reps ?? 0} reps${loadText}`;
+          }).join(", ")})`).join(" · ");
           return <div className="daily-entry" key={item.id}>
             <span className="meal-badge">↗</span>
             <span className="daily-entry-main"><strong>{title}</strong><small>{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>

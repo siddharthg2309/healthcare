@@ -9,3 +9,10 @@ export {
   findExerciseById,
   type ExerciseDefinition,
 } from "./exercises.js";
+export {
+  findWorkoutTemplateById,
+  workoutTemplates,
+  type WorkoutTemplate,
+  type WorkoutTemplateExercise,
+  type WorkoutTemplateSession,
+} from "./workout-templates.js";

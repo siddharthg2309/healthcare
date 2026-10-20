@@ -138,15 +138,31 @@ export const foodLogRecordSchema = z.object({
 }).strict();
 
 const workoutSetSchema = z.object({
-  reps: z.number().int().min(1).max(200),
+  reps: z.number().int().min(1).max(200).nullable().optional(),
+  durationSeconds: z.number().int().min(1).max(7200).nullable().optional(),
   loadKg: z.number().finite().min(0).max(1000).nullable(),
-}).strict();
+}).strict().superRefine((value, context) => {
+  const hasReps = value.reps !== null && value.reps !== undefined;
+  const hasDuration = value.durationSeconds !== null && value.durationSeconds !== undefined;
+  if (hasReps === hasDuration) {
+    context.addIssue({ code: "custom", path: ["reps"], message: "Enter either reps or a timed hold for each set." });
+  }
+  if (hasDuration && value.loadKg !== null) {
+    context.addIssue({ code: "custom", path: ["loadKg"], message: "Timed sets cannot include an external load." });
+  }
+});
 
 const workoutExerciseSchema = z.object({
   exerciseId: z.string().trim().min(1).max(80).nullable().optional(),
   exerciseName: z.string().trim().min(1).max(100),
   sets: z.array(workoutSetSchema).min(1).max(20),
-}).strict();
+}).strict().superRefine((value, context) => {
+  const timed = value.sets.some((set) => set.durationSeconds !== null && set.durationSeconds !== undefined);
+  const repBased = value.sets.some((set) => set.reps !== null && set.reps !== undefined);
+  if (timed && repBased) {
+    context.addIssue({ code: "custom", path: ["sets"], message: "All sets for one exercise must use the same tracking mode." });
+  }
+});
 
 const activityLogSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
