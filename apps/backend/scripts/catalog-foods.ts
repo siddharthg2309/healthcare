@@ -25,7 +25,7 @@ const fnddsAliases: Record<number, string[]> = {
   2706438: ["chicken curry with rice"],
   2706460: ["fish curry"],
   2706461: ["fish curry with rice"],
-  2706490: ["meat biryani", "mutton biryani"],
+  2706490: ["meat biryani"],
   2706538: ["chicken biryani", "chicken biriyani"],
   2707427: ["dal", "daal", "dahl"],
   2707430: ["sambar", "sambhar"],
