@@ -1,4 +1,4 @@
-import { Activity, Clock3, Dumbbell, Footprints } from "lucide-react-native";
+import { Clock3, Dumbbell, Footprints } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 
 import { FeedbackCard } from "@/components/feedback";
@@ -12,7 +12,6 @@ export default function ActivityScreen() {
       <ScreenHeader
         eyebrow={formatToday()}
         title="Activity"
-        subtitle="Movement that fits your day."
       />
       <PreviewNotice />
 
@@ -29,8 +28,7 @@ export default function ActivityScreen() {
         </View>
         <ProgressBar value={dailyMovement.steps / dailyMovement.stepTarget} color={colors.limeStrong} height={9} />
         <View style={styles.stepFooter}>
-          <Text style={styles.stepCaption}>A steady walk counts.</Text>
-          <Text style={styles.stepCaption}>{dailyMovement.stepTarget.toLocaleString("en-IN")} step goal</Text>
+          <Text style={styles.stepCaption}>Goal {dailyMovement.stepTarget.toLocaleString("en-IN")}</Text>
         </View>
       </Card>
 
@@ -40,7 +38,6 @@ export default function ActivityScreen() {
           label="Active time"
           value={String(dailyMovement.activeMinutes)}
           unit="min"
-          note="Sample activity"
           tint={colors.greenSoft}
         />
         <MetricCard
@@ -53,7 +50,7 @@ export default function ActivityScreen() {
         />
       </View>
 
-      <SectionHeading title="Today's session" detail="Sample workout log" />
+      <SectionHeading title="Today's session" />
       <Card style={styles.workoutCard}>
         <View style={styles.workoutHeader}>
           <View style={styles.workoutIcon}>
@@ -84,19 +81,13 @@ export default function ActivityScreen() {
         </View>
       </Card>
 
-      <SectionHeading title="Phone activity" detail="Optional connection" />
+      <SectionHeading title="Phone activity" />
       <FeedbackCard
         kind="empty"
-        title="Health Connect is not connected"
-        message="Step totals can be entered manually. Connecting a phone is planned for a later phase."
+        title="Health Connect"
+        message="Coming soon · manual steps are available."
       />
 
-      <View style={styles.note}>
-        <Activity size={15} color={colors.green} />
-        <Text style={styles.noteText}>
-          Imported steps and workouts will be reconciled with manual entries so one walk is not counted twice.
-        </Text>
-      </View>
     </Page>
   );
 }
@@ -224,19 +215,5 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontFamily: fonts.regular,
     fontSize: 10,
-  },
-  note: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 9,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-  },
-  noteText: {
-    flex: 1,
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    lineHeight: 17,
   },
 });

@@ -61,7 +61,7 @@ export function PreviewNotice() {
   return (
     <View style={styles.previewNotice}>
       <View style={styles.previewDot} />
-      <Text style={styles.previewText}>DESIGN PREVIEW · SAMPLE DATA</Text>
+      <Text style={styles.previewText}>SAMPLE DATA</Text>
     </View>
   );
 }

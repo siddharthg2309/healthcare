@@ -1,4 +1,4 @@
-import { Flame, Plus, Search, ScanLine } from "lucide-react-native";
+import { Flame, Search, ScanLine } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 
 import { Card, MacroBar, Page, PreviewNotice, ProgressBar, ScreenHeader, SectionHeading } from "@/components/ui";
@@ -13,7 +13,6 @@ export default function FoodScreen() {
       <ScreenHeader
         eyebrow={formatToday()}
         title="Food"
-        subtitle="A clear picture of what you ate."
       />
       <PreviewNotice />
 
@@ -35,21 +34,20 @@ export default function FoodScreen() {
         <ProgressBar value={dailyNutrition.eaten / dailyNutrition.target} color={colors.limeStrong} height={10} />
       </Card>
 
-      <SectionHeading title="Macros" detail="From your sample food log" />
+      <SectionHeading title="Macros" />
       <Card style={styles.macroCard}>
         <MacroBar label="Protein" value={dailyNutrition.protein} target={dailyNutrition.proteinTarget} tint={colors.green} />
         <MacroBar label="Carbohydrates" value={dailyNutrition.carbs} target={dailyNutrition.carbsTarget} tint={colors.orange} />
         <MacroBar label="Fat" value={dailyNutrition.fat} target={dailyNutrition.fatTarget} tint={colors.blue} />
       </Card>
 
-      <SectionHeading title="Add food" detail="Manual search and photo-assisted entry" />
+      <SectionHeading title="Add food" />
       <View style={styles.actionGrid}>
         <View style={styles.actionCard}>
           <View style={[styles.actionIcon, { backgroundColor: colors.greenSoft }]}>
             <Search size={20} color={colors.green} />
           </View>
           <Text style={styles.actionTitle}>Search foods</Text>
-          <Text style={styles.actionDetail}>Choose a food and confirm its portion.</Text>
           <View style={styles.comingSoon}>
             <Text style={styles.comingSoonText}>PLANNED</Text>
           </View>
@@ -59,14 +57,13 @@ export default function FoodScreen() {
             <ScanLine size={20} color={colors.green} />
           </View>
           <Text style={styles.actionTitle}>Use a photo</Text>
-          <Text style={styles.actionDetail}>Review suggested dishes before logging.</Text>
           <View style={styles.comingSoon}>
             <Text style={styles.comingSoonText}>PLANNED</Text>
           </View>
         </View>
       </View>
 
-      <SectionHeading title="Today's meals" detail="Values shown are sample data" />
+      <SectionHeading title="Today's meals" />
       <Card style={styles.mealsCard}>
         {demoMeals.map((meal, index) => (
           <View
@@ -88,12 +85,6 @@ export default function FoodScreen() {
         ))}
       </Card>
 
-      <View style={styles.noteCard}>
-        <Plus size={16} color={colors.green} />
-        <Text style={styles.noteText}>
-          Nutrition totals come from confirmed foods and portions. Photo suggestions never set a serving size by themselves.
-        </Text>
-      </View>
     </Page>
   );
 }
@@ -162,7 +153,7 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     flex: 1,
-    minHeight: 178,
+    minHeight: 145,
     borderRadius: radius.card,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.line,
@@ -182,13 +173,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontFamily: fonts.semibold,
     fontSize: 13,
-  },
-  actionDetail: {
-    flex: 1,
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 10,
-    lineHeight: 15,
   },
   comingSoon: {
     alignSelf: "flex-start",
@@ -247,20 +231,5 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontFamily: fonts.medium,
     fontSize: 11,
-  },
-  noteCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 9,
-    borderRadius: radius.medium,
-    backgroundColor: colors.greenSoft,
-    padding: 14,
-  },
-  noteText: {
-    flex: 1,
-    color: colors.green,
-    fontFamily: fonts.medium,
-    fontSize: 11,
-    lineHeight: 17,
   },
 });

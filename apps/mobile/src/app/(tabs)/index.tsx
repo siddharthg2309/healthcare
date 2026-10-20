@@ -2,7 +2,7 @@ import { Link } from "expo-router";
 import { ArrowRight, Flame, Footprints, Salad } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { Card, MacroBar, Page, PreviewNotice, ProgressBar, ScreenHeader, SectionHeading, textStyles } from "@/components/ui";
+import { Card, MacroBar, Page, PreviewNotice, ProgressBar, ScreenHeader, SectionHeading } from "@/components/ui";
 import { colors, fonts, radius } from "@/constants/theme";
 import { dailyMovement, dailyNutrition, demoMeals, formatToday } from "@/data/demo";
 
@@ -40,7 +40,6 @@ export default function HomeScreen() {
       <ScreenHeader
         eyebrow={formatToday()}
         title={greeting()}
-        subtitle="A little progress adds up."
         accessory={
           <View accessibilityLabel="Profile preview" style={styles.avatar}>
             <Text style={styles.avatarText}>H</Text>
@@ -76,7 +75,7 @@ export default function HomeScreen() {
         </Pressable>
       </Link>
 
-      <SectionHeading title="Today at a glance" detail="Your food and movement" />
+      <SectionHeading title="Today" />
       <Card style={styles.calorieCard}>
         <View style={styles.cardTitleRow}>
           <View style={styles.cardIcon}>
@@ -99,7 +98,7 @@ export default function HomeScreen() {
       </Card>
 
       <View style={styles.sectionRow}>
-        <SectionHeading title="Movement" detail="So far today" />
+        <SectionHeading title="Movement" />
         <Link href="/activity" asChild>
           <Pressable accessibilityRole="link" style={styles.textLink}>
             <Text style={styles.textLinkLabel}>Details</Text>
@@ -129,7 +128,6 @@ export default function HomeScreen() {
 
       <SectionHeading
         title="Food today"
-        detail="Sample meal log"
         accessory={
           <Link href="/food" asChild>
             <Pressable accessibilityRole="link" style={styles.textLink}>
@@ -141,11 +139,6 @@ export default function HomeScreen() {
       <Card style={styles.mealsCard}>
         <MealSummary />
       </Card>
-      <View style={styles.footerHint}>
-        <Text style={styles.footerHintText}>
-          Your progress graph compares measured check-ins with your chosen goal path.
-        </Text>
-      </View>
     </Page>
   );
 }
@@ -377,15 +370,6 @@ const styles = StyleSheet.create({
   mealCalories: {
     color: colors.text,
     fontFamily: fonts.medium,
-    fontSize: 11,
-  },
-  footerHint: {
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-  },
-  footerHintText: {
-    ...textStyles.muted,
-    textAlign: "center",
     fontSize: 11,
   },
   pressed: {

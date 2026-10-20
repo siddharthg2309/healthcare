@@ -1,8 +1,15 @@
+import type { ComponentProps, ComponentType } from "react";
 import { View } from "react-native";
 import Svg, { Circle, G, Line, Path, Text as SvgText } from "react-native-svg";
 
-import { colors } from "@/constants/theme";
+import { colors, fonts } from "@/constants/theme";
 import type { ProgressDay } from "@/data/demo";
+
+type SvgLabelProps = ComponentProps<typeof SvgText> & {
+  style?: { fontFamily?: string };
+};
+
+const SvgLabel = SvgText as ComponentType<SvgLabelProps>;
 
 const WIDTH = 340;
 const HEIGHT = 202;
@@ -73,15 +80,16 @@ export function ProgressChart({ days }: ProgressChartProps) {
                 stroke={colors.line}
                 strokeWidth={1}
               />
-              <SvgText
+              <SvgLabel
                 x={LEFT - 8}
                 y={y + 4}
                 fill={colors.muted}
                 fontSize={10}
+                style={{ fontFamily: fonts.regular }}
                 textAnchor="end"
               >
                 {tick}
-              </SvgText>
+              </SvgLabel>
             </G>
           );
         })}
@@ -119,15 +127,16 @@ export function ProgressChart({ days }: ProgressChartProps) {
                   strokeWidth={2}
                 />
               )}
-              <SvgText
+              <SvgLabel
                 x={x}
                 y={HEIGHT - 13}
                 fill={colors.muted}
                 fontSize={10}
+                style={{ fontFamily: fonts.regular }}
                 textAnchor="middle"
               >
                 {day.day}
-              </SvgText>
+              </SvgLabel>
             </G>
           );
         })}

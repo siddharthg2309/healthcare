@@ -9,7 +9,7 @@ The product specification, design direction, data model, AI workflows, release a
 ## Stack
 
 - Expo SDK 57, React Native, TypeScript, and Expo Router
-- Minimal black, white, gray, and lime/green design with Inter
+- Minimal black, white, gray, and lime/green design with Manrope
 - Custom SVG progress chart to keep the goal path, measured trend, weigh-in points, and missing days explicit
 - Planned: Neon Postgres and server API, on-device SQLite, and server-side MiniMax M3 through OpenRouter
 - Planned: two bounded LangGraph workflows for reviewed meal and workout plans

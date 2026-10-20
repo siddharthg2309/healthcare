@@ -25,7 +25,6 @@ export default function ProgressScreen() {
       <ScreenHeader
         eyebrow={formatToday()}
         title="Your progress"
-        subtitle="The goal path beside your real check-ins."
       />
       <PreviewNotice />
 
@@ -35,7 +34,7 @@ export default function ProgressScreen() {
             <Scale size={19} color={colors.green} />
           </View>
           <View style={styles.summaryCopy}>
-            <Text style={styles.summaryLabel}>LATEST WEIGHT TREND</Text>
+            <Text style={styles.summaryLabel}>WEIGHT TREND</Text>
             <Text style={styles.summaryValue}>79.5<Text style={styles.summaryUnit}> kg</Text></Text>
           </View>
           <View style={styles.weekBadge}>
@@ -57,12 +56,11 @@ export default function ProgressScreen() {
         </View>
       </View>
 
-      <SectionHeading title="Plan and measurements" detail="Weight · kilograms" />
+      <SectionHeading title="Weight progress" />
       <Card style={styles.chartCard}>
         <View style={styles.chartHeader}>
           <View>
             <Text style={styles.chartTitle}>Last 7 days</Text>
-            <Text style={styles.chartSubtitle}>A measured trend, not a prediction</Text>
           </View>
           <View style={styles.goalMark}>
             <Target size={16} color={colors.green} />
@@ -78,12 +76,12 @@ export default function ProgressScreen() {
         </View>
 
         <View style={styles.chartFootnote}>
-          <Text style={styles.footnoteText}>Days without a weigh-in stay blank.</Text>
+          <Text style={styles.footnoteText}>No weigh-in</Text>
           <Text style={styles.coverage}>5 of 7 days</Text>
         </View>
       </Card>
 
-      <SectionHeading title="Your goal" detail="Sample plan values" />
+      <SectionHeading title="Your goal" />
       <Card style={styles.goalCard}>
         <View style={styles.goalRow}>
           <View style={styles.goalCopy}>
@@ -100,15 +98,8 @@ export default function ProgressScreen() {
           <View style={styles.goalBarFill} />
           <View style={styles.goalBarDot} />
         </View>
-        <Text style={styles.goalCaption}>12-week example timeline · review with your own measurements</Text>
       </Card>
 
-      <View style={styles.explanation}>
-        <Text style={styles.explanationTitle}>How to read this graph</Text>
-        <Text style={styles.explanationText}>
-          The dashed green line is the accepted goal path. The dark line smooths recorded measurements. Green dots show individual weigh-ins. Nutrition and activity totals are shown separately and do not claim to explain a same-day weight change.
-        </Text>
-      </View>
     </Page>
   );
 }
@@ -218,12 +209,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontFamily: fonts.semibold,
     fontSize: 15,
-  },
-  chartSubtitle: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 10,
-    marginTop: 3,
   },
   goalMark: {
     width: 34,
@@ -335,27 +320,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.green,
     borderWidth: 3,
     borderColor: colors.surface,
-  },
-  goalCaption: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 10,
-    lineHeight: 15,
-  },
-  explanation: {
-    gap: 5,
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-  },
-  explanationTitle: {
-    color: colors.text,
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-  },
-  explanationText: {
-    color: colors.muted,
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    lineHeight: 17,
   },
 });
