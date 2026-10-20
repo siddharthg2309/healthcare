@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   FoodPhotoRecognitionRequest,
   FoodPhotoRecognitionResponse,
+  CopyFoodLogsRequest,
   WorkoutExercise,
 } from "@healthcare/contracts";
 import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
@@ -105,6 +106,12 @@ type Props = { day: DaySummary; onSaved: () => Promise<void> };
 const meals = ["breakfast", "lunch", "dinner", "snack"] as const;
 const categories = ["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"] as const;
 const poundsPerKilogram = 2.20462262185;
+
+function shiftDate(date: string, days: number): string {
+  const value = new Date(`${date}T12:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
 
 function dateTimeLocalNow(): string {
   const date = new Date();
@@ -739,6 +746,59 @@ function RecipeComposer({ onCreated, onCancel }: { onCreated: (food: FoodOption)
 function DailyFoodPanel({ day, onChanged }: { day: DaySummary; onChanged: () => Promise<void> }) {
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusError, setStatusError] = useState("");
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copySourceDateOverride, setCopySourceDateOverride] = useState<string | null>(null);
+  const copySourceDate = copySourceDateOverride && copySourceDateOverride <= day.date
+    ? copySourceDateOverride
+    : shiftDate(day.date, -1);
+  const [copyMealType, setCopyMealType] = useState<(typeof meals)[number]>("breakfast");
+  const [copySourceResult, setCopySourceResult] = useState<{ date: string; summary: DaySummary | null; error: string }>({ date: "", summary: null, error: "" });
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  const [pendingCopy, setPendingCopy] = useState<CopyFoodLogsRequest | null>(null);
+  const copySourceBusy = copyOpen && copySourceResult.date !== copySourceDate;
+  const copySourceDay = copySourceResult.date === copySourceDate ? copySourceResult.summary : null;
+  const copyLoadError = copySourceResult.date === copySourceDate ? copySourceResult.error : "";
+
+  useEffect(() => {
+    if (!copyOpen || !copySourceDate) return;
+    let active = true;
+    void requestJson<DaySummary>(`/v1/days/${copySourceDate}`)
+      .then((summary) => { if (active) setCopySourceResult({ date: copySourceDate, summary, error: "" }); })
+      .catch((caught) => { if (active) setCopySourceResult({ date: copySourceDate, summary: null, error: caught instanceof Error ? caught.message : "Could not load that day's meals." }); });
+    return () => { active = false; };
+  }, [copyOpen, copySourceDate]);
+
+  const copyEntries = (copySourceDay?.foodLogs ?? []).filter((item) => item.data.mealType === copyMealType);
+
+  async function copyMeal() {
+    if (!copyEntries.length || copyEntries.length > 20 || copyBusy) return;
+    const retryPayload = pendingCopy
+      && pendingCopy.sourceDate === copySourceDate
+      && pendingCopy.targetDate === day.date
+      && pendingCopy.mealType === copyMealType
+      ? pendingCopy
+      : null;
+    const payload = retryPayload ?? {
+      sourceDate: copySourceDate,
+      targetDate: day.date,
+      mealType: copyMealType,
+      entries: copyEntries.map((item) => ({ sourceLogId: item.id, logId: window.crypto.randomUUID() })),
+    };
+    setPendingCopy(payload);
+    setCopyBusy(true);
+    setCopyError("");
+    try {
+      await postJson("/v1/food-logs/copy", payload);
+      setPendingCopy(null);
+      setCopyOpen(false);
+      await onChanged();
+    } catch (caught) {
+      setCopyError(caught instanceof Error ? caught.message : "Could not copy this meal.");
+    } finally {
+      setCopyBusy(false);
+    }
+  }
 
   async function toggleComplete() {
     setStatusBusy(true);
@@ -761,6 +821,19 @@ function DailyFoodPanel({ day, onChanged }: { day: DaySummary; onChanged: () => 
     <div className="daily-calorie-total"><strong>{formatNumber(day.foodTotals.caloriesKcal)}</strong><span>kcal logged</span></div>
     <div className="daily-macro-grid"><span>Protein<strong>{formatNumber(day.foodTotals.proteinG, 1)} g</strong></span><span>Carbs<strong>{formatNumber(day.foodTotals.carbohydrateG, 1)} g</strong></span><span>Fat<strong>{formatNumber(day.foodTotals.fatG, 1)} g</strong></span></div>
     {day.foodLogs.length ? <div className="daily-entry-list">{[...day.foodLogs].reverse().map((item) => <FoodLogEntry key={`${item.id}:${item.version}`} item={item} onChanged={onChanged} />)}</div> : <div className="empty-inline"><strong>{day.foodDayComplete ? "No food logged today" : "No food logged yet"}</strong><span>{day.foodDayComplete ? "You confirmed this as a complete day with no entries." : "Log a meal, or mark the day complete if you had no food to record."}</span></div>}
+    <div className="copy-meal-tools">
+      <button type="button" className="button button-secondary" onClick={() => { setCopyOpen((open) => !open); setCopyError(""); }} aria-expanded={copyOpen}>{copyOpen ? "Close meal copy" : "Copy a previous meal"}</button>
+      {copyOpen ? <div className="copy-meal-panel">
+        <div className="form-grid">
+          <label className="field"><span>Copy from</span><input type="date" required value={copySourceDate} max={day.date} onChange={(event) => { if (event.target.value) { setCopySourceDateOverride(event.target.value); setPendingCopy(null); } }} /></label>
+          <label className="field"><span>Meal</span><select value={copyMealType} onChange={(event) => { setCopyMealType(event.target.value as (typeof meals)[number]); setPendingCopy(null); }}>{meals.map((meal) => <option key={meal} value={meal}>{meal[0].toUpperCase() + meal.slice(1)}</option>)}</select></label>
+        </div>
+        {copySourceBusy ? <p className="source-note">Loading meals…</p> : copyLoadError ? <p className="form-error" role="alert">{copyLoadError}</p> : copySourceDay ? copyEntries.length ? <div className="copy-meal-preview"><span>{copyEntries.length} {copyEntries.length === 1 ? "item" : "items"} · {formatNumber(copyEntries.reduce((sum, item) => sum + item.data.nutritionTotal.caloriesKcal, 0))} kcal</span><ul>{copyEntries.map((item) => <li key={item.id}>{item.data.foodName} · {formatNumber(item.data.quantityGrams)} g</li>)}</ul></div> : <p className="source-note">No {copyMealType} entries on {copySourceDate}.</p> : null}
+        {copyEntries.length > 20 ? <p className="form-error" role="alert">This meal has too many items to copy at once.</p> : null}
+        {copyError ? <p className="form-error" role="alert">{copyError}</p> : null}
+        <button type="button" className="button button-primary" onClick={() => void copyMeal()} disabled={copyBusy || copySourceBusy || !copyEntries.length || copyEntries.length > 20}>{copyBusy ? "Copying…" : `Copy ${copyEntries.length || "meal"} ${copyEntries.length === 1 ? "item" : "items"} to ${day.date}`}</button>
+      </div> : null}
+    </div>
     <div className="food-day-status">
       <span className={day.foodDayComplete ? "food-day-status-complete" : "food-day-status-incomplete"}>{day.foodDayComplete ? "Day complete" : "Logs may be partial"}</span>
       <button type="button" className="quiet-button" onClick={() => void toggleComplete()} disabled={statusBusy} aria-pressed={day.foodDayComplete}>{statusBusy ? "Saving…" : day.foodDayComplete ? "Mark incomplete" : "Mark day complete"}</button>

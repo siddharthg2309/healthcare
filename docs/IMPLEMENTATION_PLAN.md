@@ -755,6 +755,7 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | GET /v1/foods?query=... | Search accessible catalog entries |
 | POST /v1/foods/custom | Create a private food with per-100-g nutrition values and source note |
 | POST /v1/food-logs | Save an idempotent food entry with a nutrition snapshot |
+| POST /v1/food-logs/copy | Copy a selected meal to another local date with server-checked ownership and retry-safe IDs |
 | PATCH/DELETE /v1/food-logs/:id | Version-checked changes and soft deletion |
 | POST /v1/activity-logs | Save manually entered steps or activity duration |
 | GET /v1/workout-plans | List the signed-in user's draft and approved workout plan versions |
@@ -768,6 +769,7 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | POST /v1/foods/custom | Create a private food with user-supplied nutrition values |
 | POST /v1/foods/recipes | Create a private recipe and calculate nutrition from saved ingredient snapshots and finished yield |
 | POST /v1/food-logs | Idempotent food-entry creation |
+| POST /v1/food-logs/copy | Copy a prior meal to a selected day while preserving local time and nutrition snapshots |
 | PATCH/DELETE /v1/food-logs/:id | Version-checked changes and soft deletion |
 | POST /v1/measurements | Add a measurement with source metadata |
 | POST /v1/hydration-logs | Optional water entry with explicit volume/unit |
@@ -955,7 +957,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 4 — Food catalog and manual food tracking
 
-**Current status:** Search and manual logging work for shared catalog rows and per-account custom foods. The search includes account-scoped favorites and recently logged foods across both catalog sources, matches curated alternate names, and supports per-account household portion shortcuts for shared or personal foods. Portion labels are validated against saved user-owned portion records and kept with the food log; nutrition still uses confirmed grams. The curator CLI supports individual USDA imports and an idempotent bulk import from the public-domain FNDDS JSON archive; bulk rows stay available for manual logging but are not marked reviewed or used by AI meal planning. The import maps common names for a selected set of Indian dishes. This US survey source is a broad starter, not comprehensive Indian coverage. Users can build private recipes from catalog or personal foods, set ingredient weights and finished yield, preview per-100-g macros, and save server-calculated nutrition with an immutable ingredient snapshot. Recipe editing/version history and instructions, reviewed regional-food coverage, and multi-item/copy-meal helpers remain outstanding.
+**Current status:** Search and manual logging work for shared catalog rows and per-account custom foods. The search includes account-scoped favorites and recently logged foods across both catalog sources, matches curated alternate names, and supports per-account household portion shortcuts for shared or personal foods. Portion labels are validated against saved user-owned portion records and kept with the food log; nutrition still uses confirmed grams. The curator CLI supports individual USDA imports and an idempotent bulk import from the public-domain FNDDS JSON archive; bulk rows stay available for manual logging but are not marked reviewed or used by AI meal planning. The import maps common names for a selected set of Indian dishes. This US survey source is a broad starter, not comprehensive Indian coverage. Users can build private recipes from catalog or personal foods, set ingredient weights and finished yield, preview per-100-g macros, and save server-calculated nutrition with an immutable ingredient snapshot. Users can also preview and copy a meal from a prior local date; the server checks ownership/date/meal, preserves nutrition snapshots and local time, and makes retries idempotent. Recipe editing/version history and instructions, and reviewed regional-food coverage remain outstanding.
 
 - Create import/curation tools and grow the reviewed catalog of common group foods from the generic FNDDS starter and individually verified entries.
 - Add aliases, preparation states, portions, provenance, and catalog quality labels.

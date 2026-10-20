@@ -116,6 +116,25 @@ export const createFoodLogRequestSchema = z.object({
   quantityGrams: z.number().finite().positive().max(5000),
 }).strict();
 
+export const copyFoodLogsRequestSchema = z.object({
+  sourceDate: z.string().date(),
+  targetDate: z.string().date(),
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+  entries: z.array(z.object({
+    sourceLogId: uuidSchema,
+    logId: uuidSchema,
+  }).strict()).min(1).max(20),
+}).strict().superRefine((value, context) => {
+  const sourceIds = value.entries.map((entry) => entry.sourceLogId);
+  const destinationIds = value.entries.map((entry) => entry.logId);
+  if (new Set(sourceIds).size !== sourceIds.length) {
+    context.addIssue({ code: "custom", path: ["entries"], message: "Each source food log can be copied only once." });
+  }
+  if (new Set(destinationIds).size !== destinationIds.length || value.entries.some((entry) => entry.sourceLogId === entry.logId)) {
+    context.addIssue({ code: "custom", path: ["entries"], message: "Every copied food log needs a unique new ID." });
+  }
+});
+
 export const foodPhotoRecognitionRequestSchema = z.object({
   mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
   base64: z.string().min(128).max(3_333_336).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
@@ -653,6 +672,7 @@ export type CreateFoodPortionRequest = z.infer<typeof createFoodPortionRequestSc
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;
+export type CopyFoodLogsRequest = z.infer<typeof copyFoodLogsRequestSchema>;
 export type FoodPhotoRecognitionRequest = z.infer<typeof foodPhotoRecognitionRequestSchema>;
 export type FoodPhotoRecognitionResponse = z.infer<typeof foodPhotoRecognitionResponseSchema>;
 export type UpdateFoodLogRequest = z.infer<typeof updateFoodLogRequestSchema>;

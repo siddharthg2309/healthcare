@@ -15,6 +15,7 @@ import {
   createCustomFoodRequestSchema,
   createFoodPortionRequestSchema,
   createFoodLogRequestSchema,
+  copyFoodLogsRequestSchema,
   createFoodRecipeRequestSchema,
   createWorkoutPlanRequestSchema,
   createMeasurementRequestSchema,
@@ -160,6 +161,47 @@ function isLocalDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function localDateTimeAtTargetInZone(value: string, targetDate: string, timezone: string): string | null {
+  const source = new Date(value);
+  if (!Number.isFinite(source.getTime())) return null;
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const sourceParts = formatter.formatToParts(source);
+  const readPart = (parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? NaN);
+  const hour = readPart(sourceParts, "hour");
+  const minute = readPart(sourceParts, "minute");
+  const second = readPart(sourceParts, "second");
+  const [year = NaN, month = NaN, day = NaN] = targetDate.split("-").map(Number);
+  const milliseconds = source.getUTCMilliseconds();
+  const targetWallTime = Date.UTC(year, month - 1, day, hour, minute, second, milliseconds);
+  let candidate = targetWallTime;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = formatter.formatToParts(new Date(candidate));
+    const representedWallTime = Date.UTC(
+      readPart(parts, "year"), readPart(parts, "month") - 1, readPart(parts, "day"),
+      readPart(parts, "hour"), readPart(parts, "minute"), readPart(parts, "second"), milliseconds,
+    );
+    const offset = representedWallTime - candidate;
+    const adjusted = targetWallTime - offset;
+    if (adjusted === candidate) break;
+    candidate = adjusted;
+  }
+  const check = formatter.formatToParts(new Date(candidate));
+  const expected = { year, month, day, hour, minute, second };
+  if (Object.entries(expected).some(([key, expectedValue]) =>
+    readPart(check, key as Intl.DateTimeFormatPartTypes) !== expectedValue)) return null;
+  return new Date(candidate).toISOString();
 }
 
 function shiftLocalDate(value: string, days: number): string {
@@ -1061,6 +1103,94 @@ app.post("/v1/food-logs", async (c) => {
   if (result.status === "portion_invalid") return c.json({ error: "food_portion_invalid" }, 400);
   if (result.status === "conflict") return c.json({ error: "food_log_id_conflict" }, 409);
   return c.json({ id: parsed.data.logId, version: result.version, data: result.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+});
+
+app.post("/v1/food-logs/copy", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = copyFoodLogsRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_log_copy" }, 400);
+  if (!isLocalDate(parsed.data.sourceDate) || !isLocalDate(parsed.data.targetDate)) {
+    return c.json({ error: "invalid_food_log_copy" }, 400);
+  }
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [profile] = await tx.select({ data: userProfiles.data }).from(userProfiles)
+      .where(eq(userProfiles.userId, userId)).limit(1);
+    const savedProfile = profileSchema.safeParse(profile?.data);
+    let timezone = savedProfile.success ? savedProfile.data.timezone : "UTC";
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    } catch {
+      timezone = "UTC";
+    }
+
+    const requestedIds = parsed.data.entries.map((entry) => entry.sourceLogId);
+    const sourceRows = await tx.select({ id: userRecords.recordId, data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      inArray(userRecords.recordId, requestedIds),
+      eq(userRecords.deleted, false),
+    ));
+    if (sourceRows.length !== requestedIds.length) return { status: "source_missing" as const };
+    const sourceById = new Map(sourceRows.map((row) => [row.id, row.data]));
+    const copies: Array<{ logId: string; data: ReturnType<typeof foodLogRecordSchema.parse> }> = [];
+    for (const entry of parsed.data.entries) {
+      const sourceData = foodLogRecordSchema.safeParse(sourceById.get(entry.sourceLogId));
+      if (!sourceData.success || localDateInZone(sourceData.data.occurredAt, timezone) !== parsed.data.sourceDate) {
+        return { status: "source_date_mismatch" as const };
+      }
+      if (sourceData.data.mealType !== parsed.data.mealType) return { status: "meal_mismatch" as const };
+      const occurredAt = localDateTimeAtTargetInZone(sourceData.data.occurredAt, parsed.data.targetDate, timezone);
+      if (!occurredAt) return { status: "target_time_invalid" as const };
+      copies.push({ logId: entry.logId, data: { ...sourceData.data, occurredAt } });
+    }
+
+    const destinationIds = copies.map((entry) => entry.logId);
+    const existingRows = await tx.select({ id: userRecords.recordId, data: userRecords.data, deleted: userRecords.deleted })
+      .from(userRecords).where(and(
+        eq(userRecords.userId, userId),
+        eq(userRecords.entity, "food_log"),
+        inArray(userRecords.recordId, destinationIds),
+      ));
+    const existingById = new Map(existingRows.map((row) => [row.id, row]));
+    const pending: typeof copies = [];
+    for (const copy of copies) {
+      const existing = existingById.get(copy.logId);
+      if (!existing) {
+        pending.push(copy);
+        continue;
+      }
+      const prior = foodLogRecordSchema.safeParse(existing.data);
+      const same = !existing.deleted && prior.success
+        && JSON.stringify(prior.data) === JSON.stringify(copy.data);
+      if (!same) return { status: "conflict" as const };
+    }
+    for (const copy of pending) {
+      await tx.insert(userRecords).values({
+        userId,
+        entity: "food_log",
+        recordId: copy.logId,
+        version: 1,
+        data: copy.data,
+        deleted: false,
+        serverUpdatedAt: new Date(),
+      });
+      await appendSyncChange(tx, userId, "food_log", copy.logId, copy.data);
+    }
+    return { status: "copied" as const, copiedCount: copies.length, idempotent: pending.length === 0 };
+  });
+  if (result.status === "source_missing") return c.json({ error: "food_log_copy_source_not_found" }, 404);
+  if (result.status === "source_date_mismatch") return c.json({ error: "food_log_copy_source_date_mismatch" }, 400);
+  if (result.status === "meal_mismatch") return c.json({ error: "food_log_copy_meal_mismatch" }, 400);
+  if (result.status === "target_time_invalid") return c.json({ error: "food_log_copy_time_invalid_for_target_date" }, 400);
+  if (result.status === "conflict") return c.json({ error: "food_log_id_conflict" }, 409);
+  return c.json({ copiedCount: result.copiedCount, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
 });
 
 app.patch("/v1/food-logs/:id", async (c) => {
