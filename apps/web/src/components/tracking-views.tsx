@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { WorkoutExercise } from "@healthcare/contracts";
 import { exerciseCatalog } from "@healthcare/domain";
 import {
@@ -62,6 +62,19 @@ export type DaySummary = {
   foodDayComplete: boolean;
 };
 
+function emptyDaySummary(date: string, timezone: string): DaySummary {
+  return {
+    date,
+    timezone,
+    foodLogs: [],
+    activityLogs: [],
+    foodTotals: { caloriesKcal: 0, proteinG: 0, carbohydrateG: 0, fatG: 0 },
+    steps: 0,
+    workoutsCompleted: 0,
+    foodDayComplete: false,
+  };
+}
+
 type Props = { day: DaySummary; onSaved: () => Promise<void> };
 
 const meals = ["breakfast", "lunch", "dinner", "snack"] as const;
@@ -78,6 +91,10 @@ function toLocalInput(value: string): string {
   const date = new Date(value);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
+}
+
+function dateTimeForDay(date: string, today: string): string {
+  return date === today ? dateTimeLocalNow() : `${date}T12:00`;
 }
 
 function formatClock(value: string): string {
@@ -372,6 +389,10 @@ function emptyExercise(): ExerciseDraft {
 }
 
 export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { unitSystem: "metric" | "imperial" }) {
+  const [viewDate, setViewDate] = useState(day.date);
+  const [loadedHistoryDay, setLoadedHistoryDay] = useState<DaySummary>(day);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [activityType, setActivityType] = useState<ActivityLog["data"]["activityType"]>("steps");
   const [occurredAt, setOccurredAt] = useState(dateTimeLocalNow);
   const [durationMinutes, setDurationMinutes] = useState("");
@@ -385,6 +406,32 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const historyRequestId = useRef(0);
+
+  async function selectHistoryDay(date: string) {
+    setViewDate(date);
+    setHistoryError("");
+    const requestId = ++historyRequestId.current;
+    if (date === day.date) {
+      setHistoryLoading(false);
+      return;
+    }
+    setHistoryLoading(true);
+    try {
+      const summary = await requestJson<DaySummary>(`/v1/days/${date}`);
+      if (requestId === historyRequestId.current) setLoadedHistoryDay(summary);
+    } catch (caught) {
+      if (requestId === historyRequestId.current) setHistoryError(caught instanceof Error ? caught.message : "Could not load this day.");
+    } finally {
+      if (requestId === historyRequestId.current) setHistoryLoading(false);
+    }
+  }
+
+  const viewDay = viewDate === day.date
+    ? day
+    : loadedHistoryDay.date === viewDate
+      ? loadedHistoryDay
+      : emptyDaySummary(viewDate, day.timezone);
 
   const workoutIsReady = workoutTitle.trim().length > 0 && exercises.length > 0 && exercises.every((exercise) =>
     exercise.exerciseName.trim().length > 0 && exercise.sets.length > 0 && exercise.sets.every((set) => {
@@ -404,7 +451,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setEditingId(null);
     setEditingVersion(null);
     setActivityType("steps");
-    setOccurredAt(dateTimeLocalNow());
+    setOccurredAt(dateTimeForDay(viewDate, day.date));
     setDurationMinutes("");
     setSteps("");
     setNotes("");
@@ -445,6 +492,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
       });
       if (editingId === item.id) resetForm();
       await onSaved();
+      if (viewDate !== day.date) await selectHistoryDay(viewDate);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not delete this activity.");
     } finally {
@@ -495,6 +543,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
         setMessage(activityType === "strength" ? "Workout saved." : "Activity saved.");
       }
       await onSaved();
+      if (viewDate !== day.date) await selectHistoryDay(viewDate);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save this activity.");
     } finally {
@@ -503,10 +552,10 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
   }
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">ACTIVITY TRACKING</span><h1>Record your movement</h1><p>Enter steps or a workout. Health Connect is not available in this web app.</p></div><span className="date-chip">{day.date}</span></div>
+    <div className="page-heading"><div><span className="eyebrow">ACTIVITY TRACKING</span><h1>Record your movement</h1><p>Enter steps or a workout. Health Connect is not available in this web app.</p></div><span className="date-chip">{viewDate}</span></div>
     <section className="tracking-grid">
       <form className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
-        <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : "Today’s activity"}</h2></div><span className="panel-symbol">↗</span></div>
+        <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : viewDate === day.date ? "Today’s activity" : "Activity for this day"}</h2></div><span className="panel-symbol">↗</span></div>
         <div className="form-grid">
           <label className="field"><span>Activity</span><select value={activityType} onChange={(event) => setActivityType(event.target.value as ActivityLog["data"]["activityType"])}><option value="steps">Steps</option><option value="walk">Walk</option><option value="cardio">Cardio</option><option value="strength">Strength session</option><option value="other">Other</option></select></label>
           <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
@@ -551,10 +600,20 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
         </div>
       </form>
       <section className="panel daily-log-panel">
-        <div className="panel-heading"><div><span className="eyebrow">TODAY · {day.date}</span><h2>Movement log</h2></div><span className="count-badge">{day.activityLogs.length}</span></div>
-        <div className="daily-calorie-total"><strong>{formatNumber(day.steps)}</strong><span>manual steps logged</span></div>
-        <p className="muted-copy">{day.workoutsCompleted} walk, cardio, or strength sessions logged.</p>
-        {day.activityLogs.length ? <div className="daily-entry-list">{[...day.activityLogs].reverse().map((item) => {
+        <div className="panel-heading"><div><span className="eyebrow">MOVEMENT · {viewDate}</span><h2>Activity history</h2></div><span className="count-badge">{viewDay.activityLogs.length}</span></div>
+        <label className="field"><span>Choose a day</span><input type="date" value={viewDate} max={day.date} onChange={(event) => {
+          const nextDate = event.target.value;
+          if (!nextDate) return;
+          void selectHistoryDay(nextDate);
+          setError("");
+          setMessage("");
+          if (editingId) resetForm();
+          setOccurredAt(dateTimeForDay(nextDate, day.date));
+        }} /></label>
+        <div className="daily-calorie-total"><strong>{formatNumber(viewDay.steps)}</strong><span>manual steps logged</span></div>
+        <p className="muted-copy">{viewDay.workoutsCompleted} walk, cardio, or strength sessions logged.</p>
+        {historyError ? <p className="form-error" role="alert">{historyError}</p> : null}
+        {historyLoading ? <p className="muted-copy" role="status">Loading activity history…</p> : viewDay.activityLogs.length ? <div className="daily-entry-list">{[...viewDay.activityLogs].reverse().map((item) => {
           const title = item.data.workoutTitle ?? (item.data.activityType === "steps" ? "Step count" : item.data.activityType[0].toUpperCase() + item.data.activityType.slice(1));
           const exerciseDetails = item.data.exercises?.map((exercise) => `${exercise.exerciseName} (${exercise.sets.map((set) => `${set.reps} reps${set.loadKg === null ? "" : ` @ ${formatNumber(unitSystem === "imperial" ? set.loadKg * poundsPerKilogram : set.loadKg, 1)} ${unitSystem === "imperial" ? "lb" : "kg"}`}`).join(", ")})`).join(" · ");
           return <div className="daily-entry" key={item.id}>
@@ -566,7 +625,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
               <button type="button" className="quiet-button entry-delete" onClick={() => void removeActivity(item)} disabled={busy || deletingId !== null}>{deletingId === item.id ? "Deleting…" : "Delete"}</button>
             </div>
           </div>;
-        })}</div> : <div className="empty-inline"><strong>No activity logged yet</strong><span>Log steps or a workout when you’re ready.</span></div>}
+        })}</div> : <div className="empty-inline"><strong>No activity logged on this day</strong><span>Choose another date or add an entry for this day.</span></div>}
       </section>
     </section>
   </>;
