@@ -755,8 +755,10 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | GET /v1/foods?query=... | Search accessible catalog entries |
 | POST /v1/foods/custom | Create a private food with per-100-g nutrition values and source note |
 | POST /v1/food-logs | Save an idempotent food entry with a nutrition snapshot |
+| PATCH/DELETE /v1/food-logs/:id | Version-checked changes and soft deletion |
 | POST /v1/activity-logs | Save manually entered steps or activity duration |
 | GET /v1/days/:date | Timezone-aware food/activity records and calorie/macro/step totals |
+| PUT /v1/days/:date/food-status | Mark the food log complete or incomplete for a local date |
 | POST /v1/custom-foods | Create a private food/version |
 | POST /v1/recipes | Create/validate a private recipe version |
 | POST /v1/meal-logs | Idempotent meal creation |
@@ -947,7 +949,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 4 — Food catalog and manual food tracking
 
-**Current status:** Search and manual logging are implemented for existing shared catalog rows and per-account custom foods. The shared catalog import, reviewed Indian-food coverage, aliases/portions, recipes, edits/deletes, favorites, and complete-day marker remain outstanding.
+**Current status:** Search and manual logging work for shared catalog rows and per-account custom foods. Food entries support version-checked edits/deletion, and users can mark a local day complete. A curated shared catalog import, reviewed Indian-food coverage, aliases/portions, recipes, favorites, and multi-item/copy-meal helpers remain outstanding.
 
 - Create import/curation tools and the initial reviewed catalog of common group foods.
 - Add aliases, preparation states, portions, provenance, and catalog quality labels.

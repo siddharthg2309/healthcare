@@ -88,6 +88,25 @@ export const createFoodLogRequestSchema = z.object({
   quantityGrams: z.number().finite().positive().max(5000),
 }).strict();
 
+export const updateFoodLogRequestSchema = z.object({
+  baseVersion: z.number().int().positive(),
+  occurredAt: isoDateTime.optional(),
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]).optional(),
+  quantityGrams: z.number().finite().positive().max(5000).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.occurredAt === undefined && value.mealType === undefined && value.quantityGrams === undefined) {
+    context.addIssue({ code: "custom", path: [], message: "Provide at least one field to update." });
+  }
+});
+
+export const deleteFoodLogRequestSchema = z.object({
+  baseVersion: z.number().int().positive(),
+}).strict();
+
+export const foodDayStatusRequestSchema = z.object({
+  complete: z.boolean(),
+}).strict();
+
 export const createCustomFoodRequestSchema = z.object({
   foodId: uuidSchema,
   name: z.string().trim().min(1).max(120),
@@ -195,6 +214,8 @@ export type Profile = z.infer<typeof profileSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;
+export type UpdateFoodLogRequest = z.infer<typeof updateFoodLogRequestSchema>;
+export type FoodDayStatusRequest = z.infer<typeof foodDayStatusRequestSchema>;
 export type CreateCustomFoodRequest = z.infer<typeof createCustomFoodRequestSchema>;
 export type FoodLogRecord = z.infer<typeof foodLogRecordSchema>;
 export type CreateActivityLogRequest = z.infer<typeof createActivityLogRequestSchema>;

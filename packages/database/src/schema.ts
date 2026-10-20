@@ -95,6 +95,22 @@ export const userFoods = pgTable("user_foods", {
   }),
 ]).enableRLS();
 
+export const foodDayStatuses = pgTable("food_day_statuses", {
+  userId: text("user_id").notNull(),
+  localDate: text("local_date").notNull(),
+  complete: boolean("complete").default(false).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.localDate] }),
+  check("food_day_status_local_date_format", sql`${table.localDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
+  pgPolicy("food_day_status_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
 export const userRecords = pgTable("user_records", {
   userId: text("user_id").notNull(),
   entity: recordEntity("entity").notNull(),

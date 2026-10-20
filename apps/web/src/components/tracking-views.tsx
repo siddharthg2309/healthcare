@@ -21,6 +21,7 @@ export type FoodOption = {
 
 export type FoodLog = {
   id: string;
+  version: number;
   data: {
     foodId: string;
     foodSource: "shared_catalog" | "personal";
@@ -53,6 +54,7 @@ export type DaySummary = {
   foodTotals: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
   steps: number;
   workoutsCompleted: number;
+  foodDayComplete: boolean;
 };
 
 type Props = { day: DaySummary; onSaved: () => Promise<void> };
@@ -62,6 +64,12 @@ const categories = ["ingredient", "prepared_meal", "snack", "beverage", "restaur
 
 function dateTimeLocalNow(): string {
   const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function toLocalInput(value: string): string {
+  const date = new Date(value);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
 }
@@ -88,6 +96,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
   const [message, setMessage] = useState("");
   const [showCustomFood, setShowCustomFood] = useState(false);
 
@@ -192,7 +201,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
           <p className="source-note">Nutrition is calculated from the food’s per-100 g values and the quantity you enter. Household portions can vary.</p>
         </div>
 
-        <DailyFoodPanel day={day} />
+        <DailyFoodPanel day={day} onChanged={onSaved} />
       </section>
     </>
   );
@@ -249,18 +258,105 @@ function CustomFoodForm({ onCreated, onCancel }: { onCreated: (food: FoodOption)
   </form>;
 }
 
-function DailyFoodPanel({ day }: { day: DaySummary }) {
+function DailyFoodPanel({ day, onChanged }: { day: DaySummary; onChanged: () => Promise<void> }) {
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusError, setStatusError] = useState("");
+
+  async function toggleComplete() {
+    setStatusBusy(true);
+    setStatusError("");
+    try {
+      await requestJson(`/v1/days/${day.date}/food-status`, {
+        method: "PUT",
+        body: JSON.stringify({ complete: !day.foodDayComplete }),
+      });
+      await onChanged();
+    } catch (caught) {
+      setStatusError(caught instanceof Error ? caught.message : "Could not update this day.");
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
   return <section className="panel daily-log-panel">
     <div className="panel-heading"><div><span className="eyebrow">TODAY · {day.date}</span><h2>Food log</h2></div><span className="count-badge">{day.foodLogs.length}</span></div>
     <div className="daily-calorie-total"><strong>{formatNumber(day.foodTotals.caloriesKcal)}</strong><span>kcal logged</span></div>
     <div className="daily-macro-grid"><span>Protein<strong>{formatNumber(day.foodTotals.proteinG, 1)} g</strong></span><span>Carbs<strong>{formatNumber(day.foodTotals.carbohydrateG, 1)} g</strong></span><span>Fat<strong>{formatNumber(day.foodTotals.fatG, 1)} g</strong></span></div>
-    {day.foodLogs.length ? <div className="daily-entry-list">{[...day.foodLogs].reverse().map((item) => <div className="daily-entry" key={item.id}>
+    {day.foodLogs.length ? <div className="daily-entry-list">{[...day.foodLogs].reverse().map((item) => <FoodLogEntry key={`${item.id}:${item.version}`} item={item} onChanged={onChanged} />)}</div> : <div className="empty-inline"><strong>{day.foodDayComplete ? "No food logged today" : "No food logged yet"}</strong><span>{day.foodDayComplete ? "You confirmed this as a complete day with no entries." : "Log a meal, or mark the day complete if you had no food to record."}</span></div>}
+    <div className="food-day-status">
+      <span className={day.foodDayComplete ? "food-day-status-complete" : "food-day-status-incomplete"}>{day.foodDayComplete ? "Day complete" : "Logs may be partial"}</span>
+      <button type="button" className="quiet-button" onClick={() => void toggleComplete()} disabled={statusBusy} aria-pressed={day.foodDayComplete}>{statusBusy ? "Saving…" : day.foodDayComplete ? "Mark incomplete" : "Mark day complete"}</button>
+    </div>
+    {statusError ? <p className="form-error" role="alert">{statusError}</p> : null}
+    <p className="source-note">Totals include only entries you logged. Completion records whether tracking for this day is finished.</p>
+  </section>;
+}
+
+function FoodLogEntry({ item, onChanged }: { item: FoodLog; onChanged: () => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [quantity, setQuantity] = useState(String(item.data.quantityGrams));
+  const [mealType, setMealType] = useState(item.data.mealType);
+  const [occurredAt, setOccurredAt] = useState(toLocalInput(item.data.occurredAt));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await requestJson(`/v1/food-logs/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          baseVersion: item.version,
+          quantityGrams: Number(quantity),
+          mealType,
+          occurredAt: new Date(occurredAt).toISOString(),
+        }),
+      });
+      setEditing(false);
+      await onChanged();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update this food entry.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm(`Delete ${item.data.foodName} from this food log?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await requestJson(`/v1/food-logs/${item.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ baseVersion: item.version }),
+      });
+      await onChanged();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete this food entry.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="food-log-entry">
+    <div className="daily-entry">
       <span className="meal-badge">{item.data.mealType.slice(0, 1).toUpperCase()}</span>
       <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams)} g · {formatClock(item.data.occurredAt)}</small></span>
       <strong>{formatNumber(item.data.nutritionTotal.caloriesKcal)}<small> kcal</small></strong>
-    </div>)}</div> : <div className="empty-inline"><strong>No food logged yet</strong><span>Log a meal to start today’s nutrition totals.</span></div>}
-    <p className="source-note">A blank day means “not logged”, not zero intake.</p>
-  </section>;
+      <div className="entry-actions"><button type="button" className="quiet-button" onClick={() => { setError(""); setEditing((current) => !current); }} disabled={busy}>{editing ? "Close" : "Edit"}</button><button type="button" className="quiet-button entry-delete" onClick={() => void remove()} disabled={busy}>Delete</button></div>
+    </div>
+    {editing ? <form className="food-log-edit" onSubmit={(event) => void save(event)}>
+      <div className="form-grid">
+        <label className="field"><span>Quantity (grams)</span><input type="number" min="1" max="5000" step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label>
+        <label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as (typeof meals)[number])}>{meals.map((meal) => <option key={meal} value={meal}>{meal[0].toUpperCase() + meal.slice(1)}</option>)}</select></label>
+        <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
+      </div>
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      <button className="button button-secondary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
+    </form> : error ? <p className="form-error entry-error" role="alert">{error}</p> : null}
+  </div>;
 }
 
 export function ActivityTrackingView({ day, onSaved }: Props) {

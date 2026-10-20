@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { catalogFoods, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { catalogFoods, foodDayStatuses, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
   activityLogRecordSchema,
   acceptGoalRequestSchema,
@@ -12,12 +12,15 @@ import {
   createCustomFoodRequestSchema,
   createFoodLogRequestSchema,
   createMeasurementRequestSchema,
+  deleteFoodLogRequestSchema,
+  foodDayStatusRequestSchema,
   foodLogRecordSchema,
   goalProposalRequestSchema,
   goalSchema,
   profileSchema,
   syncPullQuerySchema,
   syncPushSchema,
+  updateFoodLogRequestSchema,
 } from "@healthcare/contracts";
 import { buildGoalProposal } from "@healthcare/domain";
 import { auth } from "./auth/config.js";
@@ -111,12 +114,24 @@ function localDateInZone(value: string, timezone: string): string {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+function isLocalDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 async function appendSyncChange(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   userId: string,
   entity: "food_log" | "activity_log",
   recordId: string,
-  data: Record<string, unknown>,
+  data: Record<string, unknown> | null,
+  version = 1,
+  deleted = false,
 ) {
   await tx.insert(userSyncCounters).values({ userId, cursor: 0 }).onConflictDoNothing();
   const [counter] = await tx.update(userSyncCounters).set({
@@ -128,9 +143,9 @@ async function appendSyncChange(
     cursor: counter.cursor,
     entity,
     recordId,
-    version: 1,
+    version,
     data,
-    deleted: false,
+    deleted,
   });
 }
 
@@ -283,7 +298,7 @@ app.post("/v1/food-logs", async (c) => {
   const userId = c.get("session").user.id;
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-    const [existing] = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+    const [existing] = await tx.select({ data: userRecords.data, version: userRecords.version }).from(userRecords).where(and(
       eq(userRecords.userId, userId),
       eq(userRecords.entity, "food_log"),
       eq(userRecords.recordId, parsed.data.logId),
@@ -296,7 +311,7 @@ app.post("/v1/food-logs", async (c) => {
         && prior.data.occurredAt === parsed.data.occurredAt
         && prior.data.mealType === parsed.data.mealType
         && prior.data.quantityGrams === parsed.data.quantityGrams;
-      return { status: same ? "saved" as const : "conflict" as const, data: existing.data, idempotent: same };
+      return { status: same ? "saved" as const : "conflict" as const, data: existing.data, version: existing.version, idempotent: same };
     }
 
     const [shared] = await tx.select().from(catalogFoods).where(and(
@@ -342,11 +357,114 @@ app.post("/v1/food-logs", async (c) => {
       serverUpdatedAt: new Date(),
     });
     await appendSyncChange(tx, userId, "food_log", parsed.data.logId, data);
-    return { status: "saved" as const, data, idempotent: false };
+    return { status: "saved" as const, data, version: 1, idempotent: false };
   });
   if (result.status === "food_not_found") return c.json({ error: "food_not_found" }, 404);
   if (result.status === "conflict") return c.json({ error: "food_log_id_conflict" }, 409);
-  return c.json({ id: parsed.data.logId, data: result.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+  return c.json({ id: parsed.data.logId, version: result.version, data: result.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+});
+
+app.patch("/v1/food-logs/:id", async (c) => {
+  const recordId = c.req.param("id");
+  if (!isUuid(recordId)) return c.json({ error: "invalid_food_log_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = updateFoodLogRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_log_update" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select({ data: userRecords.data, version: userRecords.version }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.deleted, false),
+    )).limit(1);
+    if (!existing) return { status: "missing" as const };
+    if (existing.version !== parsed.data.baseVersion) return { status: "conflict" as const, version: existing.version };
+    const prior = foodLogRecordSchema.safeParse(existing.data);
+    if (!prior.success) return { status: "invalid_record" as const };
+    const quantityGrams = parsed.data.quantityGrams ?? prior.data.quantityGrams;
+    const factor = quantityGrams / 100;
+    const data = foodLogRecordSchema.parse({
+      ...prior.data,
+      occurredAt: parsed.data.occurredAt ?? prior.data.occurredAt,
+      mealType: parsed.data.mealType ?? prior.data.mealType,
+      quantityGrams,
+      nutritionTotal: {
+        caloriesKcal: roundNutrition(prior.data.nutritionPer100g.caloriesKcal * factor),
+        proteinG: roundNutrition(prior.data.nutritionPer100g.proteinG * factor),
+        carbohydrateG: roundNutrition(prior.data.nutritionPer100g.carbohydrateG * factor),
+        fatG: roundNutrition(prior.data.nutritionPer100g.fatG * factor),
+      },
+    });
+    const version = existing.version + 1;
+    const [saved] = await tx.update(userRecords).set({
+      data,
+      version,
+      serverUpdatedAt: new Date(),
+    }).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.version, parsed.data.baseVersion),
+      eq(userRecords.deleted, false),
+    )).returning({ data: userRecords.data, version: userRecords.version });
+    if (!saved) return { status: "conflict" as const, version: existing.version + 1 };
+    await appendSyncChange(tx, userId, "food_log", recordId, data, version);
+    return { status: "saved" as const, data: saved.data, version: saved.version };
+  });
+  if (result.status === "missing") return c.json({ error: "food_log_not_found" }, 404);
+  if (result.status === "conflict") return c.json({ error: "food_log_version_conflict", currentVersion: result.version }, 409);
+  if (result.status === "invalid_record") return c.json({ error: "food_log_record_invalid" }, 409);
+  return c.json({ id: recordId, data: result.data, version: result.version });
+});
+
+app.delete("/v1/food-logs/:id", async (c) => {
+  const recordId = c.req.param("id");
+  if (!isUuid(recordId)) return c.json({ error: "invalid_food_log_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = deleteFoodLogRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_log_delete" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select({ version: userRecords.version }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.deleted, false),
+    )).limit(1);
+    if (!existing) return { status: "missing" as const };
+    if (existing.version !== parsed.data.baseVersion) return { status: "conflict" as const, version: existing.version };
+    const version = existing.version + 1;
+    const [deleted] = await tx.update(userRecords).set({
+      deleted: true,
+      version,
+      serverUpdatedAt: new Date(),
+    }).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.version, parsed.data.baseVersion),
+      eq(userRecords.deleted, false),
+    )).returning({ version: userRecords.version });
+    if (!deleted) return { status: "conflict" as const, version: existing.version + 1 };
+    await appendSyncChange(tx, userId, "food_log", recordId, null, version, true);
+    return { status: "deleted" as const, version: deleted.version };
+  });
+  if (result.status === "missing") return c.json({ error: "food_log_not_found" }, 404);
+  if (result.status === "conflict") return c.json({ error: "food_log_version_conflict", currentVersion: result.version }, 409);
+  return c.json({ id: recordId, version: result.version, deleted: true });
 });
 
 app.post("/v1/activity-logs", async (c) => {
@@ -403,10 +521,7 @@ app.post("/v1/activity-logs", async (c) => {
 
 app.get("/v1/days/:date", async (c) => {
   const date = c.req.param("date");
-  const parsedDate = new Date(`${date}T00:00:00.000Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
-    return c.json({ error: "invalid_local_date" }, 400);
-  }
+  if (!isLocalDate(date)) return c.json({ error: "invalid_local_date" }, 400);
   const userId = c.get("session").user.id;
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
@@ -414,7 +529,7 @@ app.get("/v1/days/:date", async (c) => {
       .where(eq(userProfiles.userId, userId)).limit(1);
     const savedProfile = profileSchema.safeParse(profile?.data);
     const timezone = savedProfile.success ? savedProfile.data.timezone : "UTC";
-    const foodRecords = await tx.select({ id: userRecords.recordId, data: userRecords.data }).from(userRecords).where(and(
+    const foodRecords = await tx.select({ id: userRecords.recordId, version: userRecords.version, data: userRecords.data }).from(userRecords).where(and(
       eq(userRecords.userId, userId),
       eq(userRecords.entity, "food_log"),
       eq(userRecords.deleted, false),
@@ -424,7 +539,11 @@ app.get("/v1/days/:date", async (c) => {
       eq(userRecords.entity, "activity_log"),
       eq(userRecords.deleted, false),
     ));
-    return { timezone, foodRecords, activityRecords };
+    const [status] = await tx.select({ complete: foodDayStatuses.complete }).from(foodDayStatuses).where(and(
+      eq(foodDayStatuses.userId, userId),
+      eq(foodDayStatuses.localDate, date),
+    )).limit(1);
+    return { timezone, foodRecords, activityRecords, foodDayComplete: status?.complete ?? false };
   });
   let timezone = result.timezone;
   try {
@@ -435,7 +554,7 @@ app.get("/v1/days/:date", async (c) => {
   const foodLogs = result.foodRecords.flatMap((record) => {
     const parsed = foodLogRecordSchema.safeParse(record.data);
     return parsed.success && localDateInZone(parsed.data.occurredAt, timezone) === date
-      ? [{ id: record.id, data: parsed.data }]
+      ? [{ id: record.id, version: record.version, data: parsed.data }]
       : [];
   }).sort((a, b) => a.data.occurredAt.localeCompare(b.data.occurredAt));
   const activityLogs = result.activityRecords.flatMap((record) => {
@@ -453,7 +572,34 @@ app.get("/v1/days/:date", async (c) => {
   const steps = activityLogs.filter((item) => item.data.activityType === "steps")
     .reduce((total, item) => total + (item.data.steps ?? 0), 0);
   const workoutsCompleted = activityLogs.filter((item) => ["strength", "cardio", "walk"].includes(item.data.activityType)).length;
-  return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted });
+  return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted, foodDayComplete: result.foodDayComplete });
+});
+
+app.put("/v1/days/:date/food-status", async (c) => {
+  const date = c.req.param("date");
+  if (!isLocalDate(date)) return c.json({ error: "invalid_local_date" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = foodDayStatusRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_day_status" }, 400);
+  const userId = c.get("session").user.id;
+  const [saved] = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return tx.insert(foodDayStatuses).values({
+      userId,
+      localDate: date,
+      complete: parsed.data.complete,
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: [foodDayStatuses.userId, foodDayStatuses.localDate],
+      set: { complete: parsed.data.complete, updatedAt: new Date() },
+    }).returning({ localDate: foodDayStatuses.localDate, complete: foodDayStatuses.complete, updatedAt: foodDayStatuses.updatedAt });
+  });
+  return c.json(saved);
 });
 
 app.post("/v1/goals/proposal", async (c) => {

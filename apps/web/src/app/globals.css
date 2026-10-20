@@ -141,11 +141,24 @@ a { color: inherit; text-decoration: none; }
 .daily-macro-grid > span { display: grid; gap: 5px; padding: 10px; border-radius: 13px; background: var(--surface-soft); color: var(--muted); font-size: 9px; }
 .daily-macro-grid strong { color: var(--ink); font-size: 12px; }
 .daily-entry-list { display: grid; }
-.daily-entry { min-width: 0; display: flex; align-items: center; gap: 9px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.daily-entry { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 11px 0; border-bottom: 1px solid var(--line); }
 .daily-entry:last-child { border: 0; }
 .daily-entry-main { flex: 1 1 auto; }
 .daily-entry > strong { flex: 0 0 auto; text-align: right; font-size: 11px; }
 .daily-entry > strong small { display: block; }
+.food-log-entry { border-bottom: 1px solid var(--line); }
+.food-log-entry:last-child { border: 0; }
+.food-log-entry .daily-entry { border: 0; }
+.entry-actions { display: flex; gap: 8px; margin-left: auto; }
+.entry-actions .quiet-button { min-height: 34px; padding: 0 4px; }
+.entry-delete { color: var(--red); }
+.food-log-edit { display: grid; gap: 10px; padding: 0 0 13px 38px; }
+.entry-error { padding: 0 0 10px 38px; }
+.food-day-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border-radius: 14px; background: var(--surface-soft); }
+.food-day-status > span { font-size: 9px; font-weight: 700; }
+.food-day-status-complete { color: var(--green); }
+.food-day-status-incomplete { color: var(--muted); }
+.food-day-status button { min-height: 36px; padding: 0 6px; }
 .meal-badge { width: 29px; height: 29px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 10px; background: var(--lime-pale); color: var(--green); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .intake-progress { height: 7px; overflow: hidden; margin: 14px 0 2px; border-radius: 99px; background: var(--surface-soft); }
 .intake-progress span { height: 100%; display: block; border-radius: inherit; background: var(--lime-strong); transition: width .25s ease; }
