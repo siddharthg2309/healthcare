@@ -19,6 +19,9 @@
     "db:generate": "npm --workspace @healthcare/database run generate",
     "db:app:migrate": "npm --workspace @healthcare/database run migrate",
     "db:migrate": "npm run db:auth:migrate && npm run db:app:migrate",
-    "invite:create": "npm --workspace @healthcare/backend run invite:create --"
+    "invite:create": "npm --workspace @healthcare/backend run invite:create --",
+    "catalog:search": "npm --workspace @healthcare/backend run catalog:search --",
+    "catalog:import": "npm --workspace @healthcare/backend run catalog:import --",
+    "catalog:publish": "npm --workspace @healthcare/backend run catalog:publish --"
   }
 }

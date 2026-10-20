@@ -72,10 +72,22 @@ Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_
 | Durable background AI jobs | `JOB_DISPATCH_SECRET` | Configure only when a separate authenticated worker/dispatcher is deployed. Generate with `openssl rand -hex 32`. |
 | Private food-photo storage | `STORAGE_PROVIDER`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_FORCE_PATH_STYLE`, `UPLOAD_MAX_BYTES` | Configure after selecting a private S3-compatible storage provider. Keep credentials server-only; use short-lived upload permissions and retention cleanup. |
 | Google Calendar OAuth | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Set up only when Calendar sync is implemented. The client secret and encryption key stay on the server. |
-| Curated catalog imports | `USDA_API_KEY` | Only if a catalog import tool uses FoodData Central. Normal app search should use the local database. |
+| Curated catalog imports | `USDA_API_KEY` | Optional; put it in the ignored local `.env` only when running the one-time catalog import. It is not needed by the deployed app and should not be added to Vercel. |
 | Email verification/password recovery | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Add after choosing an email provider and implementing those email flows. |
 
 The current example file has blanks for future integrations. Leave unused values empty; do not invent URLs or credentials for features that are not deployed.
+
+### Curating shared catalog foods
+
+The app does not call a nutrition provider whenever someone logs a meal. A maintainer can search FoodData Central, import a generic entry as an unpublished draft, review its values, then publish it to the shared catalog:
+
+```bash
+npm run catalog:search -- --query "cooked lentils"
+npm run catalog:import -- --fdc-id <id-from-search> --category ingredient
+npm run catalog:publish -- --food-id <catalog-id-printed-by-import>
+```
+
+Use only a matching generic Foundation, SR Legacy, or Survey food. Check the description and per-100-g calories/macros before publishing. Imports remain invisible to food search until published. USDA FoodData Central data are CC0/public domain; keep attribution and the FDC ID in the catalog. The Indian Food Composition Tables have separate reuse restrictions: their official publication prohibits storing/reproducing the data electronically for a product without prior written permission. Do not bulk-import IFCT values without that permission. [USDA API and license](https://fdc.nal.usda.gov/api-guide/) · [ICMR-NIN IFCT 2017 terms](https://www.nin.res.in/ebooks/IFCT2017_16122024.pdf)
 
 ## Phone and PWA behavior
 

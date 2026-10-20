@@ -57,12 +57,14 @@ export const catalogFoods = pgTable("catalog_foods", {
   carbohydrateGPer100g: numeric("carbohydrate_g_per_100g", { precision: 8, scale: 2 }).notNull(),
   fatGPer100g: numeric("fat_g_per_100g", { precision: 8, scale: 2 }).notNull(),
   source: text("source").notNull(),
+  externalSourceId: text("external_source_id"),
   reviewed: boolean("reviewed").default(false).notNull(),
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   index("catalog_foods_name_idx").on(table.name),
+  uniqueIndex("catalog_foods_source_record_idx").on(table.source, table.externalSourceId),
   check("catalog_foods_nutrition_nonnegative", sql`
     ${table.caloriesKcalPer100g} >= 0 AND ${table.proteinGPer100g} >= 0
     AND ${table.carbohydrateGPer100g} >= 0 AND ${table.fatGPer100g} >= 0

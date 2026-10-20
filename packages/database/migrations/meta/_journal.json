@@ -36,6 +36,13 @@
       "when": 1792511640235,
       "tag": "0004_daily_bloodscream",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792511936457,
+      "tag": "0005_black_meteorite",
+      "breakpoints": true
     }
   ]
 }

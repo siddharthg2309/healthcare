@@ -11,6 +11,9 @@
     "start": "tsx src/dev.ts",
     "migrate:auth": "auth migrate --config src/auth/config.ts --yes",
     "invite:create": "tsx scripts/create-invitation.ts",
+    "catalog:search": "tsx scripts/catalog-foods.ts search",
+    "catalog:import": "tsx scripts/catalog-foods.ts import",
+    "catalog:publish": "tsx scripts/catalog-foods.ts publish",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src scripts --config eslint.config.cjs"
   },
