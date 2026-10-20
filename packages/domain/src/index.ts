@@ -5,8 +5,10 @@ export {
 } from "./goals.js";
 export {
   EXERCISE_CATALOG_VERSION,
+  canonicalizeEquipment,
   exerciseCatalog,
   findExerciseById,
+  isExerciseAvailable,
   type ExerciseDefinition,
 } from "./exercises.js";
 export {

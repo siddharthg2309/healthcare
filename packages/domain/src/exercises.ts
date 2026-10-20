@@ -67,3 +67,50 @@ const exercisesById = new Map(exerciseCatalog.map((exercise) => [exercise.id, ex
 export function findExerciseById(id: string): ExerciseDefinition | undefined {
   return exercisesById.get(id);
 }
+
+const equipmentAliases: Record<string, string[]> = {
+  dumbbell: ["dumbbell", "dumbbells", "adjustable dumbbells", "free weights"],
+  kettlebell: ["kettlebell", "kettlebells"],
+  barbell: ["barbell", "barbells", "olympic bar"],
+  rack: ["rack", "squat rack", "power rack"],
+  bench: ["bench", "stable bench", "adjustable bench"],
+  box: ["box", "plyo box"],
+  "resistance band": ["resistance band", "resistance bands", "bands", "band"],
+  "cable machine": ["cable machine", "cables", "cable station"],
+  "leg press machine": ["leg press machine", "leg press"],
+  "hamstring curl machine": ["hamstring curl machine", "hamstring curl"],
+  "seated calf raise machine": ["seated calf raise machine", "calf raise machine"],
+  "pull-up bar": ["pull-up bar", "pullup bar", "chin-up bar"],
+  "assisted pull-up machine": ["assisted pull-up machine", "assisted pullup machine"],
+  step: ["step", "stairs", "stable step"],
+  wall: ["wall"],
+  chair: ["chair", "stable chair"],
+  table: ["table", "stable table"],
+};
+
+export function canonicalizeEquipment(values: string[]): string[] {
+  const text = values
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value && !/^(no|none|without)\b/.test(value))
+    .join(" | ");
+  return Object.entries(equipmentAliases)
+    .filter(([, aliases]) => aliases.some((alias) => text.includes(alias)))
+    .map(([name]) => name)
+    .sort();
+}
+
+function equipmentRequirementMet(requirement: string, available: Set<string>): boolean {
+  return requirement.toLowerCase().split(/\s+or\s+/).some((alternative) => {
+    const phrase = alternative.trim();
+    if (phrase.includes("stable support") || phrase === "surface") {
+      return ["bench", "box", "chair", "table"].some((item) => available.has(item));
+    }
+    return Object.entries(equipmentAliases).some(([name, aliases]) =>
+      available.has(name) && aliases.some((alias) => phrase.includes(alias) || alias.includes(phrase)));
+  });
+}
+
+export function isExerciseAvailable(exercise: ExerciseDefinition, equipment: string[]): boolean {
+  const owned = new Set(equipment);
+  return exercise.equipment.every((requirement) => equipmentRequirementMet(requirement, owned));
+}

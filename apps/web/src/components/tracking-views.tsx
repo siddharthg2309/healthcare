@@ -7,7 +7,7 @@ import type {
   WorkoutExercise,
 } from "@healthcare/contracts";
 import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
-import type { WorkoutPlanSession } from "@healthcare/contracts";
+import type { WorkoutPlanSession, WorkoutPlanVersion } from "@healthcare/contracts";
 import {
   ApiError,
   postJson,
@@ -56,6 +56,7 @@ export type ActivityLog = {
     notes: string | null;
     workoutTitle?: string;
     exercises?: WorkoutExercise[];
+    plannedSession?: { planId: string; planVersion: number; weekday: number; label: string };
   };
 };
 
@@ -526,7 +527,7 @@ function emptyExercise(): ExerciseDraft {
   return { exerciseId: null, exerciseName: "", trackingMode: "reps", sets: [{ reps: "", durationSeconds: "", loadKg: "" }] };
 }
 
-export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { unitSystem: "metric" | "imperial" }) {
+export function ActivityTrackingView({ day, unitSystem, equipment, onSaved }: Props & { unitSystem: "metric" | "imperial"; equipment: string[] }) {
   const [viewDate, setViewDate] = useState(day.date);
   const [loadedHistoryDay, setLoadedHistoryDay] = useState<DaySummary>(day);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -537,6 +538,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
   const [steps, setSteps] = useState("");
   const [notes, setNotes] = useState("");
   const [workoutTitle, setWorkoutTitle] = useState("");
+  const [plannedSession, setPlannedSession] = useState<ActivityLog["data"]["plannedSession"]>(undefined);
   const [exercises, setExercises] = useState<ExerciseDraft[]>([emptyExercise()]);
   const [templateId, setTemplateId] = useState(workoutTemplates[0]?.id ?? "");
   const [templateSessionIndex, setTemplateSessionIndex] = useState(0);
@@ -596,6 +598,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
   function applySelectedTemplate() {
     if (!selectedTemplate || !selectedTemplateSession) return;
     setActivityType("strength");
+    setPlannedSession(undefined);
     setWorkoutTitle(`${selectedTemplate.name} · ${selectedTemplateSession.label}`);
     setExercises(selectedTemplateSession.exercises.flatMap((target) => {
       const exercise = findExerciseById(target.exerciseId);
@@ -620,6 +623,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setSteps("");
     setNotes("");
     setWorkoutTitle("");
+    setPlannedSession(undefined);
     setExercises([emptyExercise()]);
   }
 
@@ -632,6 +636,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setSteps(item.data.steps === null ? "" : String(item.data.steps));
     setNotes(item.data.notes ?? "");
     setWorkoutTitle(item.data.workoutTitle ?? "Strength session");
+    setPlannedSession(item.data.plannedSession);
     setExercises(item.data.exercises?.map((exercise) => ({
       exerciseId: exercise.exerciseId ?? null,
       exerciseName: exercise.exerciseName,
@@ -646,7 +651,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setError("");
   }
 
-  function startPlannedSession(planName: string, session: WorkoutPlanSession) {
+  function startPlannedSession(plan: WorkoutPlanVersion, session: WorkoutPlanSession) {
     setEditingId(null);
     setEditingVersion(null);
     setActivityType("strength");
@@ -654,7 +659,8 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setDurationMinutes("");
     setSteps("");
     setNotes("");
-    setWorkoutTitle(`${planName} · ${session.label}`);
+    setWorkoutTitle(`${plan.data.name} · ${session.label}`);
+    setPlannedSession({ planId: plan.id, planVersion: plan.version, weekday: session.weekday, label: session.label });
     setExercises(session.exercises.flatMap((target) => {
       const exercise = findExerciseById(target.exerciseId);
       if (!exercise) return [];
@@ -666,7 +672,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
       }];
     }));
     setError("");
-    setMessage("Plan targets loaded. Enter the reps, hold times, and loads you actually complete.");
+    setMessage("Plan targets loaded. Enter what you actually complete; saving links the workout to this plan session.");
     window.requestAnimationFrame(() => document.getElementById("activity-entry-form")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -716,6 +722,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
             };
             }),
           })),
+          ...(plannedSession ? { plannedSession } : {}),
         } : {}),
       };
       if (editingId && editingVersion !== null) {
@@ -747,12 +754,16 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
 
   return <>
     <div className="page-heading"><div><span className="eyebrow">ACTIVITY TRACKING</span><h1>Record your movement</h1><p>Enter steps or a workout. Health Connect is not available in this web app.</p></div><span className="date-chip">{viewDate}</span></div>
-    <WorkoutPlansPanel unitSystem={unitSystem} onStartSession={startPlannedSession} />
+    <WorkoutPlansPanel unitSystem={unitSystem} equipment={equipment} onStartSession={startPlannedSession} />
     <section className="tracking-grid">
       <form id="activity-entry-form" className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
         <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : viewDate === day.date ? "Today’s activity" : "Activity for this day"}</h2></div><span className="panel-symbol">↗</span></div>
         <div className="form-grid">
-          <label className="field"><span>Activity</span><select value={activityType} onChange={(event) => setActivityType(event.target.value as ActivityLog["data"]["activityType"])}><option value="steps">Steps</option><option value="walk">Walk</option><option value="cardio">Cardio</option><option value="strength">Strength session</option><option value="other">Other</option></select></label>
+          <label className="field"><span>Activity</span><select value={activityType} onChange={(event) => {
+            const next = event.target.value as ActivityLog["data"]["activityType"];
+            setActivityType(next);
+            if (next !== "strength") setPlannedSession(undefined);
+          }}><option value="steps">Steps</option><option value="walk">Walk</option><option value="cardio">Cardio</option><option value="strength">Strength session</option><option value="other">Other</option></select></label>
           <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
         </div>
         {activityType === "strength" ? <>
@@ -851,7 +862,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
           }).join(", ")})`).join(" · ");
           return <div className="daily-entry" key={item.id}>
             <span className="meal-badge">↗</span>
-            <span className="daily-entry-main"><strong>{title}</strong><small>{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
+            <span className="daily-entry-main"><strong>{title}</strong><small>{item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
             {item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}
             <div className="entry-actions">
               <button type="button" className="quiet-button" onClick={() => editingId === item.id ? resetForm() : beginEdit(item)} disabled={busy || deletingId !== null}>{editingId === item.id ? "Editing" : "Edit"}</button>

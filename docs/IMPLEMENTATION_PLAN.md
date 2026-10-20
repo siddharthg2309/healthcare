@@ -1014,10 +1014,11 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 9 — Workout-planning LangGraph workflow
 
-- Use goals, experience, available equipment, and schedule with reviewed templates.
-- Generate sessions using catalog exercise IDs; validate equipment, frequency, rest, and volume.
-- Add review, edits, approval, superseding, and completion links.
-- Reuse the same run/checkpoint/budget/ownership controls as meal planning.
+**Current status:** The profile collects experience, available training days, preferred session length, equipment, and movement limitations. The authenticated API filters the reviewed exercise catalog by equipment, includes only aggregated recent activity, calls M3 with structured output, and validates exercise IDs, tracking mode, frequency, rest, set/repetition ranges, weekly volume, and server-estimated duration. It allows one repair, stores an idempotent run and Postgres checkpoint, and creates a reviewable draft. The PWA supports edits, explicit rejection or activation, history, stale-input checks, and transactional superseding. Starting an active planned workout creates a blank actual-log form; the saved activity links back to the plan version and session only after the user records it. Minors, pregnancy/breastfeeding, and stated movement limitations are blocked from AI suggestions; template and manual logging paths remain available. Live Neon/OpenRouter, real Vercel duration/cost limits, quota enforcement, and real-device review remain outstanding.
+
+- Add per-user daily run quotas and usage budgets shared with meal planning.
+- Verify prompt/schema compatibility and actual function duration against the deployed model route.
+- Expand reviewed exercise/equipment metadata and improve recovery when profile inputs have changed.
 
 **Deliverables:** Reviewed workout plans. No generated draft is an actual workout until the user records completion.
 

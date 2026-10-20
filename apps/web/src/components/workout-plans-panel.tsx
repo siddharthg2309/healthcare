@@ -8,15 +8,34 @@ import {
   type WorkoutPlanSession,
   type WorkoutPlanVersion,
 } from "@healthcare/contracts";
-import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
-import { postJson, requestJson } from "@/lib/api";
+import { exerciseCatalog, findExerciseById, isExerciseAvailable, workoutTemplates } from "@healthcare/domain";
+import { ApiError, postJson, requestJson } from "@/lib/api";
 
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const poundsPerKilogram = 2.20462262185;
 
+function workoutSuggestionError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const messages: Record<string, string> = {
+      workout_planning_not_configured: "Workout suggestions need the server-side OpenRouter key.",
+      profile_or_accepted_goal_required: "Finish your profile and accept a goal before requesting a workout plan.",
+      workout_planning_not_available_for_this_profile: "AI workout suggestions are unavailable for this profile. Use a reviewed template instead.",
+      workout_movement_review_required: "AI suggestions are paused because you listed a movement limitation. Use a reviewed template for now.",
+      workout_days_required: "Add at least one workout day to your profile first.",
+      workout_exercise_coverage_insufficient: "Add the equipment you have to your profile, or start from a reviewed template.",
+      workout_plan_provider_unavailable: "The model could not be reached. Your existing plan is unchanged; try again later.",
+      workout_plan_generation_failed: "A safe draft could not be generated. Your existing plan is unchanged; try a template or retry.",
+      workout_plan_invalid: "The model could not produce a safe routine within your constraints. Try again or start from a template.",
+    };
+    return messages[error.code] ?? error.message;
+  }
+  return error instanceof Error ? error.message : "Could not generate a workout suggestion.";
+}
+
 type Props = {
   unitSystem: "metric" | "imperial";
-  onStartSession: (planName: string, session: WorkoutPlanSession) => void;
+  equipment: string[];
+  onStartSession: (plan: WorkoutPlanVersion, session: WorkoutPlanSession) => void;
 };
 
 function templateData(templateId: string): WorkoutPlanData | null {
@@ -61,7 +80,7 @@ function toTemplateExercise(exerciseId: string) {
   } as WorkoutPlanData["sessions"][number]["exercises"][number];
 }
 
-export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
+export function WorkoutPlansPanel({ unitSystem, equipment, onStartSession }: Props) {
   const [plans, setPlans] = useState<WorkoutPlanVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -71,6 +90,8 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
   const [editingPlan, setEditingPlan] = useState<WorkoutPlanVersion | null>(null);
   const [data, setData] = useState<WorkoutPlanData | null>(null);
   const [dirty, setDirty] = useState(false);
+  const availableExercises = useMemo(() => exerciseCatalog.filter((exercise) => isExerciseAvailable(exercise, equipment)), [equipment]);
+  const hasDraft = plans.some((plan) => plan.status === "draft");
 
   async function loadPlans() {
     const response = await requestJson<unknown>("/v1/workout-plans", { cache: "no-store" });
@@ -150,6 +171,29 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
     }
   }
 
+  async function createSuggestedDraft() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await postJson<{ status: string; plan: WorkoutPlanVersion | null }>("/v1/plans/workout/runs", {
+        idempotencyKey: globalThis.crypto.randomUUID(),
+      });
+      if (response.status !== "pending_review" || !response.plan) {
+        throw new Error("The workout suggestion did not return a reviewable draft. Try again or start from a template.");
+      }
+      setPlans((current) => [response.plan!, ...current]);
+      setEditingPlan(response.plan);
+      setData(response.plan.data);
+      setDirty(false);
+      setNotice("Suggested routine created as a draft. Review its days and exercises before activating it.");
+    } catch (caught) {
+      setError(workoutSuggestionError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function editDraft(plan: WorkoutPlanVersion) {
     setEditingPlan(plan);
     setData(plan.data);
@@ -224,6 +268,27 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
     }
   }
 
+  async function rejectPlan(plan: WorkoutPlanVersion) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await postJson(`/v1/workout-plans/${plan.id}/reject`, { baseEditVersion: plan.editVersion });
+      setPlans((current) => current.map((item) => item.id === plan.id ? { ...item, status: "archived" as const } : item));
+      if (editingPlan?.id === plan.id) {
+        setEditingPlan(null);
+        setData(null);
+        setDirty(false);
+      }
+      setNotice("Suggested workout draft rejected. It was not added to your activity log.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not reject the draft.");
+      await refreshPlans().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const parsedData = data ? workoutPlanDataSchema.safeParse(data) : null;
 
   return <section className="panel workout-plans-panel">
@@ -233,7 +298,10 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
       <label className="field"><span>Start from a template</span><select value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
         {workoutTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
       </select></label>
-      <button type="button" className="button button-secondary" onClick={() => void createDraft()} disabled={busy || !templateId}>Create draft</button>
+      <div className="workout-plan-actions">
+        <button type="button" className="button button-secondary" onClick={() => void createDraft()} disabled={busy || !templateId || hasDraft}>Create template draft</button>
+        <button type="button" className="button button-primary" onClick={() => void createSuggestedDraft()} disabled={busy || hasDraft || !availableExercises.length}>{busy ? "Generating…" : "Suggest with AI"}</button>
+      </div>
     </div>
 
     {loading ? <p className="muted-copy" role="status">Loading workout plans…</p> : groups.length ? <div className="workout-plan-list">{groups.map(({ groupId, versions, active, draft }) => {
@@ -243,10 +311,11 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
         <div className="workout-plan-title-row"><div><span className={`plan-status plan-status-${current.status}`}>{current.status}</span><h3>{current.data.name}</h3><p>Version {current.version} · {current.data.sessions.length} days each week · {current.data.focus}</p></div></div>
         {active ? <div className="workout-plan-session-list">{active.data.sessions.slice().sort((a, b) => a.weekday - b.weekday).map((session, index) => <div className="workout-plan-session" key={`${active.id}-${index}`}>
           <div><strong>{weekdays[session.weekday]} · {session.label}</strong><small>{session.estimatedMinutes} min · {session.exercises.length} exercises</small></div>
-          <button type="button" className="text-button" onClick={() => onStartSession(active.data.name, session)}>Log session</button>
+          <button type="button" className="text-button" onClick={() => onStartSession(active, session)}>Log session</button>
         </div>)}</div> : null}
         {draft ? <div className="workout-plan-actions">
           <button type="button" className="button button-secondary" onClick={() => editDraft(draft)} disabled={busy}>Edit draft</button>
+          {draft.source === "ai" ? <button type="button" className="button button-secondary" onClick={() => void rejectPlan(draft)} disabled={busy}>Reject suggestion</button> : null}
           <button type="button" className="button button-primary" onClick={() => void approvePlan(draft)} disabled={busy || (editingPlan?.id === draft.id && dirty)}>Activate plan</button>
         </div> : active ? <div className="workout-plan-actions"><button type="button" className="button button-secondary" onClick={() => void revisePlan(active)} disabled={busy}>Create revision</button></div> : null}
         {versions.length > 1 ? <details className="plan-history"><summary>Version history ({versions.length})</summary><ul>{versions.map((version) => <li key={version.id}>Version {version.version} · {version.status} · updated {new Date(version.updatedAt).toLocaleDateString()}</li>)}</ul></details> : null}
@@ -268,7 +337,7 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
           const exercise = findExerciseById(target.exerciseId);
           return <div className="workout-plan-edit-exercise" key={`${sessionIndex}-${exerciseIndex}`}>
             <div className="workout-exercise-heading"><strong>{exercise?.name ?? target.exerciseId}</strong>{session.exercises.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.filter((_, index) => index !== exerciseIndex) }))}>Remove</button> : null}</div>
-            <label className="field"><span>Exercise</span><select value={target.exerciseId} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? toTemplateExercise(event.target.value) : item) }))}>{exerciseCatalog.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label className="field"><span>Exercise</span><select value={target.exerciseId} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? toTemplateExercise(event.target.value) : item) }))}>{(editingPlan.source === "ai" ? availableExercises : exerciseCatalog).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <div className="form-grid">
               <label className="field"><span>Sets</span><input type="number" min="1" max="20" value={target.sets} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? { ...item, sets: Number(event.target.value) } : item) }))} /></label>
               <label className="field"><span>{target.trackingMode === "time" ? "Hold min (sec)" : "Reps min"}</span><input type="number" min="1" max={target.trackingMode === "time" ? 7200 : 200} value={target.targetMin} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? { ...item, targetMin: Number(event.target.value) } : item) }))} /></label>
@@ -282,7 +351,7 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
             </div>
           </div>;
         })}</div>
-        <button type="button" className="text-button" disabled={session.exercises.length >= 20} onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: [...current.exercises, toTemplateExercise(exerciseCatalog[0]?.id ?? "bodyweight-squat")] }))}>＋ Add exercise</button>
+        <button type="button" className="text-button" disabled={session.exercises.length >= 20 || (editingPlan.source === "ai" && availableExercises.length === 0)} onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: [...current.exercises, toTemplateExercise((editingPlan.source === "ai" ? availableExercises : exerciseCatalog)[0]?.id ?? "bodyweight-squat")] }))}>＋ Add exercise</button>
       </article>)}</div>
       <button type="button" className="button button-secondary" disabled={data.sessions.length >= 7} onClick={() => {
         const occupied = new Set(data.sessions.map((session) => session.weekday));
@@ -291,7 +360,7 @@ export function WorkoutPlansPanel({ unitSystem, onStartSession }: Props) {
         updateData((current) => ({ ...current, sessions: [...current.sessions, { weekday: nextDay, label: "New session", estimatedMinutes: 30, exercises: [toTemplateExercise(exerciseCatalog[0]?.id ?? "bodyweight-squat")] }] }));
       }}>＋ Add session</button>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="workout-plan-actions"><button type="button" className="button button-secondary" disabled={busy || !dirty} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft"}</button><button type="button" className="button button-primary" disabled={busy || dirty || !parsedData?.success || parsedData.success && !parsedData.data.sessions.length} onClick={() => void approvePlan(editingPlan)}>Activate plan</button></div>
+      <div className="workout-plan-actions"><button type="button" className="button button-secondary" disabled={busy || !dirty} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft"}</button>{editingPlan.source === "ai" ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => void rejectPlan(editingPlan)}>Reject suggestion</button> : null}<button type="button" className="button button-primary" disabled={busy || dirty || !parsedData?.success || parsedData.success && !parsedData.data.sessions.length} onClick={() => void approvePlan(editingPlan)}>Activate plan</button></div>
       <p className="field-note">{dirty ? "Save your changes before activation." : "Activation replaces the current version for this routine. Previous versions stay in history."}</p>
     </div> : null}
     {error && !editingPlan ? <p className="form-error" role="alert">{error}</p> : null}

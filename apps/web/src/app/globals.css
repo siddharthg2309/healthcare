@@ -188,7 +188,7 @@ a { color: inherit; text-decoration: none; }
 .workout-exercise-builder > .button { justify-self: start; }
 .workout-plans-panel { display: grid; gap: 13px; margin-bottom: 16px; }
 .workout-plans-panel .panel-heading { margin-bottom: 0; }
-.workout-plan-create-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+.workout-plan-create-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: end; gap: 10px; }
 .workout-plan-create-row .field { min-width: 0; }
 .workout-plan-list { display: grid; gap: 11px; }
 .workout-plan-card, .workout-plan-editor { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-soft); }

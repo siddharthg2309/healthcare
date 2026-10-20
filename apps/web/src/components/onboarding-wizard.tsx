@@ -21,6 +21,9 @@ type Draft = {
   restrictions: string;
   equipment: string;
   availableWorkoutDays: string;
+  trainingExperience: Profile["trainingExperience"];
+  preferredWorkoutMinutes: string;
+  movementLimitations: string;
   pregnancyOrBreastfeeding: boolean;
   clinicianDirectedDiet: boolean;
   direction: GoalProposalRequest["direction"];
@@ -70,6 +73,9 @@ export function OnboardingWizard({
     restrictions: "",
     equipment: "",
     availableWorkoutDays: "3",
+    trainingExperience: "beginner",
+    preferredWorkoutMinutes: "45",
+    movementLimitations: "",
     pregnancyOrBreastfeeding: false,
     clinicianDirectedDiet: false,
     direction: "lose",
@@ -106,6 +112,9 @@ export function OnboardingWizard({
       restrictions: splitList(draft.restrictions, 50),
       equipment: splitList(draft.equipment, 50),
       availableWorkoutDays: Number(draft.availableWorkoutDays),
+      trainingExperience: draft.trainingExperience,
+      preferredWorkoutMinutes: Number(draft.preferredWorkoutMinutes),
+      movementLimitations: splitList(draft.movementLimitations, 20),
       pregnancyOrBreastfeeding: draft.pregnancyOrBreastfeeding,
       clinicianDirectedDiet: draft.clinicianDirectedDiet,
     });
@@ -215,10 +224,14 @@ export function OnboardingWizard({
                 ["sedentary", "Mostly sitting"], ["light", "Light activity"], ["moderate", "Moderately active"], ["active", "Active most days"], ["very_active", "Very active"],
               ]} />
               <Field label="Workout days per week" type="number" value={draft.availableWorkoutDays} onChange={(value) => update("availableWorkoutDays", value)} min="0" max="7" />
+              <SelectField label="Strength-training experience" value={draft.trainingExperience} onChange={(value) => update("trainingExperience", value as Draft["trainingExperience"])} options={[["beginner", "New or returning"], ["intermediate", "Some experience"], ["advanced", "Experienced"]]} />
+              <Field label="Preferred workout length (minutes)" type="number" value={draft.preferredWorkoutMinutes} onChange={(value) => update("preferredWorkoutMinutes", value)} min="10" max="180" />
               <Field label="Equipment you have" value={draft.equipment} onChange={(value) => update("equipment", value)} placeholder="Dumbbells, bands" />
+              <Field label="Movements you need to avoid" value={draft.movementLimitations} onChange={(value) => update("movementLimitations", value)} placeholder="Optional; comma-separated" />
               <Field label="Food preferences" value={draft.dietaryPreferences} onChange={(value) => update("dietaryPreferences", value)} placeholder="Vegetarian, South Indian" />
               <Field label="Allergies or foods to avoid" value={draft.restrictions} onChange={(value) => update("restrictions", value)} placeholder="Peanuts, shellfish" />
             </div>
+            <p className="field-note">Workout suggestions use your experience, available equipment, and preferred session length. If you list a movement limitation, use a reviewed template until that limitation can be safely reviewed.</p>
           </div>
 
           <div className="form-section">

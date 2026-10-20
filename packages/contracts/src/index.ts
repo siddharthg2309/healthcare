@@ -16,6 +16,9 @@ export const profileSchema = z.object({
   restrictions: z.array(z.string().trim().min(1).max(80)).max(50),
   equipment: z.array(z.string().trim().min(1).max(80)).max(50),
   availableWorkoutDays: z.number().int().min(0).max(7),
+  trainingExperience: z.enum(["beginner", "intermediate", "advanced"]).default("beginner"),
+  preferredWorkoutMinutes: z.number().int().min(10).max(180).default(45),
+  movementLimitations: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
   pregnancyOrBreastfeeding: z.boolean(),
   clinicianDirectedDiet: z.boolean(),
 }).strict();
@@ -177,6 +180,13 @@ const workoutExerciseSchema = z.object({
   }
 });
 
+const plannedWorkoutSessionReferenceSchema = z.object({
+  planId: uuidSchema,
+  planVersion: z.number().int().positive(),
+  weekday: z.number().int().min(0).max(6),
+  label: z.string().trim().min(1).max(80),
+}).strict();
+
 const activityLogSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
@@ -185,7 +195,11 @@ const activityLogSchema = z.object({
   notes: z.string().trim().max(500).nullable(),
   workoutTitle: z.string().trim().min(1).max(100).optional(),
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
+  plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if (value.activityType !== "strength" && value.plannedSession !== undefined) {
+    context.addIssue({ code: "custom", path: ["plannedSession"], message: "Only a strength session can be linked to a workout plan." });
+  }
   const setCount = value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0;
   if (setCount > 100) context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
 });
@@ -199,6 +213,7 @@ export const createActivityLogRequestSchema = z.object({
   notes: z.string().trim().max(500).nullable(),
   workoutTitle: z.string().trim().min(1).max(100).optional(),
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
+  plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
   if (value.durationMinutes === null && value.steps === null && !(value.activityType === "strength" && value.exercises?.length)) {
     context.addIssue({ code: "custom", path: ["durationMinutes"], message: "Enter a duration or step count." });
@@ -211,6 +226,9 @@ export const createActivityLogRequestSchema = z.object({
   }
   if (value.activityType !== "strength" && (value.workoutTitle !== undefined || value.exercises !== undefined)) {
     context.addIssue({ code: "custom", path: ["exercises"], message: "Strength details are only valid for a strength session." });
+  }
+  if (value.activityType !== "strength" && value.plannedSession !== undefined) {
+    context.addIssue({ code: "custom", path: ["plannedSession"], message: "Only a strength session can be linked to a workout plan." });
   }
   if ((value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0) > 100) {
     context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
@@ -226,6 +244,7 @@ export const updateActivityLogRequestSchema = z.object({
   notes: z.string().trim().max(500).nullable(),
   workoutTitle: z.string().trim().min(1).max(100).optional(),
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
+  plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
   if (value.durationMinutes === null && value.steps === null && !(value.activityType === "strength" && value.exercises?.length)) {
     context.addIssue({ code: "custom", path: ["durationMinutes"], message: "Enter a duration or step count." });
@@ -238,6 +257,9 @@ export const updateActivityLogRequestSchema = z.object({
   }
   if (value.activityType !== "strength" && (value.workoutTitle !== undefined || value.exercises !== undefined)) {
     context.addIssue({ code: "custom", path: ["exercises"], message: "Strength details are only valid for a strength session." });
+  }
+  if (value.activityType !== "strength" && value.plannedSession !== undefined) {
+    context.addIssue({ code: "custom", path: ["plannedSession"], message: "Only a strength session can be linked to a workout plan." });
   }
   if ((value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0) > 100) {
     context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
@@ -256,7 +278,11 @@ export const activityLogRecordSchema = z.object({
   notes: z.string().max(500).nullable(),
   workoutTitle: z.string().trim().min(1).max(100).optional(),
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
+  plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if (value.activityType !== "strength" && value.plannedSession !== undefined) {
+    context.addIssue({ code: "custom", path: ["plannedSession"], message: "Only a strength session can be linked to a workout plan." });
+  }
   const setCount = value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0;
   if (setCount > 100) context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
 });
@@ -328,6 +354,27 @@ export const workoutPlanDataSchema = z.object({
     context.addIssue({ code: "custom", path: ["sessions"], message: "A weekly plan can contain at most 300 work sets." });
   }
 });
+
+export const workoutPlanModelOutputSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  focus: z.string().trim().min(1).max(180),
+  sessions: z.array(z.object({
+    weekday: z.number().int().min(0).max(6),
+    label: z.string().trim().min(1).max(80),
+    exercises: z.array(z.object({
+      exerciseId: z.string().trim().min(1).max(80),
+      sets: z.number().int().min(1).max(20),
+      trackingMode: z.enum(["reps", "time"]),
+      targetMin: z.number().int().min(1).max(7200),
+      targetMax: z.number().int().min(1).max(7200),
+      restSeconds: z.number().int().min(0).max(900),
+    }).strict()).min(1).max(12),
+  }).strict()).min(1).max(7),
+}).strict();
+
+export const workoutPlanRunRequestSchema = z.object({
+  idempotencyKey: uuidSchema,
+}).strict();
 
 export const createWorkoutPlanRequestSchema = z.object({
   planId: uuidSchema,
@@ -566,6 +613,8 @@ export type ExerciseProgressResponse = z.infer<typeof exerciseProgressResponseSc
 export type WorkoutPlanData = z.infer<typeof workoutPlanDataSchema>;
 export type WorkoutPlanSession = WorkoutPlanData["sessions"][number];
 export type WorkoutPlanVersion = z.infer<typeof workoutPlanVersionSchema>;
+export type WorkoutPlanModelOutput = z.infer<typeof workoutPlanModelOutputSchema>;
+export type WorkoutPlanRunRequest = z.infer<typeof workoutPlanRunRequestSchema>;
 export type MealPlanData = z.infer<typeof mealPlanDataSchema>;
 export type MealPlanDay = MealPlanData["days"][number];
 export type MealPlanEditRequest = z.infer<typeof mealPlanEditRequestSchema>;
