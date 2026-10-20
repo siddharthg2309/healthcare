@@ -4,7 +4,7 @@ A private, Android-first health and fitness app for food logging, activity track
 
 The app and API are served by one Next.js project. Vercel hosts the web UI and server-side API routes; Neon provides the cloud Postgres database. Your laptop is needed for development and the one-time database migration, not for friends to use the deployed app.
 
-The app is under implementation. The current build includes account setup, goal onboarding, the target-versus-weigh-in graph, personal food creation and search, editable food logs, manual activity logging, daily nutrition summaries, food-day completion status, and a local workflow to import/review/publish generic USDA foods. The initial reviewed food set, Indian-specific sources, recipes, generated plans, photo recognition, reminders, live deployment, and device integrations remain planned. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the phased scope and [environment setup](docs/ENVIRONMENT.md) for deployment steps.
+The app is under implementation. The current build includes account setup, goal onboarding, the target-versus-weigh-in graph, personal food creation and search, editable food logs, manual activity logging, daily nutrition summaries, food-day completion status, a local workflow to import/review/publish generic USDA foods, and photo-based food-name suggestions. The person still selects a catalog entry and enters the amount before logging. The initial reviewed food set, Indian-specific sources, recipes, generated plans, reminders, live deployment, and device integrations remain planned. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the phased scope and [environment setup](docs/ENVIRONMENT.md) for deployment steps.
 
 ## Stack
 
@@ -12,7 +12,7 @@ The app is under implementation. The current build includes account setup, goal 
 - Minimal black, white, gray, and lime-green visual system with Manrope
 - Same-origin Next.js Route Handlers dispatching to the modular Hono API
 - Neon Postgres with Drizzle migrations; Better Auth for invite-gated accounts
-- Server-only OpenRouter integration using MiniMax M3 for later photo recognition and reviewed meal/workout plans
+- Server-only OpenRouter integration using MiniMax M3 for photo-based food-name suggestions and later reviewed meal/workout plans; only the OpenRouter key is required, with the model defaulted in the server
 - Two bounded LangGraph workflows for meal and activity plans, with database-backed state and explicit user approval
 
 ## Run locally
@@ -93,4 +93,4 @@ The hooks check staged changes for ignored files and secrets and enforce Convent
 
 ## Current implementation status
 
-The repository contains the Next.js PWA and same-origin Hono API, invitation-based authentication foundations, onboarding and versioned goals, body-weight and exercise-specific progress graphs, personal food search/creation, versioned food-log edits and deletion, manual activity tracking, editable strength-session logs with date-selectable history and timed holds, a 47-exercise starter catalog, three starter workout templates, persistent weekly workout plans with editable drafts and approved versions, timezone-aware daily summaries, a food-day completion marker, and a local USDA catalog curation CLI. Activity provenance labels, broader catalog review, meal plans, photo storage, reminders, a live Neon migration, and Vercel deployment remain phased work. The app is not feature-complete until those paths are implemented and verified.
+The repository contains the Next.js PWA and same-origin Hono API, invitation-based authentication foundations, onboarding and versioned goals, body-weight and exercise-specific progress graphs, personal food search/creation, versioned food-log edits and deletion, manual activity tracking, editable strength-session logs with date-selectable history and timed holds, a 47-exercise starter catalog, three starter workout templates, persistent weekly workout plans with editable drafts and approved versions, timezone-aware daily summaries, a food-day completion marker, a local USDA catalog curation CLI, and user-confirmed food-name suggestions from photos. Photo files are compressed in the browser, sent to the authenticated server-side OpenRouter call, and not saved to the food log. Activity provenance labels, broader catalog review, meal plans, reminders, a live Neon migration, and Vercel deployment remain phased work. The app is not feature-complete until those paths are implemented and verified.

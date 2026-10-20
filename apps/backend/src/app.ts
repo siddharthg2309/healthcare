@@ -17,6 +17,7 @@ import {
   deleteActivityLogRequestSchema,
   deleteFoodLogRequestSchema,
   exerciseProgressQuerySchema,
+  foodPhotoRecognitionRequestSchema,
   foodDayStatusRequestSchema,
   foodLogRecordSchema,
   goalProposalRequestSchema,
@@ -35,6 +36,7 @@ import { auth } from "./auth/config.js";
 import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
+import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
 import { pullSync, pushSync } from "./services/sync.js";
 
 type AuthSession = typeof auth.$Infer.Session;
@@ -262,6 +264,25 @@ app.get("/v1/foods", async (c) => {
     })),
   ];
   return c.json({ foods });
+});
+
+app.post("/v1/foods/recognize-photo", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = foodPhotoRecognitionRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_photo" }, 400);
+
+  try {
+    const result = await recognizeFoodPhoto(parsed.data);
+    return c.json(result);
+  } catch (error) {
+    if (error instanceof FoodVisionError) return c.json({ error: error.code }, error.status);
+    throw error;
+  }
 });
 
 app.post("/v1/foods/custom", async (c) => {

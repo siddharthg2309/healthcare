@@ -88,6 +88,19 @@ export const createFoodLogRequestSchema = z.object({
   quantityGrams: z.number().finite().positive().max(5000),
 }).strict();
 
+export const foodPhotoRecognitionRequestSchema = z.object({
+  mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  base64: z.string().min(128).max(3_333_336).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+}).strict();
+
+export const foodPhotoRecognitionResponseSchema = z.object({
+  candidates: z.array(z.object({
+    name: z.string().trim().min(1).max(100),
+    alternatives: z.array(z.string().trim().min(1).max(100)).max(3),
+  }).strict()).max(6),
+  note: z.string().trim().max(240).nullable(),
+}).strict();
+
 export const updateFoodLogRequestSchema = z.object({
   baseVersion: z.number().int().positive(),
   occurredAt: isoDateTime.optional(),
@@ -395,6 +408,8 @@ export type Profile = z.infer<typeof profileSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;
+export type FoodPhotoRecognitionRequest = z.infer<typeof foodPhotoRecognitionRequestSchema>;
+export type FoodPhotoRecognitionResponse = z.infer<typeof foodPhotoRecognitionResponseSchema>;
 export type UpdateFoodLogRequest = z.infer<typeof updateFoodLogRequestSchema>;
 export type FoodDayStatusRequest = z.infer<typeof foodDayStatusRequestSchema>;
 export type CreateCustomFoodRequest = z.infer<typeof createCustomFoodRequestSchema>;

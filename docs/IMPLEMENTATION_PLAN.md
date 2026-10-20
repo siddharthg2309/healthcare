@@ -989,10 +989,13 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 7 — Food photo recognition
 
-- Add browser photo selection, image preprocessing, private uploads, and cleanup rules.
-- Add a server-side MiniMax M3 vision adapter with bounded output and schema validation.
+**Current status:** The authenticated API sends a browser-compressed image to the configured OpenRouter model and validates a bounded list of food-name candidates. The PWA lets the person search those names in the catalog, choose a food, enter the amount, and save through the existing nutrition calculation. Photo files are not stored by the app. Per-user AI quotas and usage accounting, live provider checks, and Android Chrome verification remain outstanding.
+
+- Keep browser image processing bounded to a 2.5 MB JPEG, PNG, or WebP payload.
+- Send the image through the authenticated server API; keep the OpenRouter key server-only and do not persist the photo.
+- Return food names and alternatives only; never infer portion size or nutrition from the image.
 - Match candidate labels to the app catalog and let the person confirm food and quantity.
-- Record model usage and provide a fully functional manual fallback.
+- Keep the manual catalog-search path available when recognition is disabled or fails.
 
 **Deliverables:** Photo-assisted logging using the same catalog-based nutrition calculation path.
 

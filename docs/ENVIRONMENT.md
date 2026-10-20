@@ -68,14 +68,14 @@ Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_
 
 | Feature | Variables | When to configure |
 | --- | --- | --- |
-| Meal/activity planning and food photo recognition | `OPENROUTER_API_KEY`, `AI_MODEL=minimax/minimax-m3`, and optional `OPENROUTER_BASE_URL`, `OPENROUTER_HTTP_REFERER`, `OPENROUTER_APP_TITLE`, `AI_MONTHLY_BUDGET_USD`, `AI_MAX_OUTPUT_TOKENS`, `AI_MAX_PHOTO_BYTES` | Add the OpenRouter key to Vercel as a server-only Production variable when the AI feature is implemented. Keep all limits server-side. |
+| Food photo suggestions and later plan generation | `OPENROUTER_API_KEY`; optional `AI_MODEL` (defaults to `minimax/minimax-m3`) | Add only the OpenRouter key to Vercel as a server-only Production variable to enable AI. Manual tracking works without it. The app calls OpenRouter's standard endpoint and keeps image and output size limits in server code. |
 | Durable background AI jobs | `JOB_DISPATCH_SECRET` | Configure only when a separate authenticated worker/dispatcher is deployed. Generate with `openssl rand -hex 32`. |
 | Private food-photo storage | `STORAGE_PROVIDER`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_FORCE_PATH_STYLE`, `UPLOAD_MAX_BYTES` | Configure after selecting a private S3-compatible storage provider. Keep credentials server-only; use short-lived upload permissions and retention cleanup. |
 | Google Calendar OAuth | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Set up only when Calendar sync is implemented. The client secret and encryption key stay on the server. |
 | Curated catalog imports | `USDA_API_KEY` | Optional; put it in the ignored local `.env` only when running the one-time catalog import. It is not needed by the deployed app and should not be added to Vercel. |
 | Email verification/password recovery | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Add after choosing an email provider and implementing those email flows. |
 
-The current example file has blanks for future integrations. Leave unused values empty; do not invent URLs or credentials for features that are not deployed.
+The current example file has blanks for future integrations. Leave unused values empty; do not invent URLs or credentials for features that are not deployed. Per-user AI quotas and usage accounting are not implemented yet.
 
 ### Curating shared catalog foods
 

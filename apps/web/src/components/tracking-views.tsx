@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import type { WorkoutExercise } from "@healthcare/contracts";
+import type {
+  FoodPhotoRecognitionRequest,
+  FoodPhotoRecognitionResponse,
+  WorkoutExercise,
+} from "@healthcare/contracts";
 import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
 import type { WorkoutPlanSession } from "@healthcare/contracts";
 import {
+  ApiError,
   postJson,
   requestJson,
 } from "@/lib/api";
@@ -111,7 +116,49 @@ function foodLabel(food: FoodOption): string {
   return food.source === "personal" ? "Your food" : food.reviewed ? "Reviewed catalog" : "Catalog entry";
 }
 
+async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest> {
+  if (!file.type.startsWith("image/")) throw new Error("Choose an image file.");
+  if (file.size > 20_000_000) throw new Error("Choose a photo smaller than 20 MB.");
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    let maxEdge = 1440;
+    let quality = 0.82;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("This browser could not prepare the photo.");
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+      const compressed = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", quality);
+      });
+      if (!compressed) throw new Error("This browser could not prepare the photo.");
+      if (compressed.size <= 2_500_000) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => typeof reader.result === "string"
+            ? resolve(reader.result)
+            : reject(new Error("This browser could not read the photo."));
+          reader.onerror = () => reject(new Error("This browser could not read the photo."));
+          reader.readAsDataURL(compressed);
+        });
+        return { mimeType: "image/jpeg", base64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
+      }
+      maxEdge = Math.round(maxEdge * 0.78);
+      quality = Math.max(0.5, quality - 0.1);
+    }
+  } finally {
+    bitmap.close();
+  }
+  throw new Error("The photo is still too large after compression. Choose another photo.");
+}
+
 export function FoodTrackingView({ day, onSaved }: Props) {
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [foods, setFoods] = useState<FoodOption[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodOption | null>(null);
@@ -124,6 +171,9 @@ export function FoodTrackingView({ day, onSaved }: Props) {
 
   const [message, setMessage] = useState("");
   const [showCustomFood, setShowCustomFood] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+  const [photoResult, setPhotoResult] = useState<FoodPhotoRecognitionResponse | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -143,6 +193,27 @@ export function FoodTrackingView({ day, onSaved }: Props) {
       controller.abort();
     };
   }, [query]);
+
+  async function recognizePhoto(file: File) {
+    setPhotoBusy(true);
+    setPhotoError("");
+    setPhotoResult(null);
+    try {
+      const image = await prepareFoodPhoto(file);
+      const result = await postJson<FoodPhotoRecognitionResponse>("/v1/foods/recognize-photo", image);
+      setPhotoResult(result);
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "ai_not_configured") {
+        setPhotoError("Photo suggestions need the OpenRouter key in the server environment.");
+      } else if (caught instanceof ApiError && caught.code === "ai_rate_limited") {
+        setPhotoError("The AI service is busy. Try again shortly or search by name.");
+      } else {
+        setPhotoError(caught instanceof Error ? caught.message : "Could not recognize this photo.");
+      }
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   const quantityGrams = Number(quantity);
   const preview = useMemo(() => {
@@ -199,6 +270,59 @@ export function FoodTrackingView({ day, onSaved }: Props) {
         <div className="panel food-entry-panel">
           <div className="panel-heading"><div><span className="eyebrow">ADD A FOOD</span><h2>Search your catalog</h2></div><span className="panel-symbol">◉</span></div>
           <label className="field" htmlFor="food-search"><span>Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedFood(null); }} placeholder="Try dosa, rice, paneer…" autoComplete="off" /></label>
+          <section className="photo-lookup" aria-labelledby="photo-lookup-title">
+            <div className="photo-lookup-copy">
+              <strong id="photo-lookup-title">Identify food from a photo</strong>
+              <span>Get name suggestions, then choose a catalog entry and enter the amount.</span>
+            </div>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void recognizePhoto(file);
+              }}
+            />
+            <button
+              className="button button-secondary photo-pick-button"
+              type="button"
+              disabled={photoBusy}
+              onClick={() => photoInputRef.current?.click()}
+            >
+              {photoBusy ? "Checking photo…" : "Take or choose a photo"}
+            </button>
+            <p className="source-note">The photo is sent to the AI provider for food-name suggestions. It is not added to your food log.</p>
+            {photoBusy ? <p className="photo-status" role="status">Looking for visible foods…</p> : null}
+            {photoError ? <p className="form-error" role="alert">{photoError}</p> : null}
+            {photoResult ? <div className="photo-suggestions" aria-live="polite">
+              {photoResult.note ? <p className="source-note">{photoResult.note}</p> : null}
+              {photoResult.candidates.length ? photoResult.candidates.map((candidate) => (
+                <div className="photo-candidate" key={candidate.name}>
+                  <span className="eyebrow">SUGGESTED NAME</span>
+                  <div className="photo-candidate-choices">
+                    {[candidate.name, ...candidate.alternatives].map((name, index) => (
+                      <button
+                        type="button"
+                        key={name}
+                        className={index === 0 ? "photo-candidate-primary" : ""}
+                        onClick={() => {
+                          setQuery(name);
+                          setSelectedFood(null);
+                          setMessage("");
+                        }}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )) : <div className="empty-inline"><strong>No clear food match</strong><span>Search the catalog by name or try another photo.</span></div>}
+              <p className="source-note">Photo suggestions do not estimate quantity or nutrition. Confirm the food and amount before saving.</p>
+            </div> : null}
+          </section>
           {loading ? <p className="muted-copy">Searching your foods…</p> : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           {!loading && foods.length ? <div className="food-results" role="listbox" aria-label="Food search results">

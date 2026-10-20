@@ -137,6 +137,17 @@ a { color: inherit; text-decoration: none; }
 .tracking-grid { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
 .food-entry-panel, .activity-entry-panel, .daily-log-panel { display: grid; align-content: start; gap: 13px; }
 .food-entry-panel .panel-heading, .activity-entry-panel .panel-heading, .daily-log-panel .panel-heading { margin-bottom: 0; }
+.photo-lookup { display: grid; gap: 9px; padding: 13px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-soft); }
+.photo-lookup-copy { display: grid; gap: 4px; }
+.photo-lookup-copy strong { font-size: 11px; }
+.photo-lookup-copy span { color: var(--muted); font-size: 9px; line-height: 1.55; }
+.photo-pick-button { justify-self: start; min-height: 40px; }
+.photo-status { margin: 0; color: var(--green); font-size: 10px; font-weight: 600; }
+.photo-suggestions { display: grid; gap: 8px; }
+.photo-candidate { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+.photo-candidate-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.photo-candidate-choices button { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 9px; font-weight: 600; cursor: pointer; }
+.photo-candidate-choices .photo-candidate-primary { border-color: var(--green); background: var(--green-soft); color: var(--green); }
 .food-results { display: grid; gap: 7px; max-height: 290px; overflow: auto; }
 .food-result { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); text-align: left; cursor: pointer; }
 .food-result-selected { border-color: var(--green); background: var(--green-soft); }
