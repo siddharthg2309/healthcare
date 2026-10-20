@@ -1024,12 +1024,14 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 10 — Reminders and optional Google Calendar
 
+**Current status: implemented; live connection verification remains.** Per-user reminder preferences persist in Neon and use the profile's timezone. Opt-in browser notifications are checked while the app is open and use generic lock-screen text; they are not alarms while the PWA is closed. The Settings screen supports Google OAuth connect/disconnect and user-triggered one-way sync of approved workouts to a separate Goal Health calendar. Refresh tokens are AES-256-GCM encrypted at rest, OAuth state is single-use and user-bound, event IDs are deterministic, and sync reconciles the next 28 days. No Google credentials, live connection, or Vercel deployment have been configured.
+
 - Add in-app reminder preferences and optional browser notifications with clear permission/failure states.
-- Implement web OAuth for Calendar only if desired; store tokens server-side.
-- Sync approved workout occurrences idempotently to an app-created Calendar.
+- Use web OAuth only after the owner configures it; encrypt refresh tokens server-side with the `TOKEN_ENCRYPTION_KEY`.
+- Let the user sync approved workout occurrences idempotently to an app-created Calendar.
 - Keep activity logging usable if reminders or Google are unavailable.
 
-**Deliverables:** Optional web reminders and one-way Calendar integration.
+**Deliverables:** Reminder preferences, foreground PWA notifications, optional Calendar OAuth, disconnect, and 28-day one-way workout sync. Verify the flow using a configured Google test account and deployed redirect URL before enabling it for friends. Sync is started explicitly from Settings; drafts never create Calendar events.
 
 ### Phase 11 — Production hardening and private release
 

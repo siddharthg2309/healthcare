@@ -6,10 +6,11 @@ import { exerciseProgressResponseSchema, goalSchema, profileSchema, type Exercis
 import { exerciseCatalog } from "@healthcare/domain";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { ActivityTrackingView, FoodTrackingView, type DaySummary } from "@/components/tracking-views";
+import { ReminderNotificationRunner, SettingsView } from "@/components/settings-view";
 import { ApiError, postJson, requestJson } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 
-type Tab = "home" | "food" | "activity" | "progress";
+type Tab = "home" | "food" | "activity" | "progress" | "settings";
 type StoredGoal = GoalRecord & { id: string };
 type GoalRevision = { id: string; date: string; goalVersion: number; previousTargetKg: number | null; targetWeightKg: number; targetDate: string };
 type Measurement = { id: string; data: { measuredAt: string; weightKg: number } };
@@ -21,6 +22,7 @@ const tabs: { key: Tab; label: string; glyph: string }[] = [
   { key: "food", label: "Food", glyph: "◉" },
   { key: "activity", label: "Activity", glyph: "↗" },
   { key: "progress", label: "Progress", glyph: "⌁" },
+  { key: "settings", label: "Settings", glyph: "⚙" },
 ];
 
 function friendlyError(error: unknown): string {
@@ -78,6 +80,12 @@ export function DashboardApp() {
     return () => window.clearTimeout(timer);
   }, [reloadData]);
 
+  useEffect(() => {
+    if (window.location.hash !== "#settings") return;
+    const timer = window.setTimeout(() => setTab("settings"), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   if (isPending) return <LoadingPage label="Opening your account" />;
   if (!session?.user) return <AuthPage onComplete={() => void refetch()} />;
   if (loadingData) return <LoadingPage label="Loading your health data" />;
@@ -99,6 +107,7 @@ export function DashboardApp() {
 
   return (
     <div className="app-shell">
+      <ReminderNotificationRunner userId={session.user.id} />
       <aside className="sidebar" aria-label="Main navigation">
         <a className="brand-lockup" href="#home" onClick={() => setTab("home")}>
           <span className="brand-mark">GH</span>
@@ -125,6 +134,7 @@ export function DashboardApp() {
           {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} onSaved={reloadData} /> : null}
           {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} unitSystem={profile.unitSystem} equipment={profile.equipment} onSaved={reloadData} /> : null}
           {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} unitSystem={profile.unitSystem} onMeasurementAdded={reloadData} /> : null}
+          {tab === "settings" ? <SettingsView /> : null}
         </div>
       </main>
 

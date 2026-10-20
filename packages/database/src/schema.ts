@@ -40,6 +40,73 @@ export const userProfiles = pgTable("user_profiles", {
   }),
 ]).enableRLS();
 
+export const reminderPreferences = pgTable("reminder_preferences", {
+  userId: text("user_id").primaryKey(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, () => [
+  pgPolicy("reminder_preferences_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
+export const googleOauthStates = pgTable("google_oauth_states", {
+  stateHash: text("state_hash").primaryKey(),
+  userId: text("user_id").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("google_oauth_states_owner_expiry_idx").on(table.userId, table.expiresAt),
+  pgPolicy("google_oauth_states_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
+export const googleCalendarConnections = pgTable("google_calendar_connections", {
+  userId: text("user_id").primaryKey(),
+  encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
+  calendarId: text("calendar_id").notNull(),
+  calendarName: text("calendar_name").notNull(),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, () => [
+  pgPolicy("google_calendar_connections_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
+export const calendarEventLinks = pgTable("calendar_event_links", {
+  userId: text("user_id").notNull(),
+  occurrenceKey: text("occurrence_key").notNull(),
+  planId: uuid("plan_id").notNull(),
+  planVersion: integer("plan_version").notNull(),
+  occurrenceDate: text("occurrence_date").notNull(),
+  googleEventId: text("google_event_id").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.occurrenceKey] }),
+  index("calendar_event_links_owner_date_idx").on(table.userId, table.occurrenceDate),
+  check("calendar_event_links_version_positive", sql`${table.planVersion} > 0`),
+  check("calendar_event_links_date_format", sql`${table.occurrenceDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
+  pgPolicy("calendar_event_links_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
 // Each row is an immutable approved version or an editable draft snapshot.
 // Session and exercise details stay together so a version can be copied and
 // reviewed as one validated document.

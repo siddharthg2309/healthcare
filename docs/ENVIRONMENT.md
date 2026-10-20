@@ -71,11 +71,26 @@ Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_
 | Food photo suggestions and meal-plan generation | `OPENROUTER_API_KEY`; optional `AI_MODEL` (defaults to `minimax/minimax-m3`) | Add the OpenRouter key to Vercel as a server-only Production variable to enable AI. Manual tracking works without it. The app calls OpenRouter's standard endpoint and keeps image and output size limits in server code. |
 | Durable background AI jobs | `JOB_DISPATCH_SECRET` | Configure only when a separate authenticated worker/dispatcher is deployed. Generate with `openssl rand -hex 32`. |
 | Private food-photo storage | `STORAGE_PROVIDER`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_FORCE_PATH_STYLE`, `UPLOAD_MAX_BYTES` | Configure after selecting a private S3-compatible storage provider. Keep credentials server-only; use short-lived upload permissions and retention cleanup. |
-| Google Calendar OAuth | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Set up only when Calendar sync is implemented. The client secret and encryption key stay on the server. |
+| Google Calendar connection and workout sync | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Optional. The integration is implemented; configure these only if you want Calendar sync. Keep all four values server-side. |
 | Curated catalog imports | `USDA_API_KEY` | Optional; put it in the ignored local `.env` only when running the one-time catalog import. It is not needed by the deployed app and should not be added to Vercel. |
 | Email verification/password recovery | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Add after choosing an email provider and implementing those email flows. |
 
 The LangGraph checkpoint store uses `DATABASE_URL`; it does not need a separate database URL. Leave unused integration values empty. Per-user AI quotas and daily cost limits are not implemented yet. The meal-plan screen currently supports review, portion edits, approval, rejection, and history; it does not support food swaps yet. Generation pauses when a profile has diet preferences or restrictions because the catalog does not yet store reviewed diet/allergen tags. Do not use generated plans for a restricted diet until that catalog support is completed.
+
+### Optional Google Calendar setup
+
+Calendar sync uses the OAuth 2.0 web server flow and the narrow `calendar.app.created` scope. It creates a separate **Goal Health Workouts** calendar and only syncs the user's approved active workout plan. It does not read or edit the user's other calendars. Sync runs when the user presses **Sync approved workouts** in Settings and reconciles the next 28 days. Each event gets a 30-minute popup reminder. Existing events remain in Google Calendar after disconnect; disconnect removes the stored refresh token and attempts to revoke it.
+
+1. In Google Cloud Console, create or select a project, enable the Google Calendar API, and create an OAuth client for a web application.
+2. Add this exact authorized redirect URI for local use: `http://localhost:3000/v1/connections/google/callback`. For Vercel, use `https://YOUR-APP-DOMAIN/v1/connections/google/callback` with the deployed domain.
+3. Copy the OAuth client ID and secret into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Set `GOOGLE_REDIRECT_URI` to the same exact URI registered in Google Cloud.
+4. Generate `TOKEN_ENCRYPTION_KEY` with `openssl rand -hex 32`. This key encrypts Google refresh tokens in Neon. Keep a secure backup of it: changing the key makes previously stored tokens unreadable.
+5. Put the four values in the local ignored `.env` or Vercel's server-only environment settings, then redeploy Vercel. Never add a `NEXT_PUBLIC_` prefix.
+6. In Google OAuth consent settings, add the accounts that will test the app if the OAuth app is still in testing. Sign into Goal Health, open Settings, connect Calendar, then sync an approved workout plan.
+
+The app requests `https://www.googleapis.com/auth/calendar.app.created`, which Google documents as allowing the app to create secondary calendars and manage events on those calendars. The server requests offline access and encrypts the refresh token at rest. See Google's [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth), [web server OAuth flow](https://developers.google.com/identity/protocols/oauth2/web-server), and [Calendar reminders](https://developers.google.com/workspace/calendar/api/concepts/reminders).
+
+PWA browser reminders need no additional environment variables. They require notification permission and are checked while Goal Health is open; they are not reliable alarms when Android closes the PWA.
 
 ### Curating shared catalog foods
 

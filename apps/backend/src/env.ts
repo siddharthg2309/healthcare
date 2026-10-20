@@ -5,6 +5,19 @@ import { z } from "zod";
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
+const optionalText = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().trim().min(1).optional(),
+);
+const optionalUrl = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().url().optional(),
+);
+const optionalEncryptionKey = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+);
+
 const environmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().max(65535).default(8787),
@@ -15,6 +28,10 @@ const environmentSchema = z.object({
   JOB_DISPATCH_SECRET: z.string().min(32).optional(),
   OPENROUTER_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default("minimax/minimax-m3"),
+  GOOGLE_CLIENT_ID: optionalText,
+  GOOGLE_CLIENT_SECRET: optionalText,
+  GOOGLE_REDIRECT_URI: optionalUrl,
+  TOKEN_ENCRYPTION_KEY: optionalEncryptionKey,
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);

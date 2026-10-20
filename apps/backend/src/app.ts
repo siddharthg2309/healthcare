@@ -1,10 +1,10 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
-import { Hono } from "hono";
+import { and, asc, desc, eq, ilike, isNull, lt, sql } from "drizzle-orm";
+import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { aiRuns, catalogFoods, foodDayStatuses, plans, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
   approveMealPlanRequestSchema,
   approveWorkoutPlanRequestSchema,
@@ -28,6 +28,8 @@ import {
   mealPlanRunRequestSchema,
   workoutPlanRunRequestSchema,
   profileSchema,
+  reminderPreferencesRequestSchema,
+  reminderPreferencesResponseSchema,
   syncPullQuerySchema,
   syncPushSchema,
   updateWorkoutPlanRequestSchema,
@@ -45,6 +47,19 @@ import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
 import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
 import { buildWorkoutPlanningContext, hashWorkoutPlanningContext, resumeWorkoutPlan, runWorkoutPlan, workoutPlanningVersions } from "./services/workout-planning.js";
 import { pullSync, pushSync } from "./services/sync.js";
+import { syncApprovedWorkoutCalendar } from "./services/calendar-sync.js";
+import {
+  createGoalHealthCalendar,
+  createGoogleAuthorizationUrl,
+  decryptGoogleRefreshToken,
+  encryptGoogleRefreshToken,
+  exchangeGoogleCode,
+  googleCalendarConfigured,
+  GoogleCalendarError,
+  hashOAuthState,
+  makeOAuthState,
+  revokeGoogleRefreshToken,
+} from "./services/google-calendar.js";
 
 type AuthSession = typeof auth.$Infer.Session;
 type BackendEnv = { Variables: { session: AuthSession } };
@@ -260,6 +275,208 @@ app.put("/v1/me", async (c) => {
   if (!result) return c.json({ error: "profile_save_failed" }, 500);
   return c.json({ profile: result.data, updatedAt: result.updatedAt });
 });
+
+const defaultReminderPreferences = {
+  browserNotificationsEnabled: false,
+  rules: [
+    { kind: "breakfast", enabled: false, localTime: "08:00" },
+    { kind: "lunch", enabled: false, localTime: "13:00" },
+    { kind: "dinner", enabled: false, localTime: "20:00" },
+    { kind: "workout", enabled: false, localTime: "18:00" },
+    { kind: "weigh_in", enabled: false, localTime: "07:30" },
+  ],
+} as const;
+
+async function getReminderPreferences(userId: string) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [saved] = await tx.select().from(reminderPreferencesTable)
+      .where(eq(reminderPreferencesTable.userId, userId)).limit(1);
+    const [profile] = await tx.select().from(userProfiles)
+      .where(eq(userProfiles.userId, userId)).limit(1);
+    const parsedProfile = profileSchema.safeParse(profile?.data);
+    const timezone = parsedProfile.success ? parsedProfile.data.timezone : "UTC";
+    const savedPreferences = reminderPreferencesRequestSchema.safeParse(saved?.data);
+    const preferences = savedPreferences.success ? savedPreferences.data : defaultReminderPreferences;
+    return reminderPreferencesResponseSchema.parse({ ...preferences, timezone });
+  });
+}
+
+app.get("/v1/reminders", async (c) => {
+  const userId = c.get("session").user.id;
+  return c.json(await getReminderPreferences(userId));
+});
+
+app.put("/v1/reminders", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = reminderPreferencesRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_reminder_preferences" }, 400);
+  const userId = c.get("session").user.id;
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await tx.insert(reminderPreferencesTable).values({ userId, data: parsed.data, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: reminderPreferencesTable.userId,
+        set: { data: parsed.data, updatedAt: new Date() },
+      });
+  });
+  return c.json(await getReminderPreferences(userId));
+});
+
+app.get("/v1/connections/google", async (c) => {
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [connection] = await tx.select().from(googleCalendarConnections)
+      .where(eq(googleCalendarConnections.userId, userId)).limit(1);
+    const links = connection ? await tx.select({ occurrenceKey: calendarEventLinks.occurrenceKey })
+      .from(calendarEventLinks).where(eq(calendarEventLinks.userId, userId)) : [];
+    return { connection, linkCount: links.length };
+  });
+  return c.json({
+    configured: googleCalendarConfigured(),
+    connected: Boolean(result.connection),
+    calendarName: result.connection?.calendarName ?? null,
+    lastSyncedAt: result.connection?.lastSyncedAt?.toISOString() ?? null,
+    linkedEvents: result.linkCount,
+  });
+});
+
+app.get("/v1/connections/google/start", async (c) => {
+  if (!googleCalendarConfigured()) return calendarRedirect(c, "not_configured");
+  const userId = c.get("session").user.id;
+  const state = makeOAuthState();
+  const stateHash = hashOAuthState(state);
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await tx.delete(googleOauthStates).where(and(
+      eq(googleOauthStates.userId, userId),
+      lt(googleOauthStates.expiresAt, new Date()),
+    ));
+    await tx.insert(googleOauthStates).values({
+      stateHash,
+      userId,
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
+  });
+  try {
+    return c.redirect(createGoogleAuthorizationUrl(state), 302);
+  } catch {
+    return calendarRedirect(c, "not_configured");
+  }
+});
+
+app.get("/v1/connections/google/callback", async (c) => {
+  if (c.req.query("error")) return calendarRedirect(c, "authorization_cancelled");
+  const code = c.req.query("code") ?? "";
+  const state = c.req.query("state") ?? "";
+  if (code.length < 1 || code.length > 4096 || state.length < 20 || state.length > 256) {
+    return calendarRedirect(c, "authorization_failed");
+  }
+
+  const userId = c.get("session").user.id;
+  const stateResult = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [pending] = await tx.select().from(googleOauthStates).where(and(
+      eq(googleOauthStates.userId, userId),
+      eq(googleOauthStates.stateHash, hashOAuthState(state)),
+      isNull(googleOauthStates.consumedAt),
+      sql`${googleOauthStates.expiresAt} > now()`,
+    )).for("update").limit(1);
+    if (!pending) return null;
+    await tx.update(googleOauthStates).set({ consumedAt: new Date() }).where(eq(googleOauthStates.stateHash, pending.stateHash));
+    const [connection] = await tx.select().from(googleCalendarConnections)
+      .where(eq(googleCalendarConnections.userId, userId)).limit(1);
+    const [profile] = await tx.select().from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+    return { connection, timezone: profileSchema.safeParse(profile?.data).success
+      ? profileSchema.parse(profile?.data).timezone : "UTC" };
+  });
+  if (!stateResult) return calendarRedirect(c, "authorization_failed");
+
+  try {
+    const token = await exchangeGoogleCode(code);
+    const encryptedRefreshToken = token.refreshToken
+      ? encryptGoogleRefreshToken(token.refreshToken)
+      : stateResult.connection?.encryptedRefreshToken;
+    if (!encryptedRefreshToken) return calendarRedirect(c, "refresh_token_missing");
+    const calendar = stateResult.connection
+      ? { id: stateResult.connection.calendarId, summary: stateResult.connection.calendarName }
+      : await createGoalHealthCalendar(token.accessToken, stateResult.timezone);
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+      await tx.insert(googleCalendarConnections).values({
+        userId,
+        encryptedRefreshToken,
+        calendarId: calendar.id,
+        calendarName: calendar.summary,
+        updatedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: googleCalendarConnections.userId,
+        set: {
+          encryptedRefreshToken,
+          calendarId: calendar.id,
+          calendarName: calendar.summary,
+          updatedAt: new Date(),
+        },
+      });
+    });
+    return calendarRedirect(c, "connected");
+  } catch (error) {
+    if (error instanceof GoogleCalendarError && error.code === "google_calendar_not_configured") {
+      return calendarRedirect(c, "not_configured");
+    }
+    return calendarRedirect(c, "authorization_failed");
+  }
+});
+
+app.post("/v1/connections/google/disconnect", async (c) => {
+  const userId = c.get("session").user.id;
+  const [connection] = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return tx.select().from(googleCalendarConnections)
+      .where(eq(googleCalendarConnections.userId, userId)).limit(1);
+  });
+  let remoteRevoked = false;
+  if (connection) {
+    try {
+      remoteRevoked = await revokeGoogleRefreshToken(decryptGoogleRefreshToken(connection.encryptedRefreshToken));
+    } catch {
+      remoteRevoked = false;
+    }
+  }
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await tx.delete(calendarEventLinks).where(eq(calendarEventLinks.userId, userId));
+    await tx.delete(googleOauthStates).where(eq(googleOauthStates.userId, userId));
+    await tx.delete(googleCalendarConnections).where(eq(googleCalendarConnections.userId, userId));
+  });
+  return c.json({ disconnected: true, remoteRevoked });
+});
+
+app.post("/v1/connections/google/sync", async (c) => {
+  const userId = c.get("session").user.id;
+  try {
+    return c.json(await syncApprovedWorkoutCalendar(userId));
+  } catch (error) {
+    const code = error instanceof GoogleCalendarError ? error.code : "google_calendar_sync_failed";
+    const status = code === "google_calendar_not_connected" ? 409
+      : code === "google_calendar_not_configured" ? 503
+        : code === "active_workout_plan_invalid" ? 409 : 502;
+    return c.json({ error: code }, status);
+  }
+});
+
+function calendarRedirect(c: Context<BackendEnv>, status: string): Response {
+  const url = new URL("/", env.AUTH_BASE_URL);
+  url.searchParams.set("calendar", status);
+  url.hash = "settings";
+  return c.redirect(url.toString(), 303);
+}
 
 app.get("/v1/foods", async (c) => {
   const query = new URL(c.req.url).searchParams.get("query")?.trim() ?? "";

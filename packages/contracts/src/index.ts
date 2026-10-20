@@ -23,6 +23,25 @@ export const profileSchema = z.object({
   clinicianDirectedDiet: z.boolean(),
 }).strict();
 
+export const reminderKindSchema = z.enum(["breakfast", "lunch", "dinner", "workout", "weigh_in"]);
+
+export const reminderPreferencesRequestSchema = z.object({
+  browserNotificationsEnabled: z.boolean(),
+  rules: z.array(z.object({
+    kind: reminderKindSchema,
+    enabled: z.boolean(),
+    localTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+  }).strict()).length(5),
+}).strict().superRefine((value, context) => {
+  if (new Set(value.rules.map((rule) => rule.kind)).size !== value.rules.length) {
+    context.addIssue({ code: "custom", path: ["rules"], message: "Each reminder type must appear once." });
+  }
+});
+
+export const reminderPreferencesResponseSchema = reminderPreferencesRequestSchema.extend({
+  timezone: z.string().min(1).max(80),
+}).strict();
+
 export const goalProposalRequestSchema = z.object({
   direction: z.enum(["lose", "gain", "maintain"]),
   targetWeightKg: z.number().finite().min(25).max(400),
@@ -593,6 +612,7 @@ export const syncPullQuerySchema = z.object({
 }).strict();
 
 export type Profile = z.infer<typeof profileSchema>;
+export type ReminderPreferences = z.infer<typeof reminderPreferencesResponseSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;
