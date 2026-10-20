@@ -54,6 +54,8 @@ npm run db:migrate
 
 The command applies Better Auth and Drizzle application migrations, then prepares the official LangGraph checkpoint tables in the isolated `langgraph` schema. Review migration files before running them against production. Do not automatically run schema migrations as part of every Vercel build.
 
+Migration `0010_account_privacy.sql` forces row-level security on personal food, food-day status, plan, and AI-run tables and adds the user-delete cascades required by account deletion. Apply the full migration set before enabling account deletion in a deployed app. The endpoint checks that these constraints and protections exist before calling Better Auth; otherwise it returns an error without deleting the account.
+
 ### Friend access
 
 The app uses invitation-based signup. Create a one-time code for each friend with the CLI while the local root `.env` points at the same production Neon database:
@@ -89,6 +91,10 @@ Calendar sync uses the OAuth 2.0 web server flow and the narrow `calendar.app.cr
 6. In Google OAuth consent settings, add the accounts that will test the app if the OAuth app is still in testing. Sign into Goal Health, open Settings, connect Calendar, then sync an approved workout plan.
 
 The app requests `https://www.googleapis.com/auth/calendar.app.created`, which Google documents as allowing the app to create secondary calendars and manage events on those calendars. The server requests offline access and encrypts the refresh token at rest. See Google's [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth), [web server OAuth flow](https://developers.google.com/identity/protocols/oauth2/web-server), and [Calendar reminders](https://developers.google.com/workspace/calendar/api/concepts/reminders).
+
+### Export and account deletion
+
+In Settings, each user can download an account-scoped JSON export or request deletion after entering their current password and typing `DELETE`. The export includes app profile, tracking history, saved plans, AI planning history, reminder settings, safe Calendar metadata, and temporary-upload metadata; it excludes authentication credentials and Google tokens. Deletion removes account-owned Neon rows and LangGraph planning checkpoints and attempts to revoke Google access. A Google calendar created by the app and its events can remain in the user's Google account, so the user may remove that calendar there. Neon backup snapshots follow the retention settings on the Neon project and are not immediately erased by app account deletion; choose and document a retention period before inviting users to production.
 
 PWA browser reminders need no additional environment variables. They require notification permission and are checked while Goal Health is open; they are not reliable alarms when Android closes the PWA.
 

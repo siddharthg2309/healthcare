@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { pool } from "@healthcare/database";
 import { env, trustedOrigins } from "../env.js";
+import { cleanupBeforeAccountDeletion } from "../services/account-privacy.js";
 
 export const auth = betterAuth({
   database: pool,
@@ -16,5 +17,11 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
+  },
+  user: {
+    deleteUser: {
+      enabled: true,
+      beforeDelete: async (user) => cleanupBeforeAccountDeletion(user.id),
+    },
   },
 });

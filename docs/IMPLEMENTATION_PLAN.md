@@ -877,7 +877,7 @@ Require an invitation at signup and enforce access at the backend. A private URL
 
 Use HTTPS, private file access, managed password handling, secure same-origin session cookies, and encrypted Google refresh credentials with a server-held encryption key. Keep database passwords, OpenRouter keys, storage signing credentials, and OAuth secrets in server environment variables. Never expose them as NEXT_PUBLIC values.
 
-User data export should include profile, goals, logs, plans, and measurement history in understandable JSON/CSV. Deletion must cover database records, checkpoint state, temporary exports, photo objects, credentials, and active jobs, with backup retention documented. The PWA should avoid persistent local health-data copies unless a later offline design defines account isolation and deletion behavior.
+The Settings screen exports profile, current records and change history, personal foods, plans, AI planning inputs/history, reminder preferences, and safe Calendar metadata to a JSON file. It excludes authentication credentials and OAuth tokens. Account deletion requires the current password and typing `DELETE`; user-owned live rows cascade, LangGraph checkpoints are deleted, Google token revocation is attempted, and local reminder markers are cleared. The app-created Calendar and its events can remain in Google after account deletion. Neon provider backups retain deleted data until the configured backup retention window expires; review the selected Neon plan's retention before inviting friends. Temporary photo objects are not yet used by the deployed feature path; add object deletion before enabling external photo storage.
 
 ### 15.2 Provider exposure and prompt handling
 
@@ -1034,6 +1034,8 @@ The sequence delivers tracking and the signature progress graph before AI featur
 **Deliverables:** Reminder preferences, foreground PWA notifications, optional Calendar OAuth, disconnect, and 28-day one-way workout sync. Verify the flow using a configured Google test account and deployed redirect URL before enabling it for friends. Sync is started explicitly from Settings; drafts never create Calendar events.
 
 ### Phase 11 — Production hardening and private release
+
+**Current status: in progress.** The app now has an owner-scoped JSON export, password-confirmed account deletion, LangGraph checkpoint cleanup, and a migration that forces row-level security on personal food, day-status, plan, and AI-run tables. That migration also adds account-delete cascades. Authenticated API responses use `Cache-Control: private, no-store`. Production Neon application of the migration, two-account isolation checks, backup/restore exercise, live OAuth/provider verification, cost limits, and Vercel deployment remain outstanding.
 
 - Configure production Vercel environment variables and reviewed Neon migrations/backups.
 - Verify login, invitations, two-user isolation, responsive PWA behavior, error handling, deletion/export, and restore procedures.

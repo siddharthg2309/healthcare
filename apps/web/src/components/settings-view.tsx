@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { reminderPreferencesResponseSchema, type ReminderPreferences } from "@healthcare/contracts";
 import { ApiError, postJson, putJson, requestJson } from "@/lib/api";
 
@@ -20,7 +20,7 @@ type GoogleCalendarStatus = {
   linkedEvents: number;
 };
 
-export function SettingsView() {
+export function SettingsView({ userId, onAccountDeleted }: { userId: string; onAccountDeleted: () => Promise<unknown> }) {
   const [preferences, setPreferences] = useState<ReminderPreferences | null>(null);
   const [draft, setDraft] = useState<ReminderPreferences | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,6 +31,13 @@ export function SettingsView() {
   const [calendarBusy, setCalendarBusy] = useState(false);
   const [calendarMessage, setCalendarMessage] = useState("");
   const [calendarError, setCalendarError] = useState("");
+  const [exportBusy, setExportBusy] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [privacyMessage, setPrivacyMessage] = useState("");
+  const [privacyError, setPrivacyError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -167,6 +174,64 @@ export function SettingsView() {
     }
   }
 
+  async function downloadExport() {
+    setExportBusy(true);
+    setPrivacyError("");
+    setPrivacyMessage("");
+    try {
+      const response = await fetch("/v1/export", { method: "POST", headers: { Accept: "application/json" } });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: unknown };
+        throw new Error(typeof body.error === "string" ? body.error.replaceAll("_", " ") : "The export could not be created.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `goal-health-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setPrivacyMessage("Your export downloaded to this device. It contains private health information.");
+    } catch (caught) {
+      setPrivacyError(caught instanceof Error ? caught.message : "Could not download your data.");
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function deleteAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPrivacyError("");
+    setPrivacyMessage("");
+    if (deleteConfirmation !== "DELETE") {
+      setPrivacyError("Type DELETE to confirm account removal.");
+      return;
+    }
+    setDeleteBusy(true);
+    try {
+      const response = await fetch("/v1/account", {
+        method: "DELETE",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ password: deletePassword, confirmation: deleteConfirmation }),
+      });
+      const body = await response.json().catch(() => ({})) as { error?: unknown };
+      if (!response.ok) {
+        const message = body.error === "account_deletion_migration_required"
+          ? "Account deletion is unavailable until the app owner applies the latest Neon migration. Your account was not deleted."
+          : typeof body.error === "string" ? body.error.replaceAll("_", " ") : "Account deletion failed. Check your password and try again.";
+        throw new Error(message);
+      }
+      clearReminderMarkers(userId);
+      await onAccountDeleted();
+    } catch (caught) {
+      setPrivacyError(caught instanceof Error ? caught.message : "Account deletion failed. Try again.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   const dirty = JSON.stringify(preferences) !== JSON.stringify(draft);
 
   return (
@@ -216,6 +281,22 @@ export function SettingsView() {
         </>}
         {calendarError ? <p className="form-error" role="alert">{calendarError}</p> : null}
         {calendarMessage ? <p className="form-message" role="status">{calendarMessage}</p> : null}
+      </section>
+      <section className="panel privacy-panel">
+        <div className="panel-heading"><div><span className="eyebrow">YOUR DATA</span><h2>Privacy and account</h2></div><span className="panel-symbol" aria-hidden="true">⌑</span></div>
+        <p className="muted-copy">Download your profile, logs, plans, reminders, and AI planning history as JSON. The export excludes authentication and Google access tokens.</p>
+        <button className="button button-secondary" type="button" disabled={exportBusy} onClick={() => void downloadExport()}>{exportBusy ? "Preparing export…" : "Download my data"}</button>
+        <div className="account-delete-block">
+          <strong>Delete account</strong>
+          <p>This removes your app records and planning checkpoints and attempts to revoke Google access. The Goal Health calendar and synced events may remain in Google; remove that calendar there if you want those events deleted too.</p>
+          {!deleteOpen ? <button className="button button-danger" type="button" onClick={() => { setDeleteOpen(true); setPrivacyError(""); }}>Delete my account</button> : <form className="account-delete-form" onSubmit={(event) => void deleteAccount(event)}>
+            <label className="field"><span>Current password</span><input type="password" minLength={12} maxLength={128} autoComplete="current-password" required value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} /></label>
+            <label className="field"><span>Type DELETE to confirm</span><input autoComplete="off" required value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} /></label>
+            <div className="calendar-actions"><button className="button button-danger" type="submit" disabled={deleteBusy}>{deleteBusy ? "Deleting…" : "Permanently delete account"}</button><button className="text-button" type="button" disabled={deleteBusy} onClick={() => { setDeleteOpen(false); setDeletePassword(""); setDeleteConfirmation(""); }}>Cancel</button></div>
+          </form>}
+        </div>
+        {privacyError ? <p className="form-error" role="alert">{privacyError}</p> : null}
+        {privacyMessage ? <p className="form-message" role="status">{privacyMessage}</p> : null}
       </section>
     </>
   );
@@ -305,4 +386,15 @@ function reminderNotificationCopy(kind: ReminderPreferences["rules"][number]["ki
   if (kind === "breakfast" || kind === "lunch" || kind === "dinner") return "If you have eaten, add it to today’s food log.";
   if (kind === "workout") return "Check your activity plan when it suits you.";
   return "Add a weigh-in if you planned one for today.";
+}
+
+function clearReminderMarkers(userId: string): void {
+  try {
+    const prefix = `goal-health:reminder:${userId}:`;
+    const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .filter((key): key is string => key?.startsWith(prefix) ?? false);
+    for (const key of keys) localStorage.removeItem(key);
+  } catch {
+    // The account is already deleted; browser storage can be cleared manually if unavailable.
+  }
 }

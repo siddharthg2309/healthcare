@@ -588,6 +588,10 @@ export async function resumeWorkoutPlan(runId: string, decision: ApprovalDecisio
   return workoutPlanGraph.invoke(new Command({ resume: decision }), { configurable: { thread_id: runId } });
 }
 
+export async function deleteWorkoutPlanningCheckpoint(runId: string): Promise<void> {
+  await checkpointer.deleteThread(runId);
+}
+
 export const workoutPlanningVersions = {
   model: env.AI_MODEL,
   prompt: PROMPT_VERSION,

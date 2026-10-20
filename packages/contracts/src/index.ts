@@ -42,6 +42,11 @@ export const reminderPreferencesResponseSchema = reminderPreferencesRequestSchem
   timezone: z.string().min(1).max(80),
 }).strict();
 
+export const deleteAccountRequestSchema = z.object({
+  password: z.string().min(12).max(128),
+  confirmation: z.literal("DELETE"),
+}).strict();
+
 export const goalProposalRequestSchema = z.object({
   direction: z.enum(["lose", "gain", "maintain"]),
   targetWeightKg: z.number().finite().min(25).max(400),
@@ -613,6 +618,7 @@ export const syncPullQuerySchema = z.object({
 
 export type Profile = z.infer<typeof profileSchema>;
 export type ReminderPreferences = z.infer<typeof reminderPreferencesResponseSchema>;
+export type DeleteAccountRequest = z.infer<typeof deleteAccountRequestSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;

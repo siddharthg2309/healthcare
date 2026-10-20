@@ -10,6 +10,7 @@ import {
   approveWorkoutPlanRequestSchema,
   activityLogRecordSchema,
   acceptGoalRequestSchema,
+  deleteAccountRequestSchema,
   createActivityLogRequestSchema,
   createCustomFoodRequestSchema,
   createFoodLogRequestSchema,
@@ -48,6 +49,7 @@ import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions
 import { buildWorkoutPlanningContext, hashWorkoutPlanningContext, resumeWorkoutPlan, runWorkoutPlan, workoutPlanningVersions } from "./services/workout-planning.js";
 import { pullSync, pushSync } from "./services/sync.js";
 import { syncApprovedWorkoutCalendar } from "./services/calendar-sync.js";
+import { assertAccountDeletionReady, exportAccountData } from "./services/account-privacy.js";
 import {
   createGoalHealthCalendar,
   createGoogleAuthorizationUrl,
@@ -126,6 +128,11 @@ const requireSession = createMiddleware<BackendEnv>(async (c, next) => {
 });
 
 app.use("/v1/*", requireSession);
+app.use("/v1/*", async (c, next) => {
+  await next();
+  c.header("Cache-Control", "private, no-store, max-age=0");
+  c.header("Pragma", "no-cache");
+});
 
 function nutritionValue(value: string | number): number {
   return Number(value);
@@ -250,6 +257,40 @@ app.get("/v1/me", async (c) => {
     return profile ?? null;
   });
   return c.json({ profile: result?.data ?? null, updatedAt: result?.updatedAt ?? null });
+});
+
+app.post("/v1/export", async (c) => {
+  const user = c.get("session").user;
+  const data = await exportAccountData(user.id);
+  c.header("Content-Disposition", `attachment; filename=goal-health-export-${new Date().toISOString().slice(0, 10)}.json`);
+  return c.json({ ...data, account: { id: user.id, email: user.email, name: user.name } });
+});
+
+app.delete("/v1/account", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = deleteAccountRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "account_deletion_confirmation_required" }, 400);
+  try {
+    await assertAccountDeletionReady();
+  } catch {
+    return c.json({ error: "account_deletion_migration_required" }, 503);
+  }
+
+  const headers = new Headers(c.req.raw.headers);
+  headers.delete("content-length");
+  headers.delete("transfer-encoding");
+  headers.set("content-type", "application/json");
+  const authRequest = new Request(new URL("/api/auth/delete-user", c.req.url), {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ password: parsed.data.password }),
+  });
+  return auth.handler(authRequest);
 });
 
 app.put("/v1/me", async (c) => {

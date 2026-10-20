@@ -525,6 +525,10 @@ export async function resumeMealPlan(runId: string, decision: ApprovalDecision):
   return mealPlanGraph.invoke(new Command({ resume: decision }), { configurable: { thread_id: runId } });
 }
 
+export async function deleteMealPlanningCheckpoint(runId: string): Promise<void> {
+  await checkpointer.deleteThread(runId);
+}
+
 export async function buildMealPlanningContext(userId: string, startDate: string): Promise<{
   context: MealPlanningContext;
   candidates: MealFoodCandidate[];
