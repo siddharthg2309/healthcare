@@ -215,6 +215,16 @@ export const userFoods = pgTable("user_foods", {
   carbohydrateGPer100g: numeric("carbohydrate_g_per_100g", { precision: 8, scale: 2 }).notNull(),
   fatGPer100g: numeric("fat_g_per_100g", { precision: 8, scale: 2 }).notNull(),
   sourceNote: text("source_note").notNull(),
+  recipe: jsonb("recipe").$type<{
+    yieldGrams: number;
+    ingredients: Array<{
+      foodId: string;
+      foodSource: "shared_catalog" | "personal";
+      foodName: string;
+      quantityGrams: number;
+      nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
+    }>;
+  }>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [

@@ -1,0 +1,1 @@
+ALTER TABLE "user_foods" ADD COLUMN "recipe" jsonb;

@@ -29,6 +29,16 @@ export type FoodOption = {
   proteinGPer100g: number;
   carbohydrateGPer100g: number;
   fatGPer100g: number;
+  recipe?: {
+    yieldGrams: number;
+    ingredients: Array<{
+      foodId: string;
+      foodSource: "shared_catalog" | "personal";
+      foodName: string;
+      quantityGrams: number;
+      nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
+    }>;
+  } | null;
 };
 
 type FoodPortion = { id: string; label: string; grams: number };
@@ -188,6 +198,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
 
   const [message, setMessage] = useState("");
   const [showCustomFood, setShowCustomFood] = useState(false);
+  const [showRecipe, setShowRecipe] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [photoResult, setPhotoResult] = useState<FoodPhotoRecognitionResponse | null>(null);
@@ -296,12 +307,21 @@ export function FoodTrackingView({ day, onSaved }: Props) {
     }
   }
 
-  function customFoodCreated(food: FoodOption) {
+  function selectCreatedFood(food: FoodOption, savedMessage: string) {
     setFoods((current) => [food, ...current.filter((item) => item.id !== food.id)]);
     selectFood(food);
     setQuery(food.name);
     setShowCustomFood(false);
-    setMessage("Personal food saved. Check the label values before logging.");
+    setShowRecipe(false);
+    setMessage(savedMessage);
+  }
+
+  function customFoodCreated(food: FoodOption) {
+    selectCreatedFood(food, "Personal food saved. Check the source values before logging.");
+  }
+
+  function recipeCreated(food: FoodOption) {
+    selectCreatedFood(food, "Recipe saved with nutrition calculated from its ingredients and finished weight.");
   }
 
   function selectFood(food: FoodOption | null) {
@@ -491,12 +511,20 @@ export function FoodTrackingView({ day, onSaved }: Props) {
             })}
           </div> : null}
           {!loading && !foods.length && !error ? <div className="empty-inline"><strong>{foodFilter === "favorites" ? "No favorites match" : foodFilter === "recent" ? "No recent foods match" : "No match yet"}</strong><span>{foodFilter === "favorites" ? "Star foods from All foods to keep them here." : foodFilter === "recent" ? "Foods you log will appear here for quick access." : "Add it as a personal food from its nutrition label or recipe."}</span></div> : null}
-          <button type="button" className="text-button add-custom-trigger" onClick={() => setShowCustomFood((current) => !current)}>{showCustomFood ? "Close personal food form" : "＋ Add a personal food"}</button>
+          <div className="food-create-actions">
+            <button type="button" className="text-button add-custom-trigger" onClick={() => { setShowCustomFood((current) => !current); setShowRecipe(false); }}>{showCustomFood ? "Close personal food form" : "＋ Add a personal food"}</button>
+            <button type="button" className="text-button add-custom-trigger" onClick={() => { setShowRecipe((current) => !current); setShowCustomFood(false); }}>{showRecipe ? "Close recipe builder" : "＋ Build a recipe"}</button>
+          </div>
           {showCustomFood ? <CustomFoodForm onCreated={customFoodCreated} onCancel={() => setShowCustomFood(false)} /> : null}
+          {showRecipe ? <RecipeComposer onCreated={recipeCreated} onCancel={() => setShowRecipe(false)} /> : null}
 
           {selectedFood ? <form className="selected-food-form" onSubmit={(event) => void saveFood(event)}>
             <div className="selected-food-heading"><div><span className="eyebrow">SELECTED FOOD</span><strong>{selectedFood.name}</strong></div><button type="button" className="quiet-button" onClick={() => selectFood(null)}>Change</button></div>
             <p className="source-note">{selectedFood.reviewed ? "Reviewed" : "Not reviewed"} · {selectedFood.sourceNote}{selectedFood.aliases.length ? ` · Also called ${selectedFood.aliases.join(", ")}` : ""}</p>
+            {selectedFood.recipe ? <details className="recipe-details">
+              <summary>Recipe · {selectedFood.recipe.ingredients.length} ingredients · {formatNumber(selectedFood.recipe.yieldGrams)} g finished</summary>
+              <ul>{selectedFood.recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.foodSource}:${ingredient.foodId}:${index}`}><span>{ingredient.foodName}</span><strong>{formatNumber(ingredient.quantityGrams)} g</strong></li>)}</ul>
+            </details> : null}
             <div className="form-grid">
               <label className="field"><span>Quantity (grams)</span><input type="number" min="1" max="5000" step="1" value={quantity} onChange={(event) => { setQuantity(event.target.value); setSelectedPortionId(null); }} required /></label>
               <label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as (typeof meals)[number])}>{meals.map((meal) => <option key={meal} value={meal}>{meal[0].toUpperCase() + meal.slice(1)}</option>)}</select></label>
@@ -578,6 +606,133 @@ function CustomFoodForm({ onCreated, onCancel }: { onCreated: (food: FoodOption)
     <p className="source-note">Personal foods are visible only in your account and are not marked as reviewed.</p>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     <div className="button-row"><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Save food"}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
+  </form>;
+}
+
+type RecipeIngredientDraft = { food: FoodOption; quantityGrams: number };
+
+function RecipeComposer({ onCreated, onCancel }: { onCreated: (food: FoodOption) => void; onCancel: () => void }) {
+  const [name, setName] = useState("");
+  const [aliases, setAliases] = useState("");
+  const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<FoodOption[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [selectedIngredient, setSelectedIngredient] = useState<FoodOption | null>(null);
+  const [ingredientGrams, setIngredientGrams] = useState("100");
+  const [ingredients, setIngredients] = useState<RecipeIngredientDraft[]>([]);
+  const [yieldGrams, setYieldGrams] = useState("");
+  const [recipeId, setRecipeId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const yieldWeight = Number(yieldGrams);
+  const preview = useMemo(() => {
+    const ingredientWeight = ingredients.reduce((sum, ingredient) => sum + ingredient.quantityGrams, 0);
+    if (ingredients.length < 2 || !Number.isInteger(yieldWeight) || yieldWeight < 1 || yieldWeight > 50000 || yieldWeight > ingredientWeight) return null;
+    const totals = ingredients.reduce((sum, ingredient) => ({
+      caloriesKcal: sum.caloriesKcal + ingredient.food.caloriesKcalPer100g * ingredient.quantityGrams / 100,
+      proteinG: sum.proteinG + ingredient.food.proteinGPer100g * ingredient.quantityGrams / 100,
+      carbohydrateG: sum.carbohydrateG + ingredient.food.carbohydrateGPer100g * ingredient.quantityGrams / 100,
+      fatG: sum.fatG + ingredient.food.fatGPer100g * ingredient.quantityGrams / 100,
+    }), { caloriesKcal: 0, proteinG: 0, carbohydrateG: 0, fatG: 0 });
+    return {
+      caloriesKcal: totals.caloriesKcal * 100 / yieldWeight,
+      proteinG: totals.proteinG * 100 / yieldWeight,
+      carbohydrateG: totals.carbohydrateG * 100 / yieldWeight,
+      fatG: totals.fatG * 100 / yieldWeight,
+    };
+  }, [ingredients, yieldWeight]);
+
+  async function search() {
+    if (!query.trim()) return;
+    setSearchBusy(true);
+    setError("");
+    try {
+      const response = await requestJson<{ foods: FoodOption[] }>(`/v1/foods?${new URLSearchParams({ query: query.trim() }).toString()}`);
+      setSearchResults(response.foods);
+      if (!response.foods.length) setError("No matching catalog foods. Add the ingredient as a personal food first.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not search ingredients.");
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
+  function addIngredient() {
+    const grams = Number(ingredientGrams);
+    if (!selectedIngredient || !Number.isInteger(grams) || grams < 1 || grams > 5000) {
+      setError("Choose an ingredient and enter a whole-number amount from 1 to 5,000 g.");
+      return;
+    }
+    if (ingredients.length >= 20) {
+      setError("A recipe can contain up to 20 ingredient entries.");
+      return;
+    }
+    setIngredients((current) => [...current, { food: selectedIngredient, quantityGrams: grams }]);
+    setSelectedIngredient(null);
+    setIngredientGrams("100");
+    setError("");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!preview || ingredients.length < 2) return;
+    setBusy(true);
+    setError("");
+    try {
+      const stableRecipeId = recipeId ?? globalThis.crypto.randomUUID();
+      setRecipeId(stableRecipeId);
+      const response = await postJson<{ food: FoodOption }>("/v1/foods/recipes", {
+        recipeId: stableRecipeId,
+        name,
+        aliases: aliases.split(",").map((alias) => alias.trim()).filter(Boolean),
+        yieldGrams: yieldWeight,
+        ingredients: ingredients.map((ingredient) => ({
+          foodId: ingredient.food.id,
+          foodSource: ingredient.food.source,
+          quantityGrams: ingredient.quantityGrams,
+        })),
+      });
+      onCreated(response.food);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save this recipe.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <form className="custom-food-form recipe-composer" onSubmit={(event) => void submit(event)}>
+    <div><span className="eyebrow">PERSONAL RECIPE</span><h3>Build nutrition from ingredients</h3></div>
+    <label className="field"><span>Recipe name</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></label>
+    <label className="field"><span>Also called (comma-separated)</span><input value={aliases} onChange={(event) => setAliases(event.target.value)} maxLength={800} placeholder="home-style, family name" /></label>
+    <div className="recipe-ingredient-search">
+      <label className="field"><span>Find an ingredient</span><input value={query} onChange={(event) => { setQuery(event.target.value); setSearchResults([]); setSelectedIngredient(null); }} maxLength={80} placeholder="Search rice, oil, onion…" /></label>
+      <button type="button" className="button button-secondary" onClick={() => void search()} disabled={searchBusy || !query.trim()}>{searchBusy ? "Searching…" : "Search foods"}</button>
+    </div>
+    {searchResults.length ? <div className="food-results recipe-candidates" role="list" aria-label="Ingredient search results">
+      {searchResults.slice(0, 8).map((food) => <button type="button" className="food-result-select" role="listitem" key={`${food.source}:${food.id}`} onClick={() => { setSelectedIngredient(food); setError(""); }}>
+        <span className="food-result-main"><strong>{food.name}</strong><small>{food.source === "shared_catalog" ? food.sourceNote : "Personal food"}{food.reviewed ? " · reviewed" : " · not reviewed"}</small></span>
+        <span className="food-result-kcal">{formatNumber(food.caloriesKcalPer100g)}<small> kcal / 100 g</small></span>
+      </button>)}
+    </div> : null}
+    {selectedIngredient ? <div className="recipe-ingredient-add">
+      <p className="muted-copy">Selected: <strong>{selectedIngredient.name}</strong></p>
+      <label className="field"><span>Amount (grams)</span><input type="number" min="1" max="5000" step="1" value={ingredientGrams} onChange={(event) => setIngredientGrams(event.target.value)} /></label>
+      <button type="button" className="button button-secondary" onClick={addIngredient} disabled={ingredients.length >= 20}>Add ingredient</button>
+    </div> : null}
+    {ingredients.length ? <div className="recipe-ingredient-list" aria-label="Recipe ingredients">
+      {ingredients.map((ingredient, index) => <div className="recipe-ingredient-row" key={`${ingredient.food.source}:${ingredient.food.id}:${index}`}>
+        <span><strong>{ingredient.food.name}</strong><small>{ingredient.food.source === "shared_catalog" ? ingredient.food.sourceNote : "Personal food"}</small></span>
+        <span>{formatNumber(ingredient.quantityGrams)} g</span>
+        <button type="button" className="quiet-button entry-delete" aria-label={`Remove ${ingredient.food.name}`} onClick={() => setIngredients((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
+      </div>)}
+    </div> : null}
+    <label className="field"><span>Finished recipe weight (grams)</span><input type="number" min="1" max="50000" step="1" value={yieldGrams} onChange={(event) => setYieldGrams(event.target.value)} required /></label>
+    <p className="source-note">Include added water and oil as ingredients. The finished weight cannot exceed the combined ingredient weight.</p>
+    {preview ? <div className="nutrition-preview"><strong>{formatNumber(preview.caloriesKcal)} kcal / 100 g</strong><span>Protein {formatNumber(preview.proteinG, 1)} g</span><span>Carbs {formatNumber(preview.carbohydrateG, 1)} g</span><span>Fat {formatNumber(preview.fatG, 1)} g</span></div> : null}
+    <p className="source-note">Nutrition is calculated from the selected foods and the finished recipe weight. Cooking and water loss can change actual values.</p>
+    {error ? <p className="form-error" role="alert">{error}</p> : null}
+    <div className="button-row"><button className="button button-primary" disabled={busy || ingredients.length < 2 || !preview}>{busy ? "Saving…" : "Save recipe"}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
   </form>;
 }
 

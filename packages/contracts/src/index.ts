@@ -161,6 +161,19 @@ export const createCustomFoodRequestSchema = z.object({
   sourceNote: z.string().trim().min(1).max(160),
 }).strict();
 
+export const createFoodRecipeRequestSchema = z.object({
+  recipeId: uuidSchema,
+  name: z.string().trim().min(1).max(120),
+  aliases: z.array(z.string().trim().min(1).max(80)).max(20).default([])
+    .transform((values) => [...new Map(values.map((value) => [value.toLocaleLowerCase(), value])).values()]),
+  yieldGrams: z.number().int().min(1).max(50000),
+  ingredients: z.array(z.object({
+    foodId: uuidSchema,
+    foodSource: z.enum(["shared_catalog", "personal"]),
+    quantityGrams: z.number().int().min(1).max(5000),
+  }).strict()).min(2).max(20),
+}).strict();
+
 export const setFoodFavoriteRequestSchema = z.object({
   foodSource: z.enum(["shared_catalog", "personal"]),
   favorite: z.boolean(),
@@ -645,6 +658,7 @@ export type FoodPhotoRecognitionResponse = z.infer<typeof foodPhotoRecognitionRe
 export type UpdateFoodLogRequest = z.infer<typeof updateFoodLogRequestSchema>;
 export type FoodDayStatusRequest = z.infer<typeof foodDayStatusRequestSchema>;
 export type CreateCustomFoodRequest = z.infer<typeof createCustomFoodRequestSchema>;
+export type CreateFoodRecipeRequest = z.infer<typeof createFoodRecipeRequestSchema>;
 export type FoodLogRecord = z.infer<typeof foodLogRecordSchema>;
 export type CreateActivityLogRequest = z.infer<typeof createActivityLogRequestSchema>;
 export type UpdateActivityLogRequest = z.infer<typeof updateActivityLogRequestSchema>;

@@ -15,6 +15,7 @@ import {
   createCustomFoodRequestSchema,
   createFoodPortionRequestSchema,
   createFoodLogRequestSchema,
+  createFoodRecipeRequestSchema,
   createWorkoutPlanRequestSchema,
   createMeasurementRequestSchema,
   deleteActivityLogRequestSchema,
@@ -607,6 +608,7 @@ app.get("/v1/foods", async (c) => {
       isFavorite: favoriteKeys.has(`personal:${food.id}`),
       sourceNote: food.sourceNote,
       reviewed: false,
+      recipe: food.recipe,
       caloriesKcalPer100g: nutritionValue(food.caloriesKcalPer100g),
       proteinGPer100g: nutritionValue(food.proteinGPer100g),
       carbohydrateGPer100g: nutritionValue(food.carbohydrateGPer100g),
@@ -812,6 +814,151 @@ app.post("/v1/foods/custom", async (c) => {
       isFavorite: false,
       sourceNote: result.food.sourceNote,
       reviewed: false,
+      recipe: result.food.recipe,
+      caloriesKcalPer100g: nutritionValue(result.food.caloriesKcalPer100g),
+      proteinGPer100g: nutritionValue(result.food.proteinGPer100g),
+      carbohydrateGPer100g: nutritionValue(result.food.carbohydrateGPer100g),
+      fatGPer100g: nutritionValue(result.food.fatGPer100g),
+    },
+    idempotent: result.idempotent,
+  }, result.idempotent ? 200 : 201);
+});
+
+app.post("/v1/foods/recipes", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = createFoodRecipeRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_recipe" }, 400);
+  const userId = c.get("session").user.id;
+  const recipeRequest = parsed.data;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const sharedIds = [...new Set(recipeRequest.ingredients.filter((item) => item.foodSource === "shared_catalog").map((item) => item.foodId))];
+    const personalIds = [...new Set(recipeRequest.ingredients.filter((item) => item.foodSource === "personal").map((item) => item.foodId))];
+    const [sharedFoods, personalFoods] = await Promise.all([
+      sharedIds.length ? tx.select().from(catalogFoods).where(and(inArray(catalogFoods.id, sharedIds), eq(catalogFoods.active, true))) : Promise.resolve([]),
+      personalIds.length ? tx.select().from(userFoods).where(and(inArray(userFoods.id, personalIds), eq(userFoods.userId, userId))) : Promise.resolve([]),
+    ]);
+    const availableFoods = new Map<string, {
+      id: string;
+      name: string;
+      category: string;
+      foodSource: "shared_catalog" | "personal";
+      nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
+    }>();
+    for (const food of sharedFoods) {
+      availableFoods.set(`shared_catalog:${food.id}`, {
+        id: food.id,
+        name: food.name,
+        category: food.category,
+        foodSource: "shared_catalog",
+        nutritionPer100g: {
+          caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
+          proteinG: nutritionValue(food.proteinGPer100g),
+          carbohydrateG: nutritionValue(food.carbohydrateGPer100g),
+          fatG: nutritionValue(food.fatGPer100g),
+        },
+      });
+    }
+    for (const food of personalFoods) {
+      availableFoods.set(`personal:${food.id}`, {
+        id: food.id,
+        name: food.name,
+        category: food.category,
+        foodSource: "personal",
+        nutritionPer100g: {
+          caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
+          proteinG: nutritionValue(food.proteinGPer100g),
+          carbohydrateG: nutritionValue(food.carbohydrateGPer100g),
+          fatG: nutritionValue(food.fatGPer100g),
+        },
+      });
+    }
+    const ingredients = recipeRequest.ingredients.map((item) => {
+      const food = availableFoods.get(`${item.foodSource}:${item.foodId}`);
+      return food ? {
+        foodId: food.id,
+        foodSource: food.foodSource,
+        foodName: food.name,
+        quantityGrams: item.quantityGrams,
+        nutritionPer100g: food.nutritionPer100g,
+      } : null;
+    });
+    if (ingredients.some((ingredient) => ingredient === null)) return { status: "ingredient_missing" as const };
+    const recipeSnapshot = {
+      yieldGrams: recipeRequest.yieldGrams,
+      ingredients: ingredients.filter((ingredient): ingredient is NonNullable<typeof ingredient> => ingredient !== null),
+    };
+    if (recipeSnapshot.yieldGrams > recipeSnapshot.ingredients.reduce((sum, ingredient) => sum + ingredient.quantityGrams, 0)) {
+      return { status: "yield_exceeds_ingredients" as const };
+    }
+    const totals = recipeSnapshot.ingredients.reduce((sum, ingredient) => ({
+      caloriesKcal: sum.caloriesKcal + ingredient.nutritionPer100g.caloriesKcal * ingredient.quantityGrams / 100,
+      proteinG: sum.proteinG + ingredient.nutritionPer100g.proteinG * ingredient.quantityGrams / 100,
+      carbohydrateG: sum.carbohydrateG + ingredient.nutritionPer100g.carbohydrateG * ingredient.quantityGrams / 100,
+      fatG: sum.fatG + ingredient.nutritionPer100g.fatG * ingredient.quantityGrams / 100,
+    }), { caloriesKcal: 0, proteinG: 0, carbohydrateG: 0, fatG: 0 });
+    const nutritionPer100g = {
+      caloriesKcal: roundNutrition(totals.caloriesKcal * 100 / recipeSnapshot.yieldGrams),
+      proteinG: roundNutrition(totals.proteinG * 100 / recipeSnapshot.yieldGrams),
+      carbohydrateG: roundNutrition(totals.carbohydrateG * 100 / recipeSnapshot.yieldGrams),
+      fatG: roundNutrition(totals.fatG * 100 / recipeSnapshot.yieldGrams),
+    };
+    if (nutritionPer100g.caloriesKcal > 1000 || [nutritionPer100g.proteinG, nutritionPer100g.carbohydrateG, nutritionPer100g.fatG].some((value) => value > 100)) {
+      return { status: "nutrition_out_of_bounds" as const };
+    }
+    const sourceNote = `Recipe calculated from ${recipeSnapshot.ingredients.length} ingredient entries; finished yield ${recipeSnapshot.yieldGrams} g.`;
+    const [existing] = await tx.select().from(userFoods).where(and(
+      eq(userFoods.userId, userId),
+      eq(userFoods.id, recipeRequest.recipeId),
+    )).limit(1);
+    if (existing) {
+      const same = existing.name === recipeRequest.name
+        && JSON.stringify(existing.aliases) === JSON.stringify(recipeRequest.aliases)
+        && existing.category === "prepared_meal"
+        && JSON.stringify(existing.recipe) === JSON.stringify(recipeSnapshot)
+        && nutritionValue(existing.caloriesKcalPer100g) === nutritionPer100g.caloriesKcal
+        && nutritionValue(existing.proteinGPer100g) === nutritionPer100g.proteinG
+        && nutritionValue(existing.carbohydrateGPer100g) === nutritionPer100g.carbohydrateG
+        && nutritionValue(existing.fatGPer100g) === nutritionPer100g.fatG;
+      return { status: same ? "saved" as const : "conflict" as const, food: existing, idempotent: same };
+    }
+    const [saved] = await tx.insert(userFoods).values({
+      id: recipeRequest.recipeId,
+      userId,
+      name: recipeRequest.name,
+      aliases: recipeRequest.aliases,
+      category: "prepared_meal",
+      caloriesKcalPer100g: String(nutritionPer100g.caloriesKcal),
+      proteinGPer100g: String(nutritionPer100g.proteinG),
+      carbohydrateGPer100g: String(nutritionPer100g.carbohydrateG),
+      fatGPer100g: String(nutritionPer100g.fatG),
+      sourceNote,
+      recipe: recipeSnapshot,
+      updatedAt: new Date(),
+    }).returning();
+    if (!saved) throw new Error("food_recipe_save_failed");
+    return { status: "saved" as const, food: saved, idempotent: false };
+  });
+  if (result.status === "ingredient_missing") return c.json({ error: "food_recipe_ingredient_not_found" }, 404);
+  if (result.status === "yield_exceeds_ingredients") return c.json({ error: "food_recipe_yield_exceeds_ingredients" }, 400);
+  if (result.status === "nutrition_out_of_bounds") return c.json({ error: "food_recipe_nutrition_out_of_bounds" }, 400);
+  if (result.status === "conflict") return c.json({ error: "food_recipe_id_conflict" }, 409);
+  return c.json({
+    food: {
+      id: result.food.id,
+      name: result.food.name,
+      aliases: result.food.aliases,
+      category: result.food.category,
+      source: "personal",
+      isFavorite: false,
+      sourceNote: result.food.sourceNote,
+      reviewed: false,
+      recipe: result.food.recipe,
       caloriesKcalPer100g: nutritionValue(result.food.caloriesKcalPer100g),
       proteinGPer100g: nutritionValue(result.food.proteinGPer100g),
       carbohydrateGPer100g: nutritionValue(result.food.carbohydrateGPer100g),

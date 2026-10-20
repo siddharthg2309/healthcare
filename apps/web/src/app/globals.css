@@ -235,6 +235,24 @@ a { color: inherit; text-decoration: none; }
 .nutrition-preview strong { grid-column: span 2; color: var(--ink); font-size: 18px; letter-spacing: -.04em; }
 .custom-food-form { border: 1px solid var(--line); background: #fbfcfa; }
 .custom-food-form h3 { margin: 4px 0 0; font-size: 13px; }
+.food-create-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.recipe-ingredient-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; }
+.recipe-ingredient-search .button { min-height: 42px; }
+.recipe-candidates { max-height: 220px; }
+.recipe-ingredient-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.recipe-ingredient-add > p { grid-column: 1 / -1; }
+.recipe-ingredient-add .button { min-height: 42px; }
+.recipe-ingredient-list { display: grid; gap: 6px; }
+.recipe-ingredient-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-size: 10px; }
+.recipe-ingredient-row > span:first-child { min-width: 0; display: grid; gap: 3px; }
+.recipe-ingredient-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-ingredient-row small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; }
+.recipe-ingredient-row .quiet-button { min-height: 34px; padding: 4px 7px; font-size: 9px; }
+.recipe-details { padding: 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); font-size: 10px; }
+.recipe-details summary { cursor: pointer; font-weight: 650; }
+.recipe-details ul { display: grid; gap: 6px; margin: 9px 0 0; padding: 0; list-style: none; }
+.recipe-details li { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); }
+.recipe-details li strong { color: var(--ink); white-space: nowrap; }
 .form-grid-four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .daily-calorie-total { display: flex; align-items: baseline; gap: 8px; }
 .daily-calorie-total strong { font-size: 34px; letter-spacing: -.06em; }
