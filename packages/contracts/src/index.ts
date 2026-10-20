@@ -363,6 +363,147 @@ export const workoutPlansResponseSchema = z.object({
   plans: z.array(workoutPlanVersionSchema).max(100),
 }).strict();
 
+const mealPlanModelItemSchema = z.object({
+  foodId: uuidSchema,
+  quantityGrams: z.number().finite().positive().max(1500),
+}).strict();
+
+const mealPlanModelMealSchema = z.object({
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+  items: z.array(mealPlanModelItemSchema).min(1).max(6),
+  note: z.string().trim().max(180).nullable(),
+}).strict();
+
+export const mealPlanModelOutputSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  days: z.array(z.object({
+    date: z.string().date(),
+    meals: z.array(mealPlanModelMealSchema).min(2).max(6),
+  }).strict()).length(7),
+}).strict();
+
+const mealPlanItemSchema = z.object({
+  foodId: uuidSchema,
+  foodSource: z.enum(["shared_catalog", "personal"]),
+  foodName: z.string().trim().min(1).max(120),
+  category: z.string().trim().min(1).max(48),
+  quantityGrams: z.number().finite().positive().max(1500),
+  nutritionPer100g: nutritionSnapshotSchema,
+  nutritionTotal: nutritionSnapshotSchema,
+}).strict();
+
+const mealPlanMealSchema = z.object({
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+  items: z.array(mealPlanItemSchema).min(1).max(6),
+  note: z.string().max(180).nullable(),
+}).strict();
+
+const mealPlanDaySchema = z.object({
+  date: z.string().date(),
+  meals: z.array(mealPlanMealSchema).min(2).max(6),
+  totals: nutritionSnapshotSchema,
+}).strict();
+
+export const mealPlanDataSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  startDate: z.string().date(),
+  dailyCalorieTargetKcal: z.number().int().min(800).max(5000),
+  macroTargetsGrams: z.object({
+    proteinG: z.number().finite().min(0).max(500),
+    carbohydrateG: z.number().finite().min(0).max(1000),
+    fatG: z.number().finite().min(0).max(500),
+  }).strict().nullable(),
+  days: z.array(mealPlanDaySchema).length(7),
+}).strict().superRefine((value, context) => {
+  const seenDates = new Set<string>();
+  for (let index = 0; index < value.days.length; index += 1) {
+    const day = value.days[index]!;
+    const expected = new Date(Date.parse(`${value.startDate}T00:00:00.000Z`) + index * 86_400_000)
+      .toISOString().slice(0, 10);
+    if (day.date !== expected || seenDates.has(day.date)) {
+      context.addIssue({ code: "custom", path: ["days", index, "date"], message: "Meal plan dates must be seven consecutive unique days." });
+    }
+    seenDates.add(day.date);
+    const mealTypes = day.meals.map((meal) => meal.mealType).filter((type) => type !== "snack");
+    if (new Set(mealTypes).size !== mealTypes.length) {
+      context.addIssue({ code: "custom", path: ["days", index, "meals"], message: "A day can include each main meal once." });
+    }
+    const lower = value.dailyCalorieTargetKcal * 0.8;
+    const upper = value.dailyCalorieTargetKcal * 1.2;
+    if (day.totals.caloriesKcal < lower || day.totals.caloriesKcal > upper) {
+      context.addIssue({ code: "custom", path: ["days", index, "totals", "caloriesKcal"], message: "Daily calories must remain within 20% of the accepted target." });
+    }
+    if (value.macroTargetsGrams) {
+      const macros = [
+        ["proteinG", value.macroTargetsGrams.proteinG],
+        ["carbohydrateG", value.macroTargetsGrams.carbohydrateG],
+        ["fatG", value.macroTargetsGrams.fatG],
+      ] as const;
+      for (const [key, target] of macros) {
+        if (target > 0 && (day.totals[key] < target * 0.7 || day.totals[key] > target * 1.3)) {
+          context.addIssue({ code: "custom", path: ["days", index, "totals", key], message: "Daily macros must remain within 30% of the accepted target." });
+        }
+      }
+    }
+  }
+});
+
+export const mealPlanEditRequestSchema = z.object({
+  baseEditVersion: z.number().int().positive(),
+  name: z.string().trim().min(1).max(80),
+  startDate: z.string().date(),
+  days: z.array(z.object({
+    date: z.string().date(),
+    meals: z.array(z.object({
+      mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+      items: z.array(z.object({
+        foodId: uuidSchema,
+        foodSource: z.enum(["shared_catalog", "personal"]),
+        quantityGrams: z.number().finite().positive().max(1500),
+      }).strict()).min(1).max(6),
+      note: z.string().trim().max(180).nullable(),
+    }).strict()).min(2).max(6),
+  }).strict()).length(7),
+}).strict();
+
+export const mealPlanRunRequestSchema = z.object({
+  idempotencyKey: uuidSchema,
+  startDate: z.string().date(),
+}).strict();
+
+export const approveMealPlanRequestSchema = z.object({
+  baseEditVersion: z.number().int().positive(),
+  decision: z.enum(["approve", "reject"]),
+}).strict();
+
+export const mealPlanVersionSchema = z.object({
+  id: uuidSchema,
+  groupId: uuidSchema,
+  kind: z.literal("meal"),
+  version: z.number().int().positive(),
+  editVersion: z.number().int().positive(),
+  status: z.enum(["draft", "active", "superseded", "archived"]),
+  source: z.enum(["template", "manual", "ai"]),
+  data: mealPlanDataSchema,
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+  approvedAt: isoDateTime.nullable(),
+}).strict();
+
+export const mealPlansResponseSchema = z.object({
+  plans: z.array(mealPlanVersionSchema).max(100),
+}).strict();
+
+export const aiRunResponseSchema = z.object({
+  id: uuidSchema,
+  kind: z.enum(["meal_plan", "workout_plan"]),
+  status: z.enum(["running", "pending_review", "completed", "failed", "rejected", "stale"]),
+  planId: uuidSchema.nullable(),
+  errorCode: z.string().nullable(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+}).strict();
+
 const bodyMeasurementSchema = z.object({
   measuredAt: isoDateTime,
   weightKg: z.number().finite().min(25).max(400),
@@ -425,6 +566,10 @@ export type ExerciseProgressResponse = z.infer<typeof exerciseProgressResponseSc
 export type WorkoutPlanData = z.infer<typeof workoutPlanDataSchema>;
 export type WorkoutPlanSession = WorkoutPlanData["sessions"][number];
 export type WorkoutPlanVersion = z.infer<typeof workoutPlanVersionSchema>;
+export type MealPlanData = z.infer<typeof mealPlanDataSchema>;
+export type MealPlanDay = MealPlanData["days"][number];
+export type MealPlanEditRequest = z.infer<typeof mealPlanEditRequestSchema>;
+export type MealPlanVersion = z.infer<typeof mealPlanVersionSchema>;
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 export type SyncPushRequest = z.infer<typeof syncPushSchema>;
 export type SyncPullQuery = z.infer<typeof syncPullQuerySchema>;

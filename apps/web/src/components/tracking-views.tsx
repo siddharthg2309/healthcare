@@ -13,6 +13,7 @@ import {
   postJson,
   requestJson,
 } from "@/lib/api";
+import { MealPlansPanel } from "./meal-plans-panel";
 import { WorkoutPlansPanel } from "./workout-plans-panel";
 
 export type FoodOption = {
@@ -158,6 +159,7 @@ async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest
 }
 
 export function FoodTrackingView({ day, onSaved }: Props) {
+  const [foodView, setFoodView] = useState<"log" | "plan">("log");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [foods, setFoods] = useState<FoodOption[]>([]);
@@ -263,10 +265,15 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   return (
     <>
       <div className="page-heading">
-        <div><span className="eyebrow">FOOD TRACKING</span><h1>Log what you ate</h1><p>Choose a food, enter its weight, and review the nutrition before saving.</p></div>
+        <div><span className="eyebrow">FOOD TRACKING</span><h1>{foodView === "log" ? "Log what you ate" : "Plan your week"}</h1><p>{foodView === "log" ? "Choose a food, enter its weight, and review the nutrition before saving." : "Build a week around your accepted target, then review it before approval."}</p></div>
         <span className="date-chip">{day.date}</span>
       </div>
-      <section className="tracking-grid">
+      <div className="food-section-switch" role="tablist" aria-label="Food tools">
+        <button type="button" role="tab" aria-selected={foodView === "log"} className={foodView === "log" ? "food-section-tab food-section-tab-active" : "food-section-tab"} onClick={() => setFoodView("log")}>Food log</button>
+        <button type="button" role="tab" aria-selected={foodView === "plan"} className={foodView === "plan" ? "food-section-tab food-section-tab-active" : "food-section-tab"} onClick={() => setFoodView("plan")}>Meal plan</button>
+      </div>
+      {foodView === "plan" ? <MealPlansPanel startDate={day.date} /> : null}
+      {foodView === "log" ? <section className="tracking-grid">
         <div className="panel food-entry-panel">
           <div className="panel-heading"><div><span className="eyebrow">ADD A FOOD</span><h2>Search your catalog</h2></div><span className="panel-symbol">◉</span></div>
           <label className="field" htmlFor="food-search"><span>Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedFood(null); }} placeholder="Try dosa, rice, paneer…" autoComplete="off" /></label>
@@ -351,7 +358,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
         </div>
 
         <DailyFoodPanel day={day} onChanged={onSaved} />
-      </section>
+      </section> : null}
     </>
   );
 }

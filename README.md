@@ -4,7 +4,7 @@ A private, Android-first health and fitness app for food logging, activity track
 
 The app and API are served by one Next.js project. Vercel hosts the web UI and server-side API routes; Neon provides the cloud Postgres database. Your laptop is needed for development and the one-time database migration, not for friends to use the deployed app.
 
-The app is under implementation. The current build includes account setup, goal onboarding, the target-versus-weigh-in graph, personal food creation and search, editable food logs, manual activity logging, daily nutrition summaries, food-day completion status, a local workflow to import/review/publish generic USDA foods, and photo-based food-name suggestions. The person still selects a catalog entry and enters the amount before logging. The initial reviewed food set, Indian-specific sources, recipes, generated plans, reminders, live deployment, and device integrations remain planned. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the phased scope and [environment setup](docs/ENVIRONMENT.md) for deployment steps.
+The app is under implementation. The current build includes account setup, goal onboarding, the target-versus-weigh-in graph, personal food creation and search, editable food logs, manual activity logging, daily nutrition summaries, food-day completion status, a local workflow to import/review/publish generic USDA foods, and photo-based food-name suggestions. The person still selects a catalog entry and enters the amount before logging. Meal plans now have a LangGraph-backed draft/review flow with portion edits, server-recalculated nutrition, explicit approval, and plan history. Reviewed dietary/allergen tags, broader Indian-food catalog coverage, food swaps, workout-plan generation, recipes, reminders, live deployment, and device integrations remain planned. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the phased scope and [environment setup](docs/ENVIRONMENT.md) for deployment steps.
 
 ## Stack
 
@@ -12,7 +12,7 @@ The app is under implementation. The current build includes account setup, goal 
 - Minimal black, white, gray, and lime-green visual system with Manrope
 - Same-origin Next.js Route Handlers dispatching to the modular Hono API
 - Neon Postgres with Drizzle migrations; Better Auth for invite-gated accounts
-- Server-only OpenRouter integration using MiniMax M3 for photo-based food-name suggestions and later reviewed meal/workout plans; only the OpenRouter key is required, with the model defaulted in the server
+- Server-only OpenRouter integration using MiniMax M3 for food-photo candidates and reviewed meal plans; only the OpenRouter key is required, with the model defaulted in the server
 - Two bounded LangGraph workflows for meal and activity plans, with database-backed state and explicit user approval
 
 ## Run locally
@@ -31,7 +31,7 @@ cp .env.example .env
 
 Fill `DATABASE_URL`, your chosen `AUTH_SECRET`, `AUTH_BASE_URL`, and `AUTH_TRUSTED_ORIGINS` in the ignored root `.env`. For local use, both auth origins are `http://localhost:3000`. If you still need to create an auth secret, generate one with `openssl rand -base64 32`. Do not put server secrets in browser-visible variables.
 
-Apply the database migrations once, then start Next.js:
+Apply the application and isolated LangGraph checkpoint migrations once, then start Next.js:
 
 ```bash
 npm run db:migrate

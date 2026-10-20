@@ -10,7 +10,7 @@ Copy the root example file and fill it in locally:
 cp .env.example .env
 ```
 
-For the current auth/database foundation, use:
+For local development, use:
 
 | Variable | Local value | Where it comes from |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ For the current auth/database foundation, use:
 
 The app does not need `EXPO_PUBLIC_API_BASE_URL` or any browser-visible secret. The browser calls relative same-origin routes such as `/api/auth/*` and `/v1/*`.
 
-Run the schema migrations once and launch the app:
+Run the auth, application, and LangGraph checkpoint migrations once, then launch the app:
 
 ```bash
 npm run db:migrate
@@ -52,7 +52,7 @@ Apply migrations from a trusted local checkout before using a newly deployed app
 npm run db:migrate
 ```
 
-Review migration files before running them against production. Do not automatically run schema migrations as part of every Vercel build.
+The command applies Better Auth and Drizzle application migrations, then prepares the official LangGraph checkpoint tables in the isolated `langgraph` schema. Review migration files before running them against production. Do not automatically run schema migrations as part of every Vercel build.
 
 ### Friend access
 
@@ -64,18 +64,18 @@ npm run invite:create -- --email friend@example.com
 
 Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_SECRET`, or the OpenRouter key.
 
-## Add when enabling later features
+## Feature-specific configuration
 
 | Feature | Variables | When to configure |
 | --- | --- | --- |
-| Food photo suggestions and later plan generation | `OPENROUTER_API_KEY`; optional `AI_MODEL` (defaults to `minimax/minimax-m3`) | Add only the OpenRouter key to Vercel as a server-only Production variable to enable AI. Manual tracking works without it. The app calls OpenRouter's standard endpoint and keeps image and output size limits in server code. |
+| Food photo suggestions and meal-plan generation | `OPENROUTER_API_KEY`; optional `AI_MODEL` (defaults to `minimax/minimax-m3`) | Add the OpenRouter key to Vercel as a server-only Production variable to enable AI. Manual tracking works without it. The app calls OpenRouter's standard endpoint and keeps image and output size limits in server code. |
 | Durable background AI jobs | `JOB_DISPATCH_SECRET` | Configure only when a separate authenticated worker/dispatcher is deployed. Generate with `openssl rand -hex 32`. |
 | Private food-photo storage | `STORAGE_PROVIDER`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_FORCE_PATH_STYLE`, `UPLOAD_MAX_BYTES` | Configure after selecting a private S3-compatible storage provider. Keep credentials server-only; use short-lived upload permissions and retention cleanup. |
 | Google Calendar OAuth | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Set up only when Calendar sync is implemented. The client secret and encryption key stay on the server. |
 | Curated catalog imports | `USDA_API_KEY` | Optional; put it in the ignored local `.env` only when running the one-time catalog import. It is not needed by the deployed app and should not be added to Vercel. |
 | Email verification/password recovery | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Add after choosing an email provider and implementing those email flows. |
 
-The current example file has blanks for future integrations. Leave unused values empty; do not invent URLs or credentials for features that are not deployed. Per-user AI quotas and usage accounting are not implemented yet.
+The LangGraph checkpoint store uses `DATABASE_URL`; it does not need a separate database URL. Leave unused integration values empty. Per-user AI quotas and daily cost limits are not implemented yet. The meal-plan screen currently supports review, portion edits, approval, rejection, and history; it does not support food swaps yet. Generation pauses when a profile has diet preferences or restrictions because the catalog does not yet store reviewed diet/allergen tags. Do not use generated plans for a restricted diet until that catalog support is completed.
 
 ### Curating shared catalog foods
 

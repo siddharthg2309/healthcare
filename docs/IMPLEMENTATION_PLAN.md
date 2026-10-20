@@ -1003,10 +1003,11 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 8 — Meal-planning LangGraph workflow
 
-- Implement shared planning state, Postgres checkpoints, durable run status, and review interrupts.
-- Retrieve eligible catalog/recipe records and send compact constraints to M3.
-- Calculate nutrition deterministically, validate IDs/restrictions/portions, allow at most one repair, then save a draft.
-- Add review, swaps/edits, stale-input detection, approval, and plan history.
+**Current status:** The authenticated backend now creates idempotent AI runs, retrieves reviewed shared foods and account-owned foods, calls M3 through OpenRouter with structured output, calculates all meal and day nutrition from catalog snapshots, validates seven consecutive dates and daily calorie bounds, performs at most one repair, saves an editable draft, and pauses a Postgres-checkpointed LangGraph run for explicit review. The PWA screen selects days, shows daily calories/macros, supports version-checked portion edits, recalculates totals on the server, approves/rejects plans, and lists plan history. Approval rechecks the accepted goal/profile snapshot before activation. The one-time checkpoint schema setup is included in `npm run db:migrate`. Food swaps, reviewed dietary/allergen tags and catalog coverage, daily quota/cost limits, timeout behavior against the live Vercel plan, and live Neon/OpenRouter validation remain outstanding. Until reviewed food tags exist, the API refuses plan generation when dietary preferences or restrictions are present.
+
+- Add catalog search-based food swaps and clearer stale-input recovery in the review screen.
+- Add reviewed dietary/allergen metadata to foods, then filter candidates and validate preferences/restrictions deterministically.
+- Add per-user daily run quotas and spend tracking, and verify provider latency/repair behavior on the deployed function limits.
 - Do not log planned food as eaten unless the user confirms it.
 
 **Deliverables:** Reviewed weekly meal plans.

@@ -23,7 +23,7 @@ export const recordEntity = pgEnum("record_entity", [
   "goal",
 ]);
 
-export const planKind = pgEnum("plan_kind", ["workout"]);
+export const planKind = pgEnum("plan_kind", ["meal", "workout"]);
 export const planStatus = pgEnum("plan_status", ["draft", "active", "superseded", "archived"]);
 
 export const userProfiles = pgTable("user_profiles", {
@@ -64,6 +64,37 @@ export const plans = pgTable("plans", {
   check("plans_version_positive", sql`${table.version} > 0 AND ${table.editVersion} > 0`),
   check("plans_source_valid", sql`${table.source} IN ('template', 'manual', 'ai')`),
   pgPolicy("plans_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
+export const aiRuns = pgTable("ai_runs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: text("user_id").notNull(),
+  kind: text("kind").notNull(),
+  status: text("status").default("running").notNull(),
+  idempotencyKey: uuid("idempotency_key").notNull(),
+  inputHash: text("input_hash").notNull(),
+  inputSnapshot: jsonb("input_snapshot").$type<Record<string, unknown>>().notNull(),
+  model: text("model").notNull(),
+  promptVersion: text("prompt_version").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  resultPlanId: uuid("result_plan_id"),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  errorCode: text("error_code"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("ai_runs_owner_kind_idempotency_idx").on(table.userId, table.kind, table.idempotencyKey),
+  index("ai_runs_owner_created_idx").on(table.userId, table.createdAt),
+  check("ai_runs_kind_valid", sql`${table.kind} IN ('meal_plan', 'workout_plan')`),
+  check("ai_runs_status_valid", sql`${table.status} IN ('running', 'pending_review', 'completed', 'failed', 'rejected', 'stale')`),
+  check("ai_runs_usage_nonnegative", sql`(${table.inputTokens} IS NULL OR ${table.inputTokens} >= 0) AND (${table.outputTokens} IS NULL OR ${table.outputTokens} >= 0)`),
+  pgPolicy("ai_runs_owner_policy", {
     for: "all",
     to: "public",
     using: sql`user_id = current_setting('app.user_id', true)`,

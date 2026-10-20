@@ -1,11 +1,12 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { catalogFoods, foodDayStatuses, plans, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { aiRuns, catalogFoods, foodDayStatuses, plans, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
+  approveMealPlanRequestSchema,
   approveWorkoutPlanRequestSchema,
   activityLogRecordSchema,
   acceptGoalRequestSchema,
@@ -22,6 +23,9 @@ import {
   foodLogRecordSchema,
   goalProposalRequestSchema,
   goalSchema,
+  mealPlanDataSchema,
+  mealPlanEditRequestSchema,
+  mealPlanRunRequestSchema,
   profileSchema,
   syncPullQuerySchema,
   syncPushSchema,
@@ -37,6 +41,7 @@ import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
 import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
+import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
 import { pullSync, pushSync } from "./services/sync.js";
 
 type AuthSession = typeof auth.$Infer.Session;
@@ -147,6 +152,24 @@ function hasValidPlanExercises(data: WorkoutPlanData): boolean {
 
 function workoutPlanResponse(row: typeof plans.$inferSelect) {
   const data = workoutPlanDataSchema.safeParse(row.data);
+  if (!data.success || !["template", "manual", "ai"].includes(row.source)) return null;
+  return {
+    id: row.id,
+    groupId: row.groupId,
+    kind: row.kind,
+    version: row.version,
+    editVersion: row.editVersion,
+    status: row.status,
+    source: row.source as "template" | "manual" | "ai",
+    data: data.data,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    approvedAt: row.approvedAt?.toISOString() ?? null,
+  };
+}
+
+function mealPlanResponse(row: typeof plans.$inferSelect) {
+  const data = mealPlanDataSchema.safeParse(row.data);
   if (!data.success || !["template", "manual", "ai"].includes(row.source)) return null;
   return {
     id: row.id,
@@ -759,6 +782,260 @@ app.put("/v1/days/:date/food-status", async (c) => {
     }).returning({ localDate: foodDayStatuses.localDate, complete: foodDayStatuses.complete, updatedAt: foodDayStatuses.updatedAt });
   });
   return c.json(saved);
+});
+
+app.get("/v1/meal-plans", async (c) => {
+  const userId = c.get("session").user.id;
+  const rows = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.kind, "meal"),
+    )).orderBy(desc(plans.updatedAt)).limit(100);
+  });
+  return c.json({ plans: rows.map(mealPlanResponse).filter((plan) => plan !== null) });
+});
+
+app.post("/v1/plans/meal/runs", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = mealPlanRunRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_meal_plan_request" }, 400);
+  if (!isLocalDate(parsed.data.startDate)) return c.json({ error: "invalid_start_date" }, 400);
+  if (!env.OPENROUTER_API_KEY) return c.json({ error: "meal_planning_not_configured" }, 503);
+
+  const userId = c.get("session").user.id;
+  let planning;
+  try {
+    planning = await buildMealPlanningContext(userId, parsed.data.startDate);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "meal_plan_context_unavailable";
+    const statusByCode: Record<string, 409 | 422 | 503> = {
+      profile_or_accepted_goal_required: 409,
+      accepted_calorie_target_required: 409,
+      meal_planning_not_available_for_this_profile: 422,
+      meal_plan_food_metadata_required: 422,
+      meal_plan_catalog_coverage_insufficient: 422,
+    };
+    return c.json({ error: statusByCode[code] ? code : "meal_plan_context_unavailable" }, statusByCode[code] ?? 503);
+  }
+  const today = localDateInZone(new Date().toISOString(), planning.context.timezone);
+  if (parsed.data.startDate < today || parsed.data.startDate > shiftLocalDate(today, 30)) {
+    return c.json({ error: "meal_plan_start_date_out_of_range" }, 422);
+  }
+  const inputHash = hashMealPlanningContext(planning.context);
+  const runId = randomUUID();
+  const runSetup = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [prior] = await tx.select().from(aiRuns).where(and(
+      eq(aiRuns.userId, userId), eq(aiRuns.kind, "meal_plan"), eq(aiRuns.idempotencyKey, parsed.data.idempotencyKey),
+    )).limit(1);
+    if (prior) {
+      if (prior.inputHash !== inputHash) return { status: "idempotency_conflict" as const };
+      const [plan] = prior.resultPlanId ? await tx.select().from(plans).where(and(
+        eq(plans.userId, userId), eq(plans.id, prior.resultPlanId), eq(plans.kind, "meal"),
+      )).limit(1) : [];
+      return { status: "existing" as const, run: prior, plan };
+    }
+    const [active] = await tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.kind, "meal"), eq(plans.status, "active"),
+    )).orderBy(desc(plans.version)).limit(1);
+    const [draft] = await tx.select({ id: plans.id }).from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.kind, "meal"), eq(plans.status, "draft"),
+    )).limit(1);
+    if (draft) return { status: "draft_conflict" as const, planId: draft.id };
+    const groupId = active?.groupId ?? runId;
+    const [latest] = await tx.select({ version: plans.version }).from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.groupId, groupId), eq(plans.kind, "meal"),
+    )).orderBy(desc(plans.version)).limit(1);
+    const [created] = await tx.insert(aiRuns).values({
+      id: runId,
+      userId,
+      kind: "meal_plan",
+      status: "running",
+      idempotencyKey: parsed.data.idempotencyKey,
+      inputHash,
+      inputSnapshot: { ...planning.context },
+      model: mealPlanningVersions.model,
+      promptVersion: mealPlanningVersions.prompt,
+      schemaVersion: mealPlanningVersions.schema,
+    }).onConflictDoNothing().returning();
+    if (!created) return { status: "idempotency_race" as const };
+    return {
+      status: "created" as const,
+      groupId,
+      planVersion: (latest?.version ?? 0) + 1,
+    };
+  });
+  if (runSetup.status === "draft_conflict") return c.json({ error: "meal_plan_draft_exists", planId: runSetup.planId }, 409);
+  if (runSetup.status === "idempotency_conflict") return c.json({ error: "idempotency_key_reused_with_different_input" }, 409);
+  if (runSetup.status === "idempotency_race") return c.json({ error: "meal_plan_run_in_progress" }, 409);
+  if (runSetup.status === "existing") {
+    const plan = runSetup.plan ? mealPlanResponse(runSetup.plan) : null;
+    return c.json({ runId: runSetup.run.id, status: runSetup.run.status, plan, errorCode: runSetup.run.errorCode }, 200);
+  }
+
+  try {
+    const result = await runMealPlan({
+      userId,
+      runId,
+      idempotencyKey: parsed.data.idempotencyKey,
+      groupId: runSetup.groupId,
+      planVersion: runSetup.planVersion,
+      inputHash,
+      context: planning.context,
+      candidates: planning.candidates,
+    });
+    const [planRow] = result.planId ? await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+      return tx.select().from(plans).where(and(
+        eq(plans.userId, userId), eq(plans.id, result.planId!), eq(plans.kind, "meal"),
+      )).limit(1);
+    }) : [];
+    const plan = planRow ? mealPlanResponse(planRow) : null;
+    if (result.terminalStatus === "failed") return c.json({ runId, status: "failed", plan: null }, 422);
+    return c.json({ runId, status: "pending_review", plan }, 201);
+  } catch (error) {
+    const code = error instanceof Error && error.message.startsWith("openrouter_http_")
+      ? "meal_plan_provider_unavailable"
+      : error instanceof Error && error.message === "openrouter_not_configured"
+        ? "meal_planning_not_configured"
+        : "meal_plan_generation_failed";
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+      await tx.update(aiRuns).set({ status: "failed", errorCode: code, updatedAt: new Date() })
+        .where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId), eq(aiRuns.status, "running")));
+    });
+    return c.json({ runId, status: "failed", error: code }, 502);
+  }
+});
+
+app.get("/v1/ai-runs/:id", async (c) => {
+  const runId = c.req.param("id");
+  if (!isUuid(runId)) return c.json({ error: "invalid_ai_run_id" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [run] = await tx.select().from(aiRuns).where(and(
+      eq(aiRuns.userId, userId), eq(aiRuns.id, runId),
+    )).limit(1);
+    if (!run) return null;
+    const [plan] = run.resultPlanId ? await tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.id, run.resultPlanId), eq(plans.kind, "meal"),
+    )).limit(1) : [];
+    return { run, plan };
+  });
+  if (!result) return c.json({ error: "ai_run_not_found" }, 404);
+  return c.json({
+    run: {
+      id: result.run.id,
+      kind: result.run.kind,
+      status: result.run.status,
+      planId: result.run.resultPlanId,
+      errorCode: result.run.errorCode,
+      createdAt: result.run.createdAt.toISOString(),
+      updatedAt: result.run.updatedAt.toISOString(),
+    },
+    plan: result.plan ? mealPlanResponse(result.plan) : null,
+  });
+});
+
+app.patch("/v1/meal-plans/:id", async (c) => {
+  const planId = c.req.param("id");
+  if (!isUuid(planId)) return c.json({ error: "invalid_meal_plan_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = mealPlanEditRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_meal_plan_edit" }, 400);
+  const userId = c.get("session").user.id;
+  const [existing] = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.kind, "meal"), eq(plans.status, "draft"),
+    )).limit(1);
+  });
+  if (!existing) return c.json({ error: "meal_plan_draft_not_found" }, 404);
+  if (existing.editVersion !== parsed.data.baseEditVersion) {
+    return c.json({ error: "meal_plan_version_conflict", currentEditVersion: existing.editVersion }, 409);
+  }
+  const currentData = mealPlanDataSchema.safeParse(existing.data);
+  if (!currentData.success) return c.json({ error: "meal_plan_invalid" }, 409);
+  let data;
+  try {
+    data = await recalculateMealPlanEdit(userId, parsed.data, currentData.data.dailyCalorieTargetKcal, currentData.data.macroTargetsGrams);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "meal_plan_edit_invalid";
+    return c.json({ error: ["meal_plan_foods_required", "meal_plan_food_not_available", "meal_plan_edit_invalid"].includes(code) ? code : "meal_plan_edit_invalid" }, 422);
+  }
+  const [saved] = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return tx.update(plans).set({
+      data,
+      source: "manual",
+      editVersion: existing.editVersion + 1,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.kind, "meal"),
+      eq(plans.status, "draft"), eq(plans.editVersion, parsed.data.baseEditVersion),
+    )).returning();
+  });
+  if (!saved) return c.json({ error: "meal_plan_version_conflict" }, 409);
+  const plan = mealPlanResponse(saved);
+  if (!plan) return c.json({ error: "meal_plan_save_failed" }, 500);
+  return c.json({ plan });
+});
+
+app.post("/v1/meal-plans/:id/approve", async (c) => {
+  const planId = c.req.param("id");
+  if (!isUuid(planId)) return c.json({ error: "invalid_meal_plan_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = approveMealPlanRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_meal_plan_approval" }, 400);
+  const userId = c.get("session").user.id;
+  const reviewState = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [run] = await tx.select().from(aiRuns).where(and(
+      eq(aiRuns.userId, userId), eq(aiRuns.kind, "meal_plan"), eq(aiRuns.resultPlanId, planId),
+    )).limit(1);
+    const [plan] = await tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.kind, "meal"),
+    )).limit(1);
+    return { run, plan };
+  });
+  if (!reviewState.run || !reviewState.plan) return c.json({ error: "meal_plan_review_not_found" }, 404);
+  if (reviewState.run.status === "completed" || reviewState.run.status === "rejected") {
+    return c.json({ status: reviewState.run.status, plan: mealPlanResponse(reviewState.plan) });
+  }
+  if (reviewState.run.status !== "pending_review" || reviewState.plan.status !== "draft") {
+    return c.json({ error: "meal_plan_review_not_available", status: reviewState.run.status }, 409);
+  }
+  if (reviewState.plan.editVersion !== parsed.data.baseEditVersion) {
+    return c.json({ error: "meal_plan_version_conflict", currentEditVersion: reviewState.plan.editVersion }, 409);
+  }
+  try {
+    const result = await resumeMealPlan(reviewState.run.id, parsed.data);
+    if (result.terminalStatus === "stale") return c.json({ error: "meal_plan_review_stale" }, 409);
+    const [updated] = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+      return tx.select().from(plans).where(and(eq(plans.userId, userId), eq(plans.id, planId), eq(plans.kind, "meal"))).limit(1);
+    });
+    const plan = updated ? mealPlanResponse(updated) : null;
+    return c.json({ status: result.terminalStatus, plan });
+  } catch {
+    return c.json({ error: "meal_plan_review_failed" }, 409);
+  }
 });
 
 app.get("/v1/workout-plans", async (c) => {
