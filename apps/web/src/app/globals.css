@@ -149,8 +149,15 @@ a { color: inherit; text-decoration: none; }
 .photo-candidate-choices button { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 9px; font-weight: 600; cursor: pointer; }
 .photo-candidate-choices .photo-candidate-primary { border-color: var(--green); background: var(--green-soft); color: var(--green); }
 .food-results { display: grid; gap: 7px; max-height: 290px; overflow: auto; }
-.food-result { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); text-align: left; cursor: pointer; }
+.food-search-filters { display: flex; gap: 7px; margin: 10px 0; }
+.food-search-filters button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 650; cursor: pointer; }
+.food-search-filters button.food-filter-active { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+.food-result { min-height: 58px; display: flex; align-items: stretch; gap: 4px; padding: 4px 7px 4px 4px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
 .food-result-selected { border-color: var(--green); background: var(--green-soft); }
+.food-result-select { flex: 1; min-width: 0; min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px; border: 0; border-radius: 11px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.food-favorite-toggle { flex: 0 0 38px; align-self: center; width: 38px; height: 38px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 19px; cursor: pointer; }
+.food-favorite-toggle[aria-pressed="true"] { color: #4c8022; }
+.food-favorite-toggle:disabled { cursor: wait; opacity: .6; }
 .food-result-main, .daily-entry-main { min-width: 0; display: grid; gap: 4px; }
 .food-result-main strong, .daily-entry-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .food-result-main small, .food-result-kcal small, .daily-entry-main small, .daily-entry > strong small { color: var(--muted); font-size: 9px; font-weight: 500; }

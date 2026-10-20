@@ -21,6 +21,7 @@ export type FoodOption = {
   name: string;
   category: string;
   source: "shared_catalog" | "personal";
+  isFavorite: boolean;
   sourceNote: string;
   reviewed: boolean;
   caloriesKcalPer100g: number;
@@ -163,6 +164,8 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   const [foodView, setFoodView] = useState<"log" | "plan">("log");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
+  const [foodFilter, setFoodFilter] = useState<"all" | "favorites" | "recent">("all");
+  const [searchRevision, setSearchRevision] = useState(0);
   const [foods, setFoods] = useState<FoodOption[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodOption | null>(null);
   const [quantity, setQuantity] = useState("100");
@@ -171,6 +174,8 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [favoriteError, setFavoriteError] = useState("");
+  const [favoriteBusy, setFavoriteBusy] = useState<Record<string, boolean>>({});
 
   const [message, setMessage] = useState("");
   const [showCustomFood, setShowCustomFood] = useState(false);
@@ -183,7 +188,9 @@ export function FoodTrackingView({ day, onSaved }: Props) {
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      void requestJson<{ foods: FoodOption[] }>(`/v1/foods?query=${encodeURIComponent(query)}`, { signal: controller.signal })
+      const params = new URLSearchParams({ query });
+      if (foodFilter !== "all") params.set("view", foodFilter);
+      void requestJson<{ foods: FoodOption[] }>(`/v1/foods?${params.toString()}`, { signal: controller.signal })
         .then((response) => setFoods(response.foods))
         .catch((caught: unknown) => {
           if (caught instanceof DOMException && caught.name === "AbortError") return;
@@ -195,7 +202,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [query]);
+  }, [foodFilter, query, searchRevision]);
 
   async function recognizePhoto(file: File) {
     setPhotoBusy(true);
@@ -247,6 +254,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
       setMessage("Food entry saved.");
       setSelectedFood(null);
       setQuantity("100");
+      setSearchRevision((current) => current + 1);
       await onSaved();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save this food entry.");
@@ -261,6 +269,30 @@ export function FoodTrackingView({ day, onSaved }: Props) {
     setQuery(food.name);
     setShowCustomFood(false);
     setMessage("Personal food saved. Check the label values before logging.");
+  }
+
+  async function toggleFavorite(food: FoodOption) {
+    const favorite = !food.isFavorite;
+    const key = `${food.source}:${food.id}`;
+    setFavoriteError("");
+    setFavoriteBusy((current) => ({ ...current, [key]: true }));
+    try {
+      await requestJson(`/v1/foods/${encodeURIComponent(food.id)}/favorite`, {
+        method: "PUT",
+        body: JSON.stringify({ foodSource: food.source, favorite }),
+      });
+      setFoods((current) => current.flatMap((item) => {
+        if (item.id !== food.id || item.source !== food.source) return [item];
+        return foodFilter === "favorites" && !favorite ? [] : [{ ...item, isFavorite: favorite }];
+      }));
+      setSelectedFood((current) => current?.id === food.id && current.source === food.source
+        ? { ...current, isFavorite: favorite }
+        : current);
+    } catch (caught) {
+      setFavoriteError(caught instanceof Error ? caught.message : "Could not update this favorite.");
+    } finally {
+      setFavoriteBusy((current) => ({ ...current, [key]: false }));
+    }
   }
 
   return (
@@ -278,6 +310,11 @@ export function FoodTrackingView({ day, onSaved }: Props) {
         <div className="panel food-entry-panel">
           <div className="panel-heading"><div><span className="eyebrow">ADD A FOOD</span><h2>Search your catalog</h2></div><span className="panel-symbol">◉</span></div>
           <label className="field" htmlFor="food-search"><span>Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedFood(null); }} placeholder="Try dosa, rice, paneer…" autoComplete="off" /></label>
+          <div className="food-search-filters" role="group" aria-label="Filter food search results">
+            {(["all", "favorites", "recent"] as const).map((filter) => <button type="button" key={filter} aria-pressed={foodFilter === filter} className={foodFilter === filter ? "food-filter-active" : ""} onClick={() => setFoodFilter(filter)}>
+              {filter === "all" ? "All foods" : filter === "favorites" ? "Favorites" : "Recent"}
+            </button>)}
+          </div>
           <section className="photo-lookup" aria-labelledby="photo-lookup-title">
             <div className="photo-lookup-copy">
               <strong id="photo-lookup-title">Identify food from a photo</strong>
@@ -333,13 +370,23 @@ export function FoodTrackingView({ day, onSaved }: Props) {
           </section>
           {loading ? <p className="muted-copy">Searching your foods…</p> : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
-          {!loading && foods.length ? <div className="food-results" role="listbox" aria-label="Food search results">
-            {foods.map((food) => <button type="button" className={selectedFood?.id === food.id ? "food-result food-result-selected" : "food-result"} key={food.id} onClick={() => { setSelectedFood(food); setMessage(""); }}>
-              <span className="food-result-main"><strong>{food.name}</strong><small>{food.category.replaceAll("_", " ")} · {foodLabel(food)}</small></span>
-              <span className="food-result-kcal">{formatNumber(food.caloriesKcalPer100g)}<small> kcal / 100 g</small></span>
-            </button>)}
+          {favoriteError ? <p className="form-error" role="alert">{favoriteError}</p> : null}
+          {!loading && foods.length ? <div className="food-results" role="list" aria-label="Food search results">
+            {foods.map((food) => {
+              const key = `${food.source}:${food.id}`;
+              const selected = selectedFood?.id === food.id && selectedFood.source === food.source;
+              return <div className={selected ? "food-result food-result-selected" : "food-result"} role="listitem" key={key}>
+                <button type="button" className="food-result-select" aria-pressed={selected} onClick={() => { setSelectedFood(food); setMessage(""); }}>
+                  <span className="food-result-main"><strong>{food.name}</strong><small>{food.category.replaceAll("_", " ")} · {foodLabel(food)}</small></span>
+                  <span className="food-result-kcal">{formatNumber(food.caloriesKcalPer100g)}<small> kcal / 100 g</small></span>
+                </button>
+                <button type="button" className="food-favorite-toggle" aria-pressed={food.isFavorite} aria-label={food.isFavorite ? `Remove ${food.name} from favorites` : `Add ${food.name} to favorites`} disabled={favoriteBusy[key]} onClick={() => void toggleFavorite(food)}>
+                  {favoriteBusy[key] ? "…" : food.isFavorite ? "★" : "☆"}
+                </button>
+              </div>;
+            })}
           </div> : null}
-          {!loading && !foods.length && !error ? <div className="empty-inline"><strong>No match yet</strong><span>Add it as a personal food from its nutrition label or recipe.</span></div> : null}
+          {!loading && !foods.length && !error ? <div className="empty-inline"><strong>{foodFilter === "favorites" ? "No favorites match" : foodFilter === "recent" ? "No recent foods match" : "No match yet"}</strong><span>{foodFilter === "favorites" ? "Star foods from All foods to keep them here." : foodFilter === "recent" ? "Foods you log will appear here for quick access." : "Add it as a personal food from its nutrition label or recipe."}</span></div> : null}
           <button type="button" className="text-button add-custom-trigger" onClick={() => setShowCustomFood((current) => !current)}>{showCustomFood ? "Close personal food form" : "＋ Add a personal food"}</button>
           {showCustomFood ? <CustomFoodForm onCreated={customFoodCreated} onCancel={() => setShowCustomFood(false)} /> : null}
 

@@ -158,6 +158,11 @@ export const createCustomFoodRequestSchema = z.object({
   sourceNote: z.string().trim().min(1).max(160),
 }).strict();
 
+export const setFoodFavoriteRequestSchema = z.object({
+  foodSource: z.enum(["shared_catalog", "personal"]),
+  favorite: z.boolean(),
+}).strict();
+
 export const nutritionSnapshotSchema = z.object({
   caloriesKcal: z.number().finite().min(0),
   proteinG: z.number().finite().min(0),
@@ -619,6 +624,7 @@ export const syncPullQuerySchema = z.object({
 export type Profile = z.infer<typeof profileSchema>;
 export type ReminderPreferences = z.infer<typeof reminderPreferencesResponseSchema>;
 export type DeleteAccountRequest = z.infer<typeof deleteAccountRequestSchema>;
+export type SetFoodFavoriteRequest = z.infer<typeof setFoodFavoriteRequestSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;

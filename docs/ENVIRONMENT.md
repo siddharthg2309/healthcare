@@ -54,7 +54,7 @@ npm run db:migrate
 
 The command applies Better Auth and Drizzle application migrations, then prepares the official LangGraph checkpoint tables in the isolated `langgraph` schema. Review migration files before running them against production. Do not automatically run schema migrations as part of every Vercel build.
 
-Migration `0010_account_privacy.sql` forces row-level security on personal food, food-day status, plan, and AI-run tables and adds the user-delete cascades required by account deletion. Apply the full migration set before enabling account deletion in a deployed app. The endpoint checks that these constraints and protections exist before calling Better Auth; otherwise it returns an error without deleting the account.
+Migration `0010_account_privacy.sql` forces row-level security on personal food, food-day status, plan, and AI-run tables and adds the user-delete cascades required by account deletion. Migration `0011_food_favorites.sql` adds account-scoped favorites with forced row-level security and a user-delete cascade. Apply the full migration set before using these features. The account-deletion endpoint checks that the expected constraints and protections exist before calling Better Auth; otherwise it returns an error without deleting the account.
 
 ### Friend access
 

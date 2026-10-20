@@ -955,7 +955,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 4 — Food catalog and manual food tracking
 
-**Current status:** Search and manual logging work for shared catalog rows and per-account custom foods. Food entries support version-checked edits/deletion, and users can mark a local day complete. A local USDA import/review/publish CLI is available. The initial reviewed catalog itself, Indian-food coverage, aliases/portions, recipes, favorites, and multi-item/copy-meal helpers remain outstanding.
+**Current status:** Search and manual logging work for shared catalog rows and per-account custom foods. The search includes account-scoped favorites and recently logged foods across both catalog sources. Food entries support version-checked edits/deletion, and users can mark a local day complete. A local USDA import/review/publish CLI is available. The initial reviewed catalog itself, Indian-food coverage, aliases/portions, recipes, and multi-item/copy-meal helpers remain outstanding.
 
 - Create import/curation tools and the initial reviewed catalog of common group foods.
 - Add aliases, preparation states, portions, provenance, and catalog quality labels.

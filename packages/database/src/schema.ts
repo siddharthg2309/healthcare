@@ -229,6 +229,23 @@ export const userFoods = pgTable("user_foods", {
   }),
 ]).enableRLS();
 
+export const foodFavorites = pgTable("food_favorites", {
+  userId: text("user_id").notNull(),
+  foodSource: text("food_source").notNull(),
+  foodId: uuid("food_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.foodSource, table.foodId] }),
+  index("food_favorites_owner_created_idx").on(table.userId, table.createdAt),
+  check("food_favorites_source_valid", sql`${table.foodSource} IN ('shared_catalog', 'personal')`),
+  pgPolicy("food_favorites_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
 export const foodDayStatuses = pgTable("food_day_statuses", {
   userId: text("user_id").notNull(),
   localDate: text("local_date").notNull(),

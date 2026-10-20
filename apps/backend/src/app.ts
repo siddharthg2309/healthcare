@@ -1,10 +1,10 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq, ilike, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, lt, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, foodFavorites, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
   approveMealPlanRequestSchema,
   approveWorkoutPlanRequestSchema,
@@ -20,6 +20,7 @@ import {
   deleteFoodLogRequestSchema,
   exerciseProgressQuerySchema,
   foodPhotoRecognitionRequestSchema,
+  setFoodFavoriteRequestSchema,
   foodDayStatusRequestSchema,
   foodLogRecordSchema,
   goalProposalRequestSchema,
@@ -520,26 +521,72 @@ function calendarRedirect(c: Context<BackendEnv>, status: string): Response {
 }
 
 app.get("/v1/foods", async (c) => {
-  const query = new URL(c.req.url).searchParams.get("query")?.trim() ?? "";
+  const params = new URL(c.req.url).searchParams;
+  const query = params.get("query")?.trim() ?? "";
+  const view = params.get("view") ?? "all";
+  if (view !== "all" && view !== "favorites" && view !== "recent") {
+    return c.json({ error: "invalid_food_search_view" }, 400);
+  }
+  const favoritesOnly = view === "favorites";
+  const recentOnly = view === "recent";
   if (query.length > 80) return c.json({ error: "search_query_too_long" }, 400);
   const userId = c.get("session").user.id;
   const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-    const shared = await tx.select().from(catalogFoods).where(and(
-      eq(catalogFoods.active, true),
-      ilike(catalogFoods.name, pattern),
-    )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(30);
-    const personal = await tx.select().from(userFoods).where(ilike(userFoods.name, pattern))
-      .orderBy(asc(userFoods.name)).limit(20);
-    return { shared, personal };
+    const favorites = await tx.select({ foodId: foodFavorites.foodId, foodSource: foodFavorites.foodSource })
+      .from(foodFavorites).where(eq(foodFavorites.userId, userId));
+    const favoriteSharedIds = favorites.filter((item) => item.foodSource === "shared_catalog").map((item) => item.foodId);
+    const favoritePersonalIds = favorites.filter((item) => item.foodSource === "personal").map((item) => item.foodId);
+    const recentKeys: string[] = [];
+    if (recentOnly) {
+      const recentLogs = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+        eq(userRecords.userId, userId),
+        eq(userRecords.entity, "food_log"),
+        eq(userRecords.deleted, false),
+      )).orderBy(desc(userRecords.serverUpdatedAt)).limit(200);
+      const seen = new Set<string>();
+      for (const row of recentLogs) {
+        const parsed = foodLogRecordSchema.safeParse(row.data);
+        if (!parsed.success) continue;
+        const key = `${parsed.data.foodSource}:${parsed.data.foodId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        recentKeys.push(key);
+      }
+    }
+    const recentSharedIds = recentKeys.filter((key) => key.startsWith("shared_catalog:")).map((key) => key.slice("shared_catalog:".length));
+    const recentPersonalIds = recentKeys.filter((key) => key.startsWith("personal:")).map((key) => key.slice("personal:".length));
+    const sharedIds = favoritesOnly ? favoriteSharedIds : recentOnly ? recentSharedIds : [];
+    const personalIds = favoritesOnly ? favoritePersonalIds : recentOnly ? recentPersonalIds : [];
+    const shared = favoritesOnly || recentOnly
+      ? sharedIds.length ? await tx.select().from(catalogFoods).where(and(
+        inArray(catalogFoods.id, sharedIds),
+        eq(catalogFoods.active, true),
+        ilike(catalogFoods.name, pattern),
+      )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(100) : []
+      : await tx.select().from(catalogFoods).where(and(
+        eq(catalogFoods.active, true),
+        ilike(catalogFoods.name, pattern),
+      )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(30);
+    const personal = favoritesOnly || recentOnly
+      ? personalIds.length ? await tx.select().from(userFoods).where(and(
+        inArray(userFoods.id, personalIds),
+        eq(userFoods.userId, userId),
+        ilike(userFoods.name, pattern),
+      )).orderBy(asc(userFoods.name)).limit(100) : []
+      : await tx.select().from(userFoods).where(ilike(userFoods.name, pattern))
+        .orderBy(asc(userFoods.name)).limit(20);
+    return { shared, personal, favorites, recentKeys };
   });
+  const favoriteKeys = new Set(result.favorites.map((item) => `${item.foodSource}:${item.foodId}`));
   const foods = [
     ...result.shared.map((food) => ({
       id: food.id,
       name: food.name,
       category: food.category,
       source: "shared_catalog" as const,
+      isFavorite: favoriteKeys.has(`shared_catalog:${food.id}`),
       sourceNote: food.source,
       reviewed: food.reviewed,
       caloriesKcalPer100g: nutritionValue(food.caloriesKcalPer100g),
@@ -552,6 +599,7 @@ app.get("/v1/foods", async (c) => {
       name: food.name,
       category: food.category,
       source: "personal" as const,
+      isFavorite: favoriteKeys.has(`personal:${food.id}`),
       sourceNote: food.sourceNote,
       reviewed: false,
       caloriesKcalPer100g: nutritionValue(food.caloriesKcalPer100g),
@@ -560,7 +608,50 @@ app.get("/v1/foods", async (c) => {
       fatGPer100g: nutritionValue(food.fatGPer100g),
     })),
   ];
+  if (recentOnly) {
+    const recentOrder = new Map(result.recentKeys.map((key, index) => [key, index]));
+    foods.sort((left, right) => (recentOrder.get(`${left.source}:${left.id}`) ?? Number.MAX_SAFE_INTEGER)
+      - (recentOrder.get(`${right.source}:${right.id}`) ?? Number.MAX_SAFE_INTEGER));
+  }
   return c.json({ foods });
+});
+
+app.put("/v1/foods/:foodId/favorite", async (c) => {
+  const foodId = c.req.param("foodId");
+  if (!isUuid(foodId)) return c.json({ error: "invalid_food_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = setFoodFavoriteRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_favorite" }, 400);
+  const userId = c.get("session").user.id;
+  const saved = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    if (parsed.data.favorite) {
+      const [food] = parsed.data.foodSource === "shared_catalog"
+        ? await tx.select({ id: catalogFoods.id }).from(catalogFoods).where(and(
+          eq(catalogFoods.id, foodId), eq(catalogFoods.active, true),
+        )).limit(1)
+        : await tx.select({ id: userFoods.id }).from(userFoods).where(and(
+          eq(userFoods.id, foodId), eq(userFoods.userId, userId),
+        )).limit(1);
+      if (!food) return false;
+      await tx.insert(foodFavorites).values({ userId, foodSource: parsed.data.foodSource, foodId })
+        .onConflictDoNothing();
+    } else {
+      await tx.delete(foodFavorites).where(and(
+        eq(foodFavorites.userId, userId),
+        eq(foodFavorites.foodSource, parsed.data.foodSource),
+        eq(foodFavorites.foodId, foodId),
+      ));
+    }
+    return true;
+  });
+  if (!saved) return c.json({ error: "food_not_found" }, 404);
+  return c.json({ foodId, foodSource: parsed.data.foodSource, favorite: parsed.data.favorite });
 });
 
 app.post("/v1/foods/recognize-photo", async (c) => {
@@ -630,6 +721,7 @@ app.post("/v1/foods/custom", async (c) => {
       name: result.food.name,
       category: result.food.category,
       source: "personal",
+      isFavorite: false,
       sourceNote: result.food.sourceNote,
       reviewed: false,
       caloriesKcalPer100g: nutritionValue(result.food.caloriesKcalPer100g),
