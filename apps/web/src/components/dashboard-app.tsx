@@ -115,7 +115,7 @@ export function DashboardApp() {
           {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} /> : null}
           {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} onSaved={reloadData} /> : null}
           {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} onSaved={reloadData} /> : null}
-          {tab === "progress" ? <ProgressView goal={goal} measurements={measurements} onMeasurementAdded={reloadData} /> : null}
+          {tab === "progress" ? <ProgressView goal={goal} measurements={measurements} timezone={profile.timezone} onMeasurementAdded={reloadData} /> : null}
         </div>
       </main>
 
@@ -230,7 +230,7 @@ function HomeView({ profile, goal, measurements, day, onProgress }: { profile: P
       <section className="dashboard-grid">
         <article className="panel progress-panel">
           <div className="panel-heading"><div><span className="eyebrow">THE MAIN THING</span><h2>Your progress</h2></div><button className="inline-link" onClick={onProgress}>View graph <span aria-hidden="true">↗</span></button></div>
-          <GoalChart goal={goal} measurements={measurements} compact />
+          <GoalChart goal={goal} measurements={measurements} timezone={profile.timezone} compact />
           <div className="chart-legend"><span><i className="legend-plan" /> Goal path</span><span><i className="legend-actual" /> Your weigh-ins</span></div>
         </article>
         <article className="panel intake-panel">
@@ -248,7 +248,7 @@ function HomeView({ profile, goal, measurements, day, onProgress }: { profile: P
         <article className="panel checkin-panel">
           <div className="panel-heading"><div><span className="eyebrow">LATEST MEASUREMENT</span><h2>Weight</h2></div><span className="panel-symbol">↕</span></div>
           <div className="metric-main">{latest ? latest.data.weightKg.toFixed(1) : goal.startWeightKg.toFixed(1)}<small> kg</small></div>
-          <p className="muted-copy">{latest ? `Updated ${formatDate(latest.data.measuredAt.slice(0, 10))}` : "Baseline measurement"}</p>
+          <p className="muted-copy">{latest ? `Updated ${formatDate(dateAtTimezone(latest.data.measuredAt, profile.timezone))}` : "Baseline measurement"}</p>
           <button className="inline-link" onClick={onProgress}>Add a weigh-in <span aria-hidden="true">＋</span></button>
         </article>
       </section>
@@ -257,11 +257,23 @@ function HomeView({ profile, goal, measurements, day, onProgress }: { profile: P
   );
 }
 
-function ProgressView({ goal, measurements, onMeasurementAdded }: { goal: StoredGoal; measurements: Measurement[]; onMeasurementAdded: () => Promise<void> }) {
+function ProgressView({ goal, measurements, timezone, onMeasurementAdded }: { goal: StoredGoal; measurements: Measurement[]; timezone: string; onMeasurementAdded: () => Promise<void> }) {
   const [weight, setWeight] = useState("");
-  const [measuredAt, setMeasuredAt] = useState(() => new Date().toISOString().slice(0, 16));
+  const [measuredAt, setMeasuredAt] = useState(localDateTimeNow);
+  const [range, setRange] = useState<"30d" | "90d" | "all">("all");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const today = dateInTimezone(timezone);
+  const rangeEnd = range === "all" ? goal.targetDate : today < goal.startDate ? goal.startDate : today > goal.targetDate ? goal.targetDate : today;
+  const rangeStart = range === "all" ? goal.startDate : maxDate(goal.startDate, addDays(rangeEnd, range === "30d" ? -29 : -89));
+  const rangeMeasurements = measurements.filter((item) => {
+    const date = dateAtTimezone(item.data.measuredAt, timezone);
+    return date >= rangeStart && date <= rangeEnd;
+  }).sort((a, b) => a.data.measuredAt.localeCompare(b.data.measuredAt));
+  const latest = rangeMeasurements.at(-1);
+  const graphSummary = latest
+    ? progressSummary(goal, latest, timezone)
+    : `No weigh-ins recorded from ${formatDate(rangeStart)} to ${formatDate(rangeEnd)}. The dashed line is your target schedule, not a prediction.`;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -292,10 +304,16 @@ function ProgressView({ goal, measurements, onMeasurementAdded }: { goal: Stored
     <>
       <div className="page-heading"><div><span className="eyebrow">ACTUAL VS PLAN</span><h1>Your progress</h1><p>The dashed line is your chosen target path. Dots are measurements you recorded.</p></div></div>
       <section className="panel large-chart-panel">
-        <div className="panel-heading"><div><span className="eyebrow">WEIGHT · KG</span><h2>{goal.startWeightKg.toFixed(1)} <span className="heading-arrow">→</span> {goal.targetWeightKg.toFixed(1)}</h2></div><span className="date-chip">{formatDate(goal.startDate)} — {formatDate(goal.targetDate)}</span></div>
-        <GoalChart goal={goal} measurements={measurements} />
-        <div className="chart-legend"><span><i className="legend-plan" /> Target path</span><span><i className="legend-actual" /> Measured trend</span><span><i className="legend-point" /> Weigh-in</span></div>
-        <p className="chart-caption">The target line is a schedule, not a prediction. Changes in actual weight are expected.</p>
+        <div className="progress-chart-toolbar">
+          <div className="panel-heading"><div><span className="eyebrow">WEIGHT · KG</span><h2>{goal.startWeightKg.toFixed(1)} <span className="heading-arrow">→</span> {goal.targetWeightKg.toFixed(1)}</h2></div><span className="date-chip">{formatDate(rangeStart)} — {formatDate(rangeEnd)}</span></div>
+          <div className="range-switch" role="group" aria-label="Graph date range">
+            {[{ value: "30d", label: "30 days" }, { value: "90d", label: "90 days" }, { value: "all", label: "Full goal" }].map((item) => <button key={item.value} type="button" className={range === item.value ? "range-button range-button-active" : "range-button"} aria-pressed={range === item.value} onClick={() => setRange(item.value as typeof range)}>{item.label}</button>)}
+          </div>
+        </div>
+        <GoalChart goal={goal} measurements={measurements} timezone={timezone} rangeStart={rangeStart} rangeEnd={rangeEnd} />
+        <div className="chart-legend"><span><i className="legend-plan" /> Target path</span><span><i className="legend-actual" /> Recorded weigh-ins</span><span><i className="legend-point" /> Measurement</span></div>
+        <p className="chart-summary" aria-live="polite">{graphSummary}</p>
+        <p className="chart-caption">The target line is a schedule, not a prediction. Day-to-day body weight can vary.</p>
       </section>
       <section className="progress-lower-grid">
         <form className="panel weigh-in-form" onSubmit={(event) => void submit(event)}>
@@ -305,14 +323,14 @@ function ProgressView({ goal, measurements, onMeasurementAdded }: { goal: Stored
           <button className="button button-primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save measurement"}</button>
         </form>
         <section className="panel history-panel"><div className="panel-heading"><div><span className="eyebrow">YOUR RECORDS</span><h2>Recent weigh-ins</h2></div><span className="count-badge">{measurements.length}</span></div>
-          {measurements.length ? <div className="measurement-list">{[...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt)).slice(0, 8).map((item) => <div className="measurement-row" key={item.id}><span>{formatDate(item.data.measuredAt.slice(0, 10))}</span><strong>{item.data.weightKg.toFixed(1)} kg</strong></div>)}</div> : <p className="muted-copy">Your first measurement is saved as the baseline.</p>}
+          {measurements.length ? <div className="measurement-list">{[...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt)).slice(0, 8).map((item) => <div className="measurement-row" key={item.id}><span>{formatDate(dateAtTimezone(item.data.measuredAt, timezone))}</span><strong>{item.data.weightKg.toFixed(1)} kg</strong></div>)}</div> : <p className="muted-copy">Your first measurement is saved as the baseline.</p>}
         </section>
       </section>
     </>
   );
 }
 
-function GoalChart({ goal, measurements, compact = false }: { goal: StoredGoal; measurements: Measurement[]; compact?: boolean }) {
+function GoalChart({ goal, measurements, timezone, compact = false, rangeStart = goal.startDate, rangeEnd = goal.targetDate }: { goal: StoredGoal; measurements: Measurement[]; timezone: string; compact?: boolean; rangeStart?: string; rangeEnd?: string }) {
   const width = 720;
   const height = compact ? 218 : 340;
   const left = 48;
@@ -320,34 +338,77 @@ function GoalChart({ goal, measurements, compact = false }: { goal: StoredGoal; 
   const top = 18;
   const bottom = height - 34;
   const validMeasurements = measurements.filter((item) => {
-    const measuredDate = item.data.measuredAt.slice(0, 10);
-    return measuredDate >= goal.startDate && measuredDate <= goal.targetDate;
+    const measuredDate = dateAtTimezone(item.data.measuredAt, timezone);
+    return measuredDate >= rangeStart && measuredDate <= rangeEnd;
   }).sort((a, b) => a.data.measuredAt.localeCompare(b.data.measuredAt));
-  const allWeights = [...goal.trajectory.map((point) => point.targetWeightKg), ...validMeasurements.map((item) => item.data.weightKg)];
+  const interiorPlanPoints = goal.trajectory.filter((point) => point.date > rangeStart && point.date < rangeEnd);
+  const planPoints = [
+    { date: rangeStart, targetWeightKg: targetWeightAt(goal, rangeStart) },
+    ...interiorPlanPoints,
+    ...(rangeEnd > rangeStart ? [{ date: rangeEnd, targetWeightKg: targetWeightAt(goal, rangeEnd) }] : []),
+  ];
+  const allWeights = [...planPoints.map((point) => point.targetWeightKg), ...validMeasurements.map((item) => item.data.weightKg)];
   const low = Math.min(...allWeights);
   const high = Math.max(...allWeights);
   const padding = Math.max((high - low) * 0.2, 0.4);
   const min = low - padding;
   const max = high + padding;
-  const startMs = Date.parse(`${goal.startDate}T00:00:00Z`);
-  const totalMs = Math.max(1, Date.parse(`${goal.targetDate}T00:00:00Z`) - startMs);
+  const startMs = Date.parse(`${rangeStart}T00:00:00Z`);
+  const totalMs = Math.max(1, Date.parse(`${rangeEnd}T00:00:00Z`) - startMs);
   const xAt = (date: string) => left + Math.max(0, Math.min(1, (Date.parse(`${date.slice(0, 10)}T00:00:00Z`) - startMs) / totalMs)) * (width - left - right);
   const yAt = (value: number) => top + ((max - value) / (max - min)) * (bottom - top);
-  const planPath = goal.trajectory.map((point, index) => `${index ? "L" : "M"} ${xAt(point.date)} ${yAt(point.targetWeightKg)}`).join(" ");
-  const actualPath = validMeasurements.map((item, index) => `${index ? "L" : "M"} ${xAt(item.data.measuredAt)} ${yAt(item.data.weightKg)}`).join(" ");
+  const planPath = planPoints.map((point, index) => `${index ? "L" : "M"} ${xAt(point.date)} ${yAt(point.targetWeightKg)}`).join(" ");
+  const actualPath = validMeasurements.map((item, index) => `${index ? "L" : "M"} ${xAt(dateAtTimezone(item.data.measuredAt, timezone))} ${yAt(item.data.weightKg)}`).join(" ");
   const ticks = Array.from({ length: 4 }, (_, index) => min + ((max - min) * index) / 3);
-  const labelDates = [goal.startDate, goal.trajectory[Math.floor(goal.trajectory.length / 2)]?.date ?? goal.targetDate, goal.targetDate];
+  const midDate = addDays(rangeStart, Math.round((Date.parse(`${rangeEnd}T00:00:00Z`) - startMs) / 2 / 86_400_000));
+  const labelDates = [rangeStart, midDate, rangeEnd];
+  const showTargetMarker = goal.targetDate >= rangeStart && goal.targetDate <= rangeEnd;
   return (
     <div className={compact ? "goal-chart goal-chart-compact" : "goal-chart"}>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Goal progress graph from ${goal.startWeightKg} kilograms to ${goal.targetWeightKg} kilograms, with ${validMeasurements.length} recorded weigh-ins`} preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Weight graph from ${formatDate(rangeStart)} to ${formatDate(rangeEnd)}. The target path runs from ${goal.startWeightKg} to ${goal.targetWeightKg} kilograms. ${validMeasurements.length} weigh-ins are recorded in this range.`} preserveAspectRatio="none">
         {ticks.map((tick) => <g key={tick}><line x1={left} y1={yAt(tick)} x2={width - right} y2={yAt(tick)} className="chart-gridline" /><text x={left - 8} y={yAt(tick) + 4} textAnchor="end" className="chart-axis-label">{tick.toFixed(1)}</text></g>)}
+        {showTargetMarker ? <line x1={xAt(goal.targetDate)} y1={top} x2={xAt(goal.targetDate)} y2={bottom} className="chart-goal-marker" /> : null}
         <path d={planPath} className="chart-plan-path" />
         {actualPath ? <path d={actualPath} className="chart-actual-path" /> : null}
-        {validMeasurements.map((item) => <circle key={item.id} cx={xAt(item.data.measuredAt)} cy={yAt(item.data.weightKg)} r={compact ? 4.5 : 6} className="chart-actual-dot"><title>{`${item.data.weightKg.toFixed(1)} kg on ${formatDate(item.data.measuredAt.slice(0, 10))}`}</title></circle>)}
+        {validMeasurements.map((item) => <circle key={item.id} cx={xAt(dateAtTimezone(item.data.measuredAt, timezone))} cy={yAt(item.data.weightKg)} r={compact ? 4.5 : 6} className="chart-actual-dot"><title>{`${item.data.weightKg.toFixed(1)} kg on ${formatDate(dateAtTimezone(item.data.measuredAt, timezone))}`}</title></circle>)}
+        {showTargetMarker ? <circle cx={xAt(goal.targetDate)} cy={yAt(goal.targetWeightKg)} r="5" className="chart-target-dot"><title>{`Target weight ${goal.targetWeightKg.toFixed(1)} kg by ${formatDate(goal.targetDate)}`}</title></circle> : null}
         {labelDates.map((date, index) => <text key={`${date}-${index}`} x={xAt(date)} y={height - 7} textAnchor={index === 0 ? "start" : index === 2 ? "end" : "middle"} className="chart-axis-label">{compact ? formatShortDate(date) : formatDate(date)}</text>)}
       </svg>
     </div>
   );
+}
+
+function targetWeightAt(goal: StoredGoal, date: string): number {
+  const points = goal.trajectory;
+  const before = [...points].reverse().find((point) => point.date <= date);
+  const after = points.find((point) => point.date >= date);
+  if (!before) return points[0]?.targetWeightKg ?? goal.startWeightKg;
+  if (!after || after.date === before.date) return before.targetWeightKg;
+  const elapsed = Date.parse(`${date}T00:00:00Z`) - Date.parse(`${before.date}T00:00:00Z`);
+  const span = Date.parse(`${after.date}T00:00:00Z`) - Date.parse(`${before.date}T00:00:00Z`);
+  const fraction = span > 0 ? elapsed / span : 0;
+  return before.targetWeightKg + (after.targetWeightKg - before.targetWeightKg) * fraction;
+}
+
+function addDays(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function maxDate(left: string, right: string): string {
+  return left > right ? left : right;
+}
+
+function progressSummary(goal: StoredGoal, latest: Measurement, timezone: string): string {
+  const date = dateAtTimezone(latest.data.measuredAt, timezone);
+  if (date < goal.startDate || date > goal.targetDate) {
+    return `Latest weigh-in: ${latest.data.weightKg.toFixed(1)} kg on ${formatDate(date)}. This measurement is outside the current goal timeline.`;
+  }
+  const target = targetWeightAt(goal, date);
+  const difference = latest.data.weightKg - target;
+  const relation = Math.abs(difference) < 0.05
+    ? "on the target path"
+    : `${Math.abs(difference).toFixed(1)} kg ${difference < 0 ? "below" : "above"} the target path`;
+  return `Latest weigh-in: ${latest.data.weightKg.toFixed(1)} kg on ${formatDate(date)}; target path that day: ${target.toFixed(1)} kg (${relation}).`;
 }
 
 function Macro({ label, value, color }: { label: string; value: number; color: string }) {
@@ -362,17 +423,27 @@ function dayGreeting(): string {
 }
 
 function formatDate(value: string): string {
-  const date = new Date(`${value.slice(0, 10)}T12:00:00`);
-  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(date);
+  const date = new Date(`${value.slice(0, 10)}T12:00:00Z`);
+  return new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" }).format(date);
 }
 
 function formatShortDate(value: string): string {
-  const date = new Date(`${value.slice(0, 10)}T12:00:00`);
-  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(date);
+  const date = new Date(`${value.slice(0, 10)}T12:00:00Z`);
+  return new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", day: "numeric", month: "short" }).format(date);
 }
 
 function dateInTimezone(timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "00";
-  return `${value("year")}-${value("month")}-${value("day")}`;
+  return dateAtTimezone(new Date().toISOString(), timezone);
+}
+
+function dateAtTimezone(instant: string, timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(instant));
+  const partValue = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${partValue("year")}-${partValue("month")}-${partValue("day")}`;
+}
+
+function localDateTimeNow(): string {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
 }

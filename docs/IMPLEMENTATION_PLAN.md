@@ -961,7 +961,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 5 — Signature progress graph and daily dashboard
 
-**Current status:** The dashboard and Progress page render the accepted target trajectory beside recorded weigh-ins, with a weight-entry form. This first graph does not yet include range controls, trend smoothing, goal-revision annotations, or the full weekly review/context panel.
+**Current status:** The dashboard and Progress page render the accepted target trajectory beside timezone-aware weigh-ins, with a weight-entry form, 30/90-day and full-goal ranges, a target-date marker, and a written comparison summary. Trend smoothing, goal-revision annotations, and the full weekly review/context panel remain outstanding.
 
 - Connect actual measurements and the accepted goal trajectory to the main graph.
 - Add measured points, a trend line, target/date marker, range controls, and goal-revision annotations.
