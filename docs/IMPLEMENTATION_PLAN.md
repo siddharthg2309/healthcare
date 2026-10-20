@@ -662,7 +662,7 @@ Record a snapshot of the name, serving conversion, and calculated nutrient value
 | --- | --- | --- |
 | `exercise_catalog` | name, category, equipment, units, technique, alternatives, review/source | Stable IDs and supported metadata |
 | `workout_templates` | experience, goal category, weekly frequency, template version | Reviewed starting structures |
-| `plans` | owner, kind, goal version, source run, parent plan, status, version, approval time | `draft`, `awaiting_review`, `active`, `superseded`, `rejected`, `stale`, `archived` |
+| `plans` | owner, kind, plan group, version, edit version, source, status, JSONB snapshot, approval time | Current workout versions use a validated structured snapshot; drafts are editable, active versions are immutable, and each group has one active and one draft version at most |
 | `meal_plan_days` | plan ID, local date/day index | Structured weekly schedule |
 | `meal_plan_items` | day ID, meal slot, nutrient-version ID, grams, portion label, derived totals | Same food references as manual logs |
 | `workout_plan_sessions` | plan ID, weekday/date, start time, duration, session purpose | Weekly split and scheduling |
@@ -676,7 +676,7 @@ Record a snapshot of the name, serving conversion, and calculated nutrient value
 | `activity_links` | manual record, imported record, relation/reconciliation choice | Future imported-source reconciliation to prevent duplicate energy |
 | `daily_summaries` | owner/day/timezone, food totals, completeness, selected steps/activity, target version, computation version | Derived cache; rebuildable |
 
-Manual plans use the same `plans` and structured child tables. Accepting a meal plan does not automatically mark its food as consumed. Completing a workout plan item creates/links actual activity records rather than editing the planned exercise.
+The PWA workout-plan editor stores sessions and exercise targets in the versioned `plans.data` snapshot. This keeps each proposed or approved revision together while the first release is online-first. Accepting a meal plan does not automatically mark its food as consumed. Starting a planned workout only prefills a blank activity form; actual performance is saved separately after the user enters what they completed.
 
 ### 11.5 Integrations and operational tables
 
@@ -757,6 +757,11 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | POST /v1/food-logs | Save an idempotent food entry with a nutrition snapshot |
 | PATCH/DELETE /v1/food-logs/:id | Version-checked changes and soft deletion |
 | POST /v1/activity-logs | Save manually entered steps or activity duration |
+| GET /v1/workout-plans | List the signed-in user's draft and approved workout plan versions |
+| POST /v1/workout-plans | Create a draft from a reviewed template or manual input |
+| PATCH /v1/workout-plans/:id | Save a draft with an edit-version check |
+| POST /v1/workout-plans/:id/revise | Copy the active plan into a new draft version |
+| POST /v1/workout-plans/:id/approve | Revalidate and activate the draft; supersede the prior active version |
 | GET /v1/days/:date | Timezone-aware food/activity records and calorie/macro/step totals |
 | GET /v1/exercises/:exerciseId/progress?range=30d\|90d\|365d | Daily reps, load, and timed-hold performance from that account's logged sets |
 | PUT /v1/days/:date/food-status | Mark the food log complete or incomplete for a local date |
@@ -972,10 +977,10 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 6 — Exercise, user plans, and manual activity
 
-**Current status:** Manual steps/walks/cardio and structured strength sessions are implemented. Strength logs support version-checked edits, soft deletion, date-selectable cross-day history, rep-based sets with optional load, and timed holds. The `starter-v2` catalog contains 47 curated exercises with stable IDs, movement patterns, equipment, primary muscles, technique cues, easier alternatives where available, tracking mode, and typical rest guidance. Three starter templates (two-day bodyweight, three-day dumbbell, and three-day gym) can prefill a session form; targets stay separate from completed logs. Progress now has an exercise-specific graph for daily best reps, best load, or longest timed hold, separate from the body-weight graph. Persistent user plans, schedule editing, activity provenance labels, and broader catalog coverage remain outstanding.
+**Current status:** Manual steps/walks/cardio and structured strength sessions are implemented. Strength logs support version-checked edits, soft deletion, date-selectable cross-day history, rep-based sets with optional load, and timed holds. The `starter-v2` catalog contains 47 curated exercises with stable IDs, movement patterns, equipment, primary muscles, technique cues, easier alternatives where available, tracking mode, and typical rest guidance. Three starter templates can prefill actual session logs or create persistent editable weekly plan drafts. Plans support weekday schedules, exercise and set targets, optimistic edits, explicit activation, immutable approved versions, revision history, and starting a session with blank actual-performance fields. Progress also has an exercise-specific graph for daily best reps, best load, or longest timed hold, separate from the body-weight graph. Activity provenance labels and broader catalog coverage remain outstanding.
 
 - Continue reviewing and expanding the exercise catalog and starter workout templates.
-- Add suggested and user-authored workout plans with weekly scheduling and approved plan versions.
+- Expand plans with AI-generated, reviewed drafts and explicit plan-to-completion links after the workout-planning workflow is implemented.
 - Continue reviewing and improving exercise-specific progress metrics.
 - Add source/provenance labels to activity and calorie estimates.
 - Keep exercise progress separate from the body-weight graph; do not invent calorie-burn values.

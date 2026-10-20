@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { WorkoutExercise } from "@healthcare/contracts";
 import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
+import type { WorkoutPlanSession } from "@healthcare/contracts";
 import {
   postJson,
   requestJson,
 } from "@/lib/api";
+import { WorkoutPlansPanel } from "./workout-plans-panel";
 
 export type FoodOption = {
   id: string;
@@ -513,6 +515,30 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setError("");
   }
 
+  function startPlannedSession(planName: string, session: WorkoutPlanSession) {
+    setEditingId(null);
+    setEditingVersion(null);
+    setActivityType("strength");
+    setOccurredAt(dateTimeForDay(viewDate, day.date));
+    setDurationMinutes("");
+    setSteps("");
+    setNotes("");
+    setWorkoutTitle(`${planName} · ${session.label}`);
+    setExercises(session.exercises.flatMap((target) => {
+      const exercise = findExerciseById(target.exerciseId);
+      if (!exercise) return [];
+      return [{
+        exerciseId: exercise.id,
+        exerciseName: exercise.name,
+        trackingMode: exercise.trackingMode,
+        sets: Array.from({ length: target.sets }, () => ({ reps: "", durationSeconds: "", loadKg: "" })),
+      }];
+    }));
+    setError("");
+    setMessage("Plan targets loaded. Enter the reps, hold times, and loads you actually complete.");
+    window.requestAnimationFrame(() => document.getElementById("activity-entry-form")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
   async function removeActivity(item: ActivityLog) {
     const name = item.data.workoutTitle ?? item.data.activityType;
     if (!window.confirm(`Delete ${name} from this activity log?`)) return;
@@ -590,8 +616,9 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
 
   return <>
     <div className="page-heading"><div><span className="eyebrow">ACTIVITY TRACKING</span><h1>Record your movement</h1><p>Enter steps or a workout. Health Connect is not available in this web app.</p></div><span className="date-chip">{viewDate}</span></div>
+    <WorkoutPlansPanel unitSystem={unitSystem} onStartSession={startPlannedSession} />
     <section className="tracking-grid">
-      <form className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
+      <form id="activity-entry-form" className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
         <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : viewDate === day.date ? "Today’s activity" : "Activity for this day"}</h2></div><span className="panel-symbol">↗</span></div>
         <div className="form-grid">
           <label className="field"><span>Activity</span><select value={activityType} onChange={(event) => setActivityType(event.target.value as ActivityLog["data"]["activityType"])}><option value="steps">Steps</option><option value="walk">Walk</option><option value="cardio">Cardio</option><option value="strength">Strength session</option><option value="other">Other</option></select></label>

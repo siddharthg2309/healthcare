@@ -23,6 +23,9 @@ export const recordEntity = pgEnum("record_entity", [
   "goal",
 ]);
 
+export const planKind = pgEnum("plan_kind", ["workout"]);
+export const planStatus = pgEnum("plan_status", ["draft", "active", "superseded", "archived"]);
+
 export const userProfiles = pgTable("user_profiles", {
   userId: text("user_id").primaryKey(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
@@ -30,6 +33,37 @@ export const userProfiles = pgTable("user_profiles", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, () => [
   pgPolicy("user_profiles_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
+// Each row is an immutable approved version or an editable draft snapshot.
+// Session and exercise details stay together so a version can be copied and
+// reviewed as one validated document.
+export const plans = pgTable("plans", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: text("user_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  kind: planKind("kind").default("workout").notNull(),
+  version: integer("version").notNull(),
+  editVersion: integer("edit_version").default(1).notNull(),
+  status: planStatus("status").default("draft").notNull(),
+  source: text("source").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+}, (table) => [
+  uniqueIndex("plans_owner_group_version_idx").on(table.userId, table.groupId, table.version),
+  uniqueIndex("plans_owner_active_group_idx").on(table.userId, table.groupId).where(sql`${table.status} = 'active'`),
+  uniqueIndex("plans_owner_draft_group_idx").on(table.userId, table.groupId).where(sql`${table.status} = 'draft'`),
+  index("plans_owner_updated_idx").on(table.userId, table.updatedAt),
+  check("plans_version_positive", sql`${table.version} > 0 AND ${table.editVersion} > 0`),
+  check("plans_source_valid", sql`${table.source} IN ('template', 'manual', 'ai')`),
+  pgPolicy("plans_owner_policy", {
     for: "all",
     to: "public",
     using: sql`user_id = current_setting('app.user_id', true)`,

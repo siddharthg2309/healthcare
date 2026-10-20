@@ -175,6 +175,37 @@ a { color: inherit; text-decoration: none; }
 .workout-exercise-card > .text-button { justify-self: start; min-height: 34px; margin: 0; }
 .workout-exercise-card > .text-button:disabled { opacity: .45; cursor: not-allowed; }
 .workout-exercise-builder > .button { justify-self: start; }
+.workout-plans-panel { display: grid; gap: 13px; margin-bottom: 16px; }
+.workout-plans-panel .panel-heading { margin-bottom: 0; }
+.workout-plan-create-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+.workout-plan-create-row .field { min-width: 0; }
+.workout-plan-list { display: grid; gap: 11px; }
+.workout-plan-card, .workout-plan-editor { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-soft); }
+.workout-plan-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.workout-plan-title-row h3, .workout-plan-editor h3 { margin: 4px 0; font-size: 14px; letter-spacing: -.035em; }
+.workout-plan-title-row p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.plan-status { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.plan-status-active { background: var(--lime-pale); color: var(--green); }
+.plan-status-draft { background: var(--surface); color: var(--green); }
+.plan-status-superseded, .plan-status-archived { background: var(--surface); color: var(--faint); }
+.workout-plan-session-list, .workout-plan-editor-sessions, .workout-plan-edit-exercises { display: grid; gap: 8px; }
+.workout-plan-session { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 9px 10px; border-radius: 13px; background: var(--surface); }
+.workout-plan-session > div { display: grid; gap: 3px; }
+.workout-plan-session strong { font-size: 9px; }
+.workout-plan-session small { color: var(--muted); font-size: 8px; }
+.workout-plan-session .text-button { flex: 0 0 auto; margin: 0; padding-inline: 3px; }
+.workout-plan-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.workout-plan-actions .button { min-height: 40px; }
+.plan-history { color: var(--muted); font-size: 9px; }
+.plan-history summary { cursor: pointer; }
+.plan-history ul { display: grid; gap: 5px; padding-left: 16px; line-height: 1.5; }
+.workout-plan-editor { margin-top: 2px; background: var(--surface); }
+.workout-plan-editor > .panel-heading { margin-bottom: 0; }
+.workout-plan-edit-session { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-soft); }
+.workout-plan-edit-exercise { display: grid; gap: 8px; padding: 10px; border-radius: 13px; background: var(--surface); }
+.workout-plan-edit-exercise .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workout-plan-edit-exercise .field input, .workout-plan-edit-exercise .field select, .workout-plan-edit-session .field input, .workout-plan-edit-session .field select, .workout-plan-editor > .field input { background: #fbfcfa; }
+.workout-plans-panel > .muted-copy { margin: -7px 0 0; }
 .nutrition-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; border: 1px solid rgba(54, 91, 54, .12); border-radius: 15px; background: var(--surface); color: var(--muted); font-size: 10px; }
 .nutrition-preview strong { grid-column: span 2; color: var(--ink); font-size: 18px; letter-spacing: -.04em; }
 .custom-food-form { border: 1px solid var(--line); background: #fbfcfa; }
@@ -294,6 +325,8 @@ a { color: inherit; text-decoration: none; }
   .progress-lower-grid { grid-template-columns: 1.1fr .9fr; gap: 16px; }
   .tracking-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workout-plan-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workout-plan-editor { grid-column: 1 / -1; }
   .form-grid-four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .form-card { padding: 23px; }
   .auth-page { grid-template-columns: minmax(0, 1.1fr) minmax(330px, .9fr); max-width: 1100px; margin: auto; padding: 36px; }

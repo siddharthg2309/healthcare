@@ -4,13 +4,15 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { catalogFoods, foodDayStatuses, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { catalogFoods, foodDayStatuses, plans, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
+  approveWorkoutPlanRequestSchema,
   activityLogRecordSchema,
   acceptGoalRequestSchema,
   createActivityLogRequestSchema,
   createCustomFoodRequestSchema,
   createFoodLogRequestSchema,
+  createWorkoutPlanRequestSchema,
   createMeasurementRequestSchema,
   deleteActivityLogRequestSchema,
   deleteFoodLogRequestSchema,
@@ -22,8 +24,11 @@ import {
   profileSchema,
   syncPullQuerySchema,
   syncPushSchema,
+  updateWorkoutPlanRequestSchema,
   updateActivityLogRequestSchema,
   updateFoodLogRequestSchema,
+  workoutPlanDataSchema,
+  type WorkoutPlanData,
 } from "@healthcare/contracts";
 import { buildGoalProposal, findExerciseById } from "@healthcare/domain";
 import { auth } from "./auth/config.js";
@@ -129,6 +134,31 @@ function shiftLocalDate(value: string, days: number): string {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function hasValidPlanExercises(data: WorkoutPlanData): boolean {
+  return data.sessions.every((session) => session.exercises.every((target) => {
+    const exercise = findExerciseById(target.exerciseId);
+    return exercise !== undefined && exercise.trackingMode === target.trackingMode;
+  }));
+}
+
+function workoutPlanResponse(row: typeof plans.$inferSelect) {
+  const data = workoutPlanDataSchema.safeParse(row.data);
+  if (!data.success || !["template", "manual", "ai"].includes(row.source)) return null;
+  return {
+    id: row.id,
+    groupId: row.groupId,
+    kind: row.kind,
+    version: row.version,
+    editVersion: row.editVersion,
+    status: row.status,
+    source: row.source as "template" | "manual" | "ai",
+    data: data.data,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    approvedAt: row.approvedAt?.toISOString() ?? null,
+  };
 }
 
 async function appendSyncChange(
@@ -708,6 +738,178 @@ app.put("/v1/days/:date/food-status", async (c) => {
     }).returning({ localDate: foodDayStatuses.localDate, complete: foodDayStatuses.complete, updatedAt: foodDayStatuses.updatedAt });
   });
   return c.json(saved);
+});
+
+app.get("/v1/workout-plans", async (c) => {
+  const userId = c.get("session").user.id;
+  const rows = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return tx.select().from(plans).where(and(
+      eq(plans.userId, userId),
+      eq(plans.kind, "workout"),
+    )).orderBy(desc(plans.updatedAt)).limit(100);
+  });
+  return c.json({ plans: rows.map(workoutPlanResponse).filter((plan) => plan !== null) });
+});
+
+app.post("/v1/workout-plans", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = createWorkoutPlanRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_workout_plan" }, 400);
+  if (!hasValidPlanExercises(parsed.data.data)) return c.json({ error: "invalid_exercise_reference" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existingId] = await tx.select({ id: plans.id }).from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.id, parsed.data.planId),
+    )).limit(1);
+    if (existingId) return { status: "id_conflict" as const };
+    const [existingDraft] = await tx.select({ id: plans.id }).from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.groupId, parsed.data.groupId), eq(plans.status, "draft"),
+    )).limit(1);
+    if (existingDraft) return { status: "draft_conflict" as const };
+    const [saved] = await tx.insert(plans).values({
+      id: parsed.data.planId,
+      userId,
+      groupId: parsed.data.groupId,
+      kind: "workout",
+      version: 1,
+      editVersion: 1,
+      status: "draft",
+      source: parsed.data.source,
+      data: parsed.data.data,
+    }).returning();
+    return saved ? { status: "saved" as const, row: saved } : { status: "save_failed" as const };
+  });
+  if (result.status === "id_conflict") return c.json({ error: "workout_plan_id_conflict" }, 409);
+  if (result.status === "draft_conflict") return c.json({ error: "workout_plan_draft_exists" }, 409);
+  if (result.status === "save_failed") return c.json({ error: "workout_plan_save_failed" }, 500);
+  const plan = workoutPlanResponse(result.row);
+  if (!plan) return c.json({ error: "workout_plan_save_failed" }, 500);
+  return c.json({ plan }, 201);
+});
+
+app.patch("/v1/workout-plans/:id", async (c) => {
+  const planId = c.req.param("id");
+  if (!isUuid(planId)) return c.json({ error: "invalid_workout_plan_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = updateWorkoutPlanRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_workout_plan_update" }, 400);
+  if (!hasValidPlanExercises(parsed.data.data)) return c.json({ error: "invalid_exercise_reference" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.kind, "workout"),
+    )).for("update").limit(1);
+    if (!existing) return { status: "missing" as const };
+    if (existing.status !== "draft") return { status: "not_draft" as const };
+    if (existing.editVersion !== parsed.data.baseEditVersion) return { status: "conflict" as const, version: existing.editVersion };
+    const [saved] = await tx.update(plans).set({
+      data: parsed.data.data,
+      source: "manual",
+      editVersion: existing.editVersion + 1,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.status, "draft"), eq(plans.editVersion, parsed.data.baseEditVersion),
+    )).returning();
+    return saved ? { status: "saved" as const, row: saved } : { status: "conflict" as const, version: existing.editVersion + 1 };
+  });
+  if (result.status === "missing") return c.json({ error: "workout_plan_not_found" }, 404);
+  if (result.status === "not_draft") return c.json({ error: "approved_workout_plan_is_immutable" }, 409);
+  if (result.status === "conflict") return c.json({ error: "workout_plan_version_conflict", currentEditVersion: result.version }, 409);
+  const plan = workoutPlanResponse(result.row);
+  if (!plan) return c.json({ error: "workout_plan_save_failed" }, 500);
+  return c.json({ plan });
+});
+
+app.post("/v1/workout-plans/:id/revise", async (c) => {
+  const planId = c.req.param("id");
+  if (!isUuid(planId)) return c.json({ error: "invalid_workout_plan_id" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [active] = await tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.status, "active"), eq(plans.kind, "workout"),
+    )).for("update").limit(1);
+    if (!active) return { status: "missing" as const };
+    const [draft] = await tx.select({ id: plans.id }).from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.groupId, active.groupId), eq(plans.status, "draft"),
+    )).limit(1);
+    if (draft) return { status: "draft_exists" as const, id: draft.id };
+    const [latest] = await tx.select({ version: plans.version }).from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.groupId, active.groupId),
+    )).orderBy(desc(plans.version)).limit(1);
+    const [saved] = await tx.insert(plans).values({
+      userId,
+      groupId: active.groupId,
+      kind: "workout",
+      version: (latest?.version ?? active.version) + 1,
+      editVersion: 1,
+      status: "draft",
+      source: "manual",
+      data: active.data,
+    }).returning();
+    return saved ? { status: "saved" as const, row: saved } : { status: "save_failed" as const };
+  });
+  if (result.status === "missing") return c.json({ error: "active_workout_plan_not_found" }, 404);
+  if (result.status === "draft_exists") return c.json({ error: "workout_plan_draft_exists", draftId: result.id }, 409);
+  if (result.status === "save_failed") return c.json({ error: "workout_plan_revision_failed" }, 500);
+  const plan = workoutPlanResponse(result.row);
+  if (!plan) return c.json({ error: "workout_plan_revision_failed" }, 500);
+  return c.json({ plan }, 201);
+});
+
+app.post("/v1/workout-plans/:id/approve", async (c) => {
+  const planId = c.req.param("id");
+  if (!isUuid(planId)) return c.json({ error: "invalid_workout_plan_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = approveWorkoutPlanRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_workout_plan_approval" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [draft] = await tx.select().from(plans).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.kind, "workout"), eq(plans.status, "draft"),
+    )).for("update").limit(1);
+    if (!draft) return { status: "missing" as const };
+    if (draft.editVersion !== parsed.data.baseEditVersion) return { status: "conflict" as const, version: draft.editVersion };
+    const data = workoutPlanDataSchema.safeParse(draft.data);
+    if (!data.success || !hasValidPlanExercises(data.data)) return { status: "invalid" as const };
+    const now = new Date();
+    await tx.update(plans).set({ status: "superseded", updatedAt: now }).where(and(
+      eq(plans.userId, userId), eq(plans.groupId, draft.groupId), eq(plans.status, "active"),
+    ));
+    const [saved] = await tx.update(plans).set({
+      status: "active",
+      approvedAt: now,
+      updatedAt: now,
+    }).where(and(
+      eq(plans.userId, userId), eq(plans.id, planId), eq(plans.status, "draft"), eq(plans.editVersion, parsed.data.baseEditVersion),
+    )).returning();
+    return saved ? { status: "approved" as const, row: saved } : { status: "conflict" as const, version: draft.editVersion + 1 };
+  });
+  if (result.status === "missing") return c.json({ error: "workout_plan_draft_not_found" }, 404);
+  if (result.status === "conflict") return c.json({ error: "workout_plan_version_conflict", currentEditVersion: result.version }, 409);
+  if (result.status === "invalid") return c.json({ error: "workout_plan_invalid" }, 409);
+  const plan = workoutPlanResponse(result.row);
+  if (!plan) return c.json({ error: "workout_plan_approval_failed" }, 500);
+  return c.json({ plan });
 });
 
 app.get("/v1/exercises/:exerciseId/progress", async (c) => {

@@ -273,6 +273,83 @@ export const exerciseProgressResponseSchema = z.object({
   points: z.array(exerciseProgressPointSchema).max(366),
 }).strict();
 
+const workoutPlanExerciseSchema = z.object({
+  exerciseId: z.string().trim().min(1).max(80),
+  sets: z.number().int().min(1).max(20),
+  trackingMode: z.enum(["reps", "time"]),
+  targetMin: z.number().int().min(1),
+  targetMax: z.number().int().min(1),
+  restSeconds: z.number().int().min(0).max(900),
+  targetLoadKg: z.number().finite().min(0).max(1000).nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.targetMax < value.targetMin) {
+    context.addIssue({ code: "custom", path: ["targetMax"], message: "The upper target must be at least the lower target." });
+  }
+  const maxTarget = value.trackingMode === "time" ? 7200 : 200;
+  if (value.targetMax > maxTarget) {
+    context.addIssue({ code: "custom", path: ["targetMax"], message: "The target is above the supported limit." });
+  }
+  if (value.trackingMode === "time" && value.targetLoadKg !== null) {
+    context.addIssue({ code: "custom", path: ["targetLoadKg"], message: "Timed holds cannot have a load target." });
+  }
+});
+
+const workoutPlanSessionSchema = z.object({
+  weekday: z.number().int().min(0).max(6),
+  label: z.string().trim().min(1).max(80),
+  estimatedMinutes: z.number().int().min(5).max(240),
+  exercises: z.array(workoutPlanExerciseSchema).min(1).max(20),
+}).strict();
+
+export const workoutPlanDataSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  focus: z.string().trim().min(1).max(180),
+  sessions: z.array(workoutPlanSessionSchema).min(1).max(7),
+}).strict().superRefine((value, context) => {
+  const weekdays = value.sessions.map((session) => session.weekday);
+  if (new Set(weekdays).size !== weekdays.length) {
+    context.addIssue({ code: "custom", path: ["sessions"], message: "Schedule each workout on a different day." });
+  }
+  const weeklySets = value.sessions.reduce((total, session) => total + session.exercises.reduce((sum, exercise) => sum + exercise.sets, 0), 0);
+  if (weeklySets > 300) {
+    context.addIssue({ code: "custom", path: ["sessions"], message: "A weekly plan can contain at most 300 work sets." });
+  }
+});
+
+export const createWorkoutPlanRequestSchema = z.object({
+  planId: uuidSchema,
+  groupId: uuidSchema,
+  source: z.enum(["template", "manual"]),
+  data: workoutPlanDataSchema,
+}).strict();
+
+export const updateWorkoutPlanRequestSchema = z.object({
+  baseEditVersion: z.number().int().positive(),
+  data: workoutPlanDataSchema,
+}).strict();
+
+export const approveWorkoutPlanRequestSchema = z.object({
+  baseEditVersion: z.number().int().positive(),
+}).strict();
+
+export const workoutPlanVersionSchema = z.object({
+  id: uuidSchema,
+  groupId: uuidSchema,
+  kind: z.literal("workout"),
+  version: z.number().int().positive(),
+  editVersion: z.number().int().positive(),
+  status: z.enum(["draft", "active", "superseded", "archived"]),
+  source: z.enum(["template", "manual", "ai"]),
+  data: workoutPlanDataSchema,
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+  approvedAt: isoDateTime.nullable(),
+}).strict();
+
+export const workoutPlansResponseSchema = z.object({
+  plans: z.array(workoutPlanVersionSchema).max(100),
+}).strict();
+
 const bodyMeasurementSchema = z.object({
   measuredAt: isoDateTime,
   weightKg: z.number().finite().min(25).max(400),
@@ -330,6 +407,9 @@ export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type ExerciseProgressQuery = z.infer<typeof exerciseProgressQuerySchema>;
 export type ExerciseProgressResponse = z.infer<typeof exerciseProgressResponseSchema>;
+export type WorkoutPlanData = z.infer<typeof workoutPlanDataSchema>;
+export type WorkoutPlanSession = WorkoutPlanData["sessions"][number];
+export type WorkoutPlanVersion = z.infer<typeof workoutPlanVersionSchema>;
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 export type SyncPushRequest = z.infer<typeof syncPushSchema>;
 export type SyncPullQuery = z.infer<typeof syncPullQuerySchema>;

@@ -43,6 +43,13 @@
       "when": 1792511936457,
       "tag": "0005_black_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792515055527,
+      "tag": "0006_great_iron_fist",
+      "breakpoints": true
     }
   ]
 }
