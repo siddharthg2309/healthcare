@@ -42,6 +42,10 @@ private/
 
 # Dependencies and tool caches.
 node_modules/
+**/.next/
+.vercel/
+**/.turbo/
+coverage/
 .pnp.*
 .yarn/cache/
 .yarn/unplugged/

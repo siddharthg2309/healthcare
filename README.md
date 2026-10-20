@@ -1,82 +1,73 @@
-# Healthcare
+# Goal Health
 
-An Android-first health and fitness app for food logging, activity tracking, and measured progress toward a personal goal. The intended distribution is a private signed APK for the owner and invited friends.
+A private, Android-first health and fitness app for food logging, activity tracking, and measured progress toward personal goals. It is a responsive Next.js Progressive Web App (PWA): deploy it to Vercel, share the HTTPS link with invited friends, and optionally add it to an Android home screen. **No APK or Play Store listing is required.**
 
-**Current implementation: Phase 1 UI and the Phase 2 backend foundation.** The app launches into four navigable screens: Home, Food, Activity, and Progress. The screens still use sample data. The backend now has invite-gated authentication, profile/sync endpoints, database migrations, and local encrypted storage primitives; they are not wired into the screens or deployed yet. AI plans, photo recognition, Health Connect, reminders, and Calendar are later phases.
+The app and API are served by one Next.js project. Vercel hosts the web UI and server-side API routes; Neon provides the cloud Postgres database. Your laptop is needed for development and the one-time database migration, not for friends to use the deployed app.
 
-The product specification, design direction, data model, AI workflows, release approach, and phase gates are in [the implementation plan](docs/IMPLEMENTATION_PLAN.md). Phase 0 integration decisions and remaining device/account checks are in [the Phase 0 decision log](docs/decisions/0001-phase-0.md).
+The app is still under implementation. The current web shell includes the dashboard, progress view, onboarding/goal setup, authentication UI, and placeholders for features not yet connected to the database. The phased work and product details are in [the implementation plan](docs/IMPLEMENTATION_PLAN.md). Current deployment steps are in [environment setup](docs/ENVIRONMENT.md).
 
 ## Stack
 
-- Expo SDK 57, React Native, TypeScript, and Expo Router
-- Minimal black, white, gray, and lime/green design with Manrope
-- Custom SVG progress chart to keep the goal path, measured trend, weigh-in points, and missing days explicit
-- Neon Postgres and a Hono/TypeScript API, on-device SQLCipher SQLite, and server-side MiniMax M3 through OpenRouter
-- Planned: two bounded LangGraph workflows for reviewed meal and workout plans
+- Next.js App Router, React, and TypeScript, deployed as a PWA on Vercel
+- Minimal black, white, gray, and lime-green visual system with Manrope
+- Same-origin Next.js Route Handlers dispatching to the modular Hono API
+- Neon Postgres with Drizzle migrations; Better Auth for invite-gated accounts
+- Server-only OpenRouter integration using MiniMax M3 for later photo recognition and reviewed meal/workout plans
+- Two bounded LangGraph workflows for meal and activity plans, with database-backed state and explicit user approval
 
-The Android package ID and app display name are working values. Confirm them before the first signed APK is shared.
+## Run locally
 
-## Run the UI preview
-
-### Prerequisites
+### Requirements
 
 - Node.js 22.13 or later and npm 10 or later
-- For a UI-only preview, install Expo Go. Phase 2 secure sessions and SQLCipher storage require a development build.
-- For a local emulator, install Android Studio with an Android emulator and SDK
+- A Neon Postgres database (or another PostgreSQL instance supported by the schema)
 
-Install dependencies from the repository root:
+Install dependencies and configure the server environment:
 
 ```bash
 npm install
+cp .env.example .env
 ```
 
-Start the development server:
+Fill `DATABASE_URL`, your chosen `AUTH_SECRET`, `AUTH_BASE_URL`, and `AUTH_TRUSTED_ORIGINS` in the ignored root `.env`. For local use, both auth origins are `http://localhost:3000`. If you still need to create an auth secret, generate one with `openssl rand -base64 32`. Do not put server secrets in browser-visible variables.
 
-```bash
-npm run start
-```
-
-For a phone preview, put the phone and computer on the same network, scan the QR code with Expo Go, and open the app. If local network discovery is blocked, start Expo with its tunnel option:
-
-```bash
-npm run start -- --tunnel
-```
-
-For an Android emulator, start the emulator first, then run:
-
-```bash
-npm run android
-```
-
-A browser preview is available with:
-
-```bash
-npm run web
-```
-
-The preview intentionally marks all sample values. The main call to action on Home opens the Progress screen; the other tracking controls remain visual placeholders until their implementation phases.
-
-## Configure and run the backend
-
-See [environment setup](docs/ENVIRONMENT.md) for every variable, where it comes from, and which phase uses it. To start the current API foundation:
-
-1. Copy `.env.example` to `.env` in the repository root.
-2. Set `DATABASE_URL`, `AUTH_SECRET`, and `AUTH_BASE_URL` there.
-3. Copy `apps/mobile/.env.example` to `apps/mobile/.env` and set the phone-reachable `EXPO_PUBLIC_API_BASE_URL`.
-4. Run the auth and application migrations, then start the API:
+Apply the database migrations once, then start Next.js:
 
 ```bash
 npm run db:migrate
-npm run api:dev
+npm run dev
 ```
 
-Create an email-bound invitation for a friend with:
+Open `http://localhost:3000` in a browser. To check the phone layout on your local network, start Next.js on all interfaces:
+
+```bash
+npm run dev -- --hostname 0.0.0.0
+```
+
+Open the computer's LAN address on the Android phone. Local use requires the computer and phone to share a network; deployed use does not.
+
+## Deploy to Vercel and use on Android
+
+1. Push the source to your GitHub repository. Never commit `.env` or credentials.
+2. In Vercel, import the repository and select `apps/web` as the project root. Keep the detected Next.js framework and npm workspace installation/build settings.
+3. Add the server environment variables from [the environment guide](docs/ENVIRONMENT.md) in Vercel **before the production build**. Set `AUTH_BASE_URL` and `AUTH_TRUSTED_ORIGINS` to the exact HTTPS domain you plan to use, such as `https://your-project.vercel.app`.
+4. Run the database migrations once against the Neon database before using the app. See the environment guide for the command and safe options.
+5. Deploy. Vercel provides the public HTTPS URL and handles subsequent deployments from the connected Git branch.
+6. Open the URL on Android Chrome. Use Chrome's menu → **Add to Home screen** (or **Install app**, when offered). Friends open the same URL, create an account with their invitation, and can add it the same way.
+
+Vercel hosts both the pages and `/api/*` and `/v1/*` server routes, so no separate API host or laptop server is needed. Neon remains a separate hosted database. Keep `DATABASE_URL`, `AUTH_SECRET`, and `OPENROUTER_API_KEY` in Vercel's server environment only. Do not use a Neon Data API URL in place of the Postgres connection URL for this app.
+
+The PWA can support food logging, photo upload, plans, reminders while installed/allowed, and the goal graph. Browser support differs from a native Android app: direct Health Connect integration and reliable background step collection are not available in this PWA. Steps can be entered manually. Calendar integration can be added through Google's web OAuth flow if needed.
+
+## Friend invitations
+
+New accounts use an email-bound invitation code. Create one with the repository command configured to use the intended Neon database:
 
 ```bash
 npm run invite:create -- --email friend@example.com
 ```
 
-Share the one-time code privately. A physical Android phone must be able to reach the API host over the network. For EAS builds, set `EXPO_PUBLIC_API_BASE_URL` in the EAS environment used by that build; ignored local `.env` files are not committed to the cloud build. The mobile API URL is public app configuration; provider credentials stay in the backend `.env`.
+Share the one-time code privately. Do not place it in source control or public issue trackers.
 
 ## Checks
 
@@ -85,67 +76,21 @@ From the repository root:
 ```bash
 npm run typecheck
 npm run lint
-npm run doctor
+npm run build
 ```
 
-Expo dependencies are pinned in the workspace lockfile. When adding Expo or native packages, use the local SDK's installer from `apps/mobile`:
+## Public-repository safeguards
 
-```bash
-cd apps/mobile
-npx expo install <package-name>
-```
+This GitHub repository is public. It must contain source and documentation only, never API keys, database credentials, auth secrets, user health records, or private meal photos. `.env.example` contains blank secret placeholders; real values belong in the ignored `.env` locally and in Vercel's encrypted environment settings for deployment.
 
-A real Android build, system font scaling review, Android Back behavior review, and Health Connect permission review still require an Android device or emulator. The current environment does not have `adb` or the Android SDK installed. `npm run doctor` currently reports the host Mac's Xcode version as its sole failed check; this app is configured for Android and web, and Android-relevant dependency/configuration checks pass. Review `npm audit` findings before sharing a build. Avoid `npm audit fix --force` unless you are prepared to make and verify the required major-version upgrades.
-
-### Private Android APK profiles
-
-The Expo app has internal EAS profiles for development, preview, and production. All produce installable APKs; the development profile also includes the development client. An Expo account is required for the cloud build and signing setup.
-
-```bash
-cd apps/mobile
-npx eas-cli@latest login
-npx eas-cli@latest build --profile development --platform android
-npx eas-cli@latest build --profile production --platform android
-```
-
-The first EAS build may ask to configure Android signing. Let EAS manage signing for private distribution and keep credentials outside Git. Confirm the app identity in `apps/mobile/app.json` before creating a build that will be shared. These profiles are configured only; no APK has been built yet.
-
-## Repository setup and public-repository safeguards
-
-This GitHub repository is public. It must contain source and documentation only, never API keys, database credentials, OAuth secrets, session tokens, signing keys, personal health data, or private meal photos.
-
-New clones should enable the repository hooks:
+Enable the repository hooks on a new clone:
 
 ```bash
 sh scripts/setup-git-hooks.sh
 ```
 
-The hooks reject staged files that match ignore rules, scan staged changes and local history with Gitleaks, and enforce Conventional Commit subjects under 72 characters. Install Python 3 and Gitleaks first; see [SECURITY.md](SECURITY.md). Use explicit `git add` paths and review `git diff --cached` before committing.
+The hooks check staged changes for ignored files and secrets and enforce Conventional Commit subjects. Stage explicit paths and review `git diff --cached` before committing.
 
-`.env.example` contains blank credential fields and safe defaults. Keep real values in the ignored root `.env`. `EXPO_PUBLIC_*` values are included in the APK and must be safe for anyone to read. OpenRouter, storage, Google, USDA, and SMTP settings are listed for later phases and are not needed for the current manual/API foundation.
+## Current implementation status
 
-## Roadmap
-
-Implementation follows [the phased plan](docs/IMPLEMENTATION_PLAN.md#16-implementation-phases). Phase 1 provides the navigable visual shell and internal Android APK profiles. Phase 2 backend and local-storage foundations are scaffolded, but still need Neon credentials, migration execution, Android build verification, and integration with the app screens. Later phases add goal calculations, curated food data, manual tracking, the measured progress graph, image recognition, planning workflows, Health Connect, reminders, and private APK operations.
-
-The first APK will be built and signed only after the required app identity, Android version matrix, cloud resources, and release safeguards are confirmed. Do not commit signing material.
-
-## Git commit style
-
-Use focused Conventional Commits, for example:
-
-```text
-feat(mobile): add the progress preview
-fix(progress): keep missing weigh-ins as gaps
-docs: update the local development guide
-```
-
-Before committing, stage the intended files and inspect them:
-
-```bash
-git status --short
-git add README.md apps/mobile docs
-git diff --cached --stat
-git diff --cached
-git commit -m "feat(mobile): add the navigable app preview"
-```
+The repository contains the initial Next.js PWA, a same-origin API bridge to the Hono backend, invitation-based auth foundations, versioned goal proposal/acceptance routes, and the first dashboard/onboarding flow. Food catalog search/logging, real daily summaries, meal and workout records, AI workflows, photo storage, and production Vercel setup remain phased work. The app must not be described as feature-complete until those paths are connected and verified.

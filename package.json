@@ -3,24 +3,22 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "apps/*",
+    "apps/backend",
+    "apps/web",
     "packages/*"
   ],
   "scripts": {
-    "start": "npm --workspace @healthcare/mobile run start",
-    "android": "npm --workspace @healthcare/mobile run android",
-    "web": "npm --workspace @healthcare/mobile run web",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "doctor": "npm --workspace @healthcare/mobile run doctor",
+    "start": "npm --workspace @healthcare/web run start",
+    "dev": "npm --workspace @healthcare/web run dev",
+    "build": "npm --workspace @healthcare/web run build",
+    "web": "npm --workspace @healthcare/web run dev",
+    "typecheck": "npm run typecheck --workspace @healthcare/contracts && npm run typecheck --workspace @healthcare/domain && npm run typecheck --workspace @healthcare/database && npm run typecheck --workspace @healthcare/backend && npm run typecheck --workspace @healthcare/web",
+    "lint": "npm run lint --workspace @healthcare/backend && npm run lint --workspace @healthcare/web",
     "api:dev": "npm --workspace @healthcare/backend run dev",
     "db:auth:migrate": "npm --workspace @healthcare/backend run migrate:auth",
     "db:generate": "npm --workspace @healthcare/database run generate",
     "db:app:migrate": "npm --workspace @healthcare/database run migrate",
     "db:migrate": "npm run db:auth:migrate && npm run db:app:migrate",
     "invite:create": "npm --workspace @healthcare/backend run invite:create --"
-  },
-  "overrides": {
-    "react-native-svg": "15.15.4"
   }
 }

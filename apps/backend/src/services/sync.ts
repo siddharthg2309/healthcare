@@ -85,6 +85,10 @@ export async function pushSync(userId: string, request: SyncPushRequest): Promis
     const results: SyncResult[] = [];
 
     for (const operation of request.operations) {
+      if (operation.entity === "goal") {
+        throw new Error("goal_changes_require_acceptance");
+      }
+
       const [current] = await tx.select().from(userRecords).where(and(
         eq(userRecords.userId, userId),
         eq(userRecords.entity, operation.entity),

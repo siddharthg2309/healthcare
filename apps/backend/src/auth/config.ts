@@ -1,5 +1,4 @@
 import { betterAuth } from "better-auth";
-import { expo } from "@better-auth/expo";
 import { pool } from "@healthcare/database";
 import { env, trustedOrigins } from "../env.js";
 
@@ -18,5 +17,4 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
   },
-  plugins: [expo()],
 });

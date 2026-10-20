@@ -1,7 +1,7 @@
 const { defineConfig, globalIgnores } = require("eslint/config");
-const expoConfig = require("eslint-config-expo/flat");
+const tseslint = require("typescript-eslint");
 
 module.exports = defineConfig([
   globalIgnores(["dist/*", "node_modules/*"]),
-  expoConfig,
+  ...tseslint.configs.recommended,
 ]);

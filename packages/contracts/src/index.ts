@@ -5,16 +5,72 @@ const isoDateTime = z.string().datetime({ offset: true });
 
 export const profileSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
+  ageYears: z.number().int().min(13).max(110),
   heightCm: z.number().min(80).max(250),
   currentWeightKg: z.number().min(25).max(400),
-  birthDate: z.string().date(),
-  sexAtBirth: z.enum(["female", "male", "intersex", "unspecified"]),
+  unitSystem: z.enum(["metric", "imperial"]),
+  energyEquation: z.enum(["mifflin_female", "mifflin_male", "manual", "not_provided"]),
   activityLevel: z.enum(["sedentary", "light", "moderate", "active", "very_active"]),
   timezone: z.string().min(1).max(80),
   dietaryPreferences: z.array(z.string().trim().min(1).max(48)).max(30),
   restrictions: z.array(z.string().trim().min(1).max(80)).max(50),
   equipment: z.array(z.string().trim().min(1).max(80)).max(50),
   availableWorkoutDays: z.number().int().min(0).max(7),
+  pregnancyOrBreastfeeding: z.boolean(),
+  clinicianDirectedDiet: z.boolean(),
+}).strict();
+
+export const goalProposalRequestSchema = z.object({
+  direction: z.enum(["lose", "gain", "maintain"]),
+  targetWeightKg: z.number().finite().min(25).max(400),
+  targetDate: z.string().date(),
+  manualDailyCalories: z.number().int().min(800).max(5000).nullable(),
+  manualTargetSource: z.enum(["self", "clinician"]).nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.manualDailyCalories === null && value.manualTargetSource !== null) {
+    context.addIssue({ code: "custom", path: ["manualTargetSource"], message: "A target source needs a manual calorie target." });
+  }
+  if (value.manualDailyCalories !== null && value.manualTargetSource === null) {
+    context.addIssue({ code: "custom", path: ["manualTargetSource"], message: "Choose who supplied the manual target." });
+  }
+});
+
+export const acceptGoalRequestSchema = z.object({
+  goalId: uuidSchema,
+  measurementId: uuidSchema,
+  request: goalProposalRequestSchema,
+  accepted: z.literal(true),
+}).strict();
+
+export const createMeasurementRequestSchema = z.object({
+  measurementId: uuidSchema,
+  measuredAt: isoDateTime,
+  weightKg: z.number().finite().min(25).max(400),
+}).strict();
+
+const trajectoryPointSchema = z.object({
+  date: z.string().date(),
+  targetWeightKg: z.number().finite().min(25).max(400),
+}).strict();
+
+export const goalSchema = z.object({
+  goalVersion: z.number().int().positive(),
+  direction: z.enum(["lose", "gain", "maintain"]),
+  startWeightKg: z.number().finite().min(25).max(400),
+  targetWeightKg: z.number().finite().min(25).max(400),
+  startDate: z.string().date(),
+  targetDate: z.string().date(),
+  dailyCaloriesKcal: z.number().int().min(800).max(5000).nullable(),
+  macrosGrams: z.object({
+    protein: z.number().finite().min(0).max(500),
+    carbohydrate: z.number().finite().min(0).max(1000),
+    fat: z.number().finite().min(0).max(500),
+  }).strict().nullable(),
+  calculationMode: z.enum(["automatic_estimate", "manual_target"]),
+  calculationPolicyVersion: z.string().min(1).max(40),
+  rationale: z.array(z.string().min(1).max(180)).max(10),
+  trajectory: z.array(trajectoryPointSchema).min(2).max(106),
+  acceptedAt: isoDateTime,
 }).strict();
 
 const foodLogSchema = z.object({
@@ -35,13 +91,6 @@ const activityLogSchema = z.object({
 const bodyMeasurementSchema = z.object({
   measuredAt: isoDateTime,
   weightKg: z.number().finite().min(25).max(400),
-}).strict();
-
-const goalSchema = z.object({
-  direction: z.enum(["lose", "gain", "maintain"]),
-  targetWeightKg: z.number().finite().min(25).max(400),
-  targetDate: z.string().date(),
-  acceptedAt: isoDateTime,
 }).strict();
 
 const upsertOperation = <TEntity extends string, T extends z.ZodTypeAny>(entity: TEntity, data: T) => z.object({
@@ -81,6 +130,8 @@ export const syncPullQuerySchema = z.object({
 }).strict();
 
 export type Profile = z.infer<typeof profileSchema>;
+export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
+export type GoalRecord = z.infer<typeof goalSchema>;
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 export type SyncPushRequest = z.infer<typeof syncPushSchema>;
 export type SyncPullQuery = z.infer<typeof syncPullQuerySchema>;

@@ -4,8 +4,17 @@ import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { userProfiles, privateUploads } from "@healthcare/database/schema";
-import { profileSchema, syncPullQuerySchema, syncPushSchema } from "@healthcare/contracts";
+import { privateUploads, syncChanges, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import {
+  acceptGoalRequestSchema,
+  createMeasurementRequestSchema,
+  goalProposalRequestSchema,
+  goalSchema,
+  profileSchema,
+  syncPullQuerySchema,
+  syncPushSchema,
+} from "@healthcare/contracts";
+import { buildGoalProposal } from "@healthcare/domain";
 import { auth } from "./auth/config.js";
 import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
@@ -112,6 +121,220 @@ app.put("/v1/me", async (c) => {
   return c.json({ profile: result.data, updatedAt: result.updatedAt });
 });
 
+app.post("/v1/goals/proposal", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsedRequest = goalProposalRequestSchema.safeParse(body);
+  if (!parsedRequest.success) return c.json({ error: "invalid_goal_request" }, 400);
+
+  const userId = c.get("session").user.id;
+  const profile = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [saved] = await tx.select({ data: userProfiles.data })
+      .from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+    return saved?.data ?? null;
+  });
+  const parsedProfile = profileSchema.safeParse(profile);
+  if (!parsedProfile.success) return c.json({ error: "profile_required" }, 409);
+
+  const proposal = buildGoalProposal(parsedProfile.data, parsedRequest.data);
+  if (proposal.status === "invalid") return c.json({ error: "invalid_goal", message: proposal.reason }, 422);
+  return c.json(proposal);
+});
+
+app.get("/v1/goals", async (c) => {
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const goals = await tx.select({ id: userRecords.recordId, data: userRecords.data })
+      .from(userRecords).where(and(
+        eq(userRecords.userId, userId),
+        eq(userRecords.entity, "goal"),
+        eq(userRecords.deleted, false),
+      ));
+    const measurements = await tx.select({ id: userRecords.recordId, data: userRecords.data })
+      .from(userRecords).where(and(
+        eq(userRecords.userId, userId),
+        eq(userRecords.entity, "body_measurement"),
+        eq(userRecords.deleted, false),
+      ));
+    return { goals, measurements };
+  });
+
+  const versions = result.goals.flatMap((record) => {
+    const parsed = goalSchema.safeParse(record.data);
+    return parsed.success ? [{ id: record.id, ...parsed.data }] : [];
+  }).sort((left, right) => right.goalVersion - left.goalVersion);
+  return c.json({ current: versions[0] ?? null, versions, measurements: result.measurements });
+});
+
+app.post("/v1/goals/accept", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = acceptGoalRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_goal_acceptance" }, 400);
+
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
+
+    const [existing] = await tx.select({ id: userRecords.recordId, data: userRecords.data })
+      .from(userRecords).where(and(
+        eq(userRecords.userId, userId),
+        eq(userRecords.entity, "goal"),
+        eq(userRecords.recordId, parsed.data.goalId),
+        eq(userRecords.deleted, false),
+      )).limit(1);
+    if (existing) {
+      const priorGoal = goalSchema.safeParse(existing.data);
+      if (priorGoal.success) return { status: "accepted" as const, goal: { id: existing.id, ...priorGoal.data }, idempotent: true };
+      return { status: "conflict" as const };
+    }
+
+    const [savedProfile] = await tx.select({ data: userProfiles.data })
+      .from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+    const profile = profileSchema.safeParse(savedProfile?.data);
+    if (!profile.success) return { status: "profile_required" as const };
+
+    const proposal = buildGoalProposal(profile.data, parsed.data.request);
+    if (proposal.status === "manual_required") {
+      return { status: "manual_required" as const, reasons: proposal.reasons };
+    }
+    if (proposal.status === "invalid") return { status: "invalid" as const, message: proposal.reason };
+
+    const existingGoals = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "goal"),
+      eq(userRecords.deleted, false),
+    ));
+    const previousVersions = existingGoals.flatMap((record) => {
+      const candidate = goalSchema.safeParse(record.data);
+      return candidate.success ? [candidate.data.goalVersion] : [];
+    });
+    const goal = goalSchema.parse({
+      ...proposal.goal,
+      goalVersion: Math.max(0, ...previousVersions) + 1,
+      acceptedAt: new Date().toISOString(),
+    });
+
+    const measurementData = {
+      measuredAt: new Date().toISOString(),
+      weightKg: profile.data.currentWeightKg,
+    };
+    const [existingMeasurement] = await tx.select({ data: userRecords.data })
+      .from(userRecords).where(and(
+        eq(userRecords.userId, userId),
+        eq(userRecords.entity, "body_measurement"),
+        eq(userRecords.recordId, parsed.data.measurementId),
+      )).limit(1);
+    if (existingMeasurement && JSON.stringify(existingMeasurement.data) !== JSON.stringify(measurementData)) {
+      return { status: "conflict" as const };
+    }
+
+    await tx.insert(userSyncCounters).values({ userId, cursor: 0 }).onConflictDoNothing();
+    const records = [
+      { entity: "goal" as const, recordId: parsed.data.goalId, data: goal },
+      { entity: "body_measurement" as const, recordId: parsed.data.measurementId, data: measurementData },
+    ];
+    for (const record of records) {
+      if (record.entity === "body_measurement" && existingMeasurement) continue;
+      await tx.insert(userRecords).values({
+        userId,
+        entity: record.entity,
+        recordId: record.recordId,
+        version: 1,
+        data: record.data,
+        deleted: false,
+        serverUpdatedAt: new Date(),
+      });
+      const [counter] = await tx.update(userSyncCounters).set({
+        cursor: sql`${userSyncCounters.cursor} + 1`,
+      }).where(eq(userSyncCounters.userId, userId)).returning({ cursor: userSyncCounters.cursor });
+      if (!counter) throw new Error("sync_cursor_update_failed");
+      await tx.insert(syncChanges).values({
+        userId,
+        cursor: counter.cursor,
+        entity: record.entity,
+        recordId: record.recordId,
+        version: 1,
+        data: record.data,
+        deleted: false,
+      });
+    }
+    return { status: "accepted" as const, goal: { id: parsed.data.goalId, ...goal }, idempotent: false };
+  });
+
+  if (result.status === "profile_required") return c.json({ error: "profile_required" }, 409);
+  if (result.status === "manual_required") return c.json({ error: "manual_target_required", reasons: result.reasons }, 422);
+  if (result.status === "invalid") return c.json({ error: "invalid_goal", message: result.message }, 422);
+  if (result.status === "conflict") return c.json({ error: "goal_id_conflict" }, 409);
+  return c.json(result, result.idempotent ? 200 : 201);
+});
+
+app.post("/v1/measurements", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = createMeasurementRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_measurement" }, 400);
+  const measuredAt = Date.parse(parsed.data.measuredAt);
+  const now = Date.now();
+  if (measuredAt > now + 5 * 60_000 || measuredAt < now - 10 * 366 * 86_400_000) {
+    return c.json({ error: "measurement_date_out_of_range" }, 422);
+  }
+
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select({ data: userRecords.data })
+      .from(userRecords).where(and(
+        eq(userRecords.userId, userId),
+        eq(userRecords.entity, "body_measurement"),
+        eq(userRecords.recordId, parsed.data.measurementId),
+      )).limit(1);
+    if (existing) return { idempotent: true };
+
+    await tx.insert(userSyncCounters).values({ userId, cursor: 0 }).onConflictDoNothing();
+    const data = { measuredAt: parsed.data.measuredAt, weightKg: parsed.data.weightKg };
+    await tx.insert(userRecords).values({
+      userId,
+      entity: "body_measurement",
+      recordId: parsed.data.measurementId,
+      version: 1,
+      data,
+      deleted: false,
+      serverUpdatedAt: new Date(),
+    });
+    const [counter] = await tx.update(userSyncCounters).set({
+      cursor: sql`${userSyncCounters.cursor} + 1`,
+    }).where(eq(userSyncCounters.userId, userId)).returning({ cursor: userSyncCounters.cursor });
+    if (!counter) throw new Error("sync_cursor_update_failed");
+    await tx.insert(syncChanges).values({
+      userId,
+      cursor: counter.cursor,
+      entity: "body_measurement",
+      recordId: parsed.data.measurementId,
+      version: 1,
+      data,
+      deleted: false,
+    });
+    return { idempotent: false };
+  });
+  return c.json({ ...parsed.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+});
+
 app.post("/v1/sync/push", async (c) => {
   let body: unknown;
   try {
@@ -130,6 +353,9 @@ app.post("/v1/sync/push", async (c) => {
     }
     if (error instanceof Error && error.message === "sync_request_in_progress") {
       return c.json({ error: "request_in_progress" }, 409);
+    }
+    if (error instanceof Error && error.message === "goal_changes_require_acceptance") {
+      return c.json({ error: "goal_changes_require_acceptance" }, 422);
     }
     throw error;
   }

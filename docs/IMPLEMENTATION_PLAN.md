@@ -1,16 +1,16 @@
-# Android Health App — Product, Architecture, and Implementation Plan
+# Goal Health PWA — Product, Architecture, and Implementation Plan
 
-**Working name:** Goal Health; final name and package ID to be chosen before distribution.
+**Working name:** Goal Health; final public-facing name can be chosen before inviting friends.
 
 **Document date:** 20 October 2026.
 
 **Audience:** The owner and developers implementing the app.
 
-**Distribution:** A signed Android APK for the owner and invited friends.
+**Distribution:** A private HTTPS Progressive Web App for the owner and invited friends, hosted on Vercel and optionally added to Android home screens.
 
-**Status:** Implementation specification. The app, cloud resources, integrations, and APK have not been created by this document.
+**Status:** Active implementation plan. The selected client is Next.js PWA; there is no APK or Play Store deliverable. See Decision 0004 for the platform pivot.
 
-This plan consolidates the agreed features and design direction. Details that were not explicitly chosen in the conversation are proposed defaults. Provider availability, package compatibility, quotas, and Android behavior must be confirmed in Phase 0 and again before release.
+This plan consolidates the agreed features and current PWA design direction. Decision 0004 is the source of truth for platform and deployment. Details that were not explicitly chosen are proposed defaults. Feature support and provider limits must be confirmed before enabling each integration. PWA limitations are called out where they affect Android-specific behavior.
 
 ## Contents
 
@@ -25,12 +25,12 @@ This plan consolidates the agreed features and design direction. Details that we
 9. [AI calls and model configuration](#9-ai-calls-and-model-configuration)
 10. [Two LangGraph workflows and memory](#10-two-langgraph-workflows-and-memory)
 11. [Database design](#11-database-design)
-12. [API and offline synchronization](#12-api-and-offline-synchronization)
-13. [Android and Health Connect](#13-android-and-health-connect)
+12. [API and connectivity](#12-api-and-connectivity)
+13. [Android PWA capabilities and limits](#13-android-pwa-capabilities-and-limits)
 14. [Reminders and Google Calendar](#14-reminders-and-google-calendar)
 15. [Privacy, reliability, and cost controls](#15-privacy-reliability-and-cost-controls)
 16. [Implementation phases](#16-implementation-phases)
-17. [Deployment and APK runbook](#17-deployment-and-apk-runbook)
+17. [Vercel deployment runbook](#17-vercel-deployment-runbook)
 18. [Using the app](#18-using-the-app)
 19. [Release acceptance and future work](#19-release-acceptance-and-future-work)
 20. [Reference documentation](#20-reference-documentation)
@@ -47,7 +47,7 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 | --- | --- |
 | Main platform | Android phones |
 | Audience | Owner and invited friends, with separate private accounts |
-| Distribution | Direct installation of an APK; no planned Play Store release |
+| Distribution | Share a private HTTPS link; users may add the PWA to their Android home screen |
 | Cloud database | Neon Postgres |
 | AI model | MiniMax M3; the selected `minimax/minimax-m3` identifier is an OpenRouter route |
 | AI orchestration | Two bounded LangGraph workflows: meal planning and workout planning |
@@ -57,18 +57,20 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 | Core differentiator | Interactive actual-versus-plan progress graph |
 | Visual style | Minimal black, white, gray, and lime/green, based on the supplied references |
 
-### 1.2 Proposed implementation defaults
+### 1.2 Current implementation defaults
 
-- React Native with Expo and TypeScript for the Android app.
-- A modular backend in TypeScript, initially deployed with Neon Functions.
-- Managed Neon Auth for identity, subject to the mobile integration check in Phase 0.
-- Private object storage for food photos; Neon Object Storage is the initial choice.
-- SQLite on the phone for offline logs, cached catalog entries, and a synchronization outbox.
-- Health Connect for available phone and connected-app activity data.
-- Local notifications for everyday reminders; optional Google Calendar synchronization.
+- Next.js App Router, React, TypeScript, and a responsive installable PWA for the Android-first UI.
+- One Vercel project hosts both Next.js pages and same-origin API routes. Next Route Handlers forward `/api/*` and `/v1/*` to the modular Hono API.
+- Neon Postgres is the cloud source of truth. Better Auth handles invite-gated accounts and sessions.
+- Keep OpenRouter credentials and all trusted provider calls in server routes/workers, never in browser code.
+- Add private object storage only when photo recognition is implemented; keep photos private and short-lived by default.
+- Use browser storage for install metadata and safe UI preferences. Cloud logging requires a network connection; do not promise robust offline writes until an encrypted, account-scoped PWA data/outbox design is implemented.
+- Meal/workout plans use two bounded LangGraph workflows, persisted state, deterministic validation, and explicit user review. Food-photo understanding is a separate vision request, not a general autonomous agent.
+- Manual step and activity logging is the supported first path. A browser PWA cannot provide direct Health Connect integration or dependable background step collection.
+- Google Calendar can be optional through a web OAuth flow. Reminder support depends on browser permission and installation state; provide in-app reminders as the reliable baseline.
 - Adults using general fitness and nutrition tracking are the initial supported audience.
 
-The audience being small does not make the database local to the phone. The installed app runs on the phone, local records can work offline, and cloud synchronization requires an internet connection and a deployed backend.
+The small audience does not mean the backend runs on a laptop. Vercel serves the app/API continuously and Neon hosts the data. Each user opens the same HTTPS app URL; Android Chrome can add it to the home screen. The laptop is used to develop and apply reviewed schema migrations.
 
 ## 2. Features and release scope
 
@@ -86,22 +88,22 @@ The audience being small does not make the database local to the phone. The inst
 | Activity logs | Sets, reps, weights, walking/cardio duration, optional steps, completion notes |
 | Progress | Actual measurements, trend, original plan, goal/date marker, history, contextual annotations |
 | Daily dashboard | Food totals, workout status, steps when available, reminder status, and logging completeness |
-| Android integration | Photo picker/camera, secure session storage, Health Connect when supported, notification permissions |
+| Android integration | Responsive PWA, browser photo picker, install prompt/home-screen guidance, permissions only where supported |
 | Reminders | Meal logging, workout, weigh-in, optional hydration, weekly review |
 | Calendar | Opt-in synchronization of approved schedule items to an app-created Google calendar |
-| Offline | Create/edit normal logs offline; synchronize when connectivity returns |
+| Offline | Read cached static shell; core logging requires connection in the first release unless an explicit offline queue is implemented |
 | Privacy | Each person sees their own records; export and deletion controls |
-| Distribution | Signed standalone APK, installation instructions, documented update process |
+| Distribution | Vercel HTTPS URL, invite process, add-to-home-screen guide, documented web release process |
 
 Hydration is an optional simple log and reminder, not a requirement for calorie tracking. Heart rate is not a launch requirement because the app cannot assume the phone or a wearable supplies it. Friends do not automatically see one another's health data.
 
 ### 2.2 Milestones
 
-1. **Manual tracking MVP:** Accounts, onboarding, food catalog, manual food/workout logging, offline sync, and the main progress graph.
+1. **Manual tracking MVP:** Accounts, onboarding, food catalog, manual food/workout logging, and the main progress graph.
 2. **AI milestone:** Food recognition and both reviewed planning workflows.
-3. **Connected private release:** Health Connect, reminders, Calendar, release hardening, and a signed APK for friends.
+3. **Connected private release:** Web reminders, optional Google Calendar, release hardening, and a stable Vercel deployment for friends.
 
-Ship an internal APK at the manual MVP milestone so the graph and logging experience can be used before all integrations are finished.
+Deploy the manual MVP to a private Vercel project so the graph and logging experience can be used before all integrations are finished.
 
 ## 3. Design system and screen structure
 
@@ -147,7 +149,7 @@ Use four labeled bottom tabs: **Home, Food, Activity, Progress**. A visible add 
 | Progress | Large interactive graph, metric selector, time range, annotations, weekly review |
 | Settings | Units, profile, goals, connections, reminders, privacy, data export, app version |
 
-Every important view needs empty, loading, offline, permission-denied, error, and partially synchronized states. Display dates as local dates and label the last successful activity sync.
+Every important view needs empty, loading, offline-fallback, permission-denied, and error states. Display dates as local dates and label the source/freshness of imported values when those are added.
 
 ## 4. Onboarding, goals, and target calculations
 
@@ -165,7 +167,7 @@ Collect required inputs first and request integration permissions only when the 
 | Practical constraints | Meals per day, cooking access, available preparation time, optional budget |
 | Exercise | Experience, available days, session duration, equipment, walking access, movement limitations |
 | Reminders | Preferred meal/workout/weigh-in times and quiet hours |
-| Optional connections | Health Connect and Google Calendar |
+| Optional connections | Google Calendar; native Health Connect is deferred |
 
 If an energy equation requires a sex-related physiological parameter, explain the purpose, make the choice explicit, and offer a manually supplied target where appropriate. Do not silently substitute gender identity for that parameter. Do not send a date of birth to the model when an age range is enough.
 
@@ -185,7 +187,7 @@ The process is:
 6. Store a new goal version and target version with effective dates and calculation metadata.
 7. Create the graph's planned trajectory from that accepted version.
 
-**Energy accounting policy for the first release:** Nutrition targets already account for the person's typical activity. Display workout energy as an estimate, and do not automatically add all reported exercise calories back to the food allowance. Health Connect total energy, active energy, walking estimates, and manual workout estimates must never be blindly summed together.
+**Energy accounting policy for the first release:** Nutrition targets already account for the person's typical activity. Display workout energy as an estimate, and do not automatically add all reported exercise calories back to the food allowance. Future imported energy/step sources and manual workout estimates must never be blindly summed together.
 
 Store calorie and macro targets as compatible ranges with a versioned tolerance policy. Catalog energy can differ from a simple `4 × protein + 4 × carbohydrate + 9 × fat` estimate because of fiber, labeling, and rounding. Flag large discrepancies for review rather than replacing authoritative catalog values automatically.
 
@@ -219,7 +221,7 @@ Import data through a script or controlled admin action, with provenance and dup
 
 ### 5.2 Search
 
-Use Postgres full-text search plus `pg_trgm` where supported, normalized aliases, category filters, and user recency/favorites. Support common spelling variants and transliteration. Cache popular and recently used entries in SQLite. A dedicated vector database is not required for launch.
+Use Postgres full-text search plus `pg_trgm` where supported, normalized aliases, category filters, and user recency/favorites. Support common spelling variants and transliteration. Use server-side query/indexing for catalog search; keep only harmless recency preferences in the browser. A dedicated vector database is not required for launch.
 
 If nothing matches, offer custom food creation or a recipe builder. An unreviewed custom entry should show its source and quality. An LLM suggestion alone is not enough to publish a verified shared nutrition entry.
 
@@ -254,7 +256,7 @@ Examples such as home-cooked dal should have the user's recipe version instead o
 6. The person confirms or changes each match and enters the quantity.
 7. Compute nutrition from confirmed catalog versions and quantities; save normally.
 
-For mixed plates, show multiple selectable items. For hidden ingredients or uncertain dishes, ask for confirmation. Model-reported confidence is an uncalibrated hint, not permission to auto-log. Offer manual logging when offline, the model fails, or no suitable match exists.
+For mixed plates, show multiple selectable items. For hidden ingredients or uncertain dishes, ask for confirmation. Model-reported confidence is an uncalibrated hint, not permission to auto-log. Offer manual logging when photo upload/model recognition fails or no suitable match exists.
 
 Default photo retention: delete temporary recognition photos after a short documented period, proposed as seven days, unless the person explicitly chooses to keep a photo with the log. Delete object files as well as database references. A saved log remains valid after its temporary photo is removed.
 
@@ -278,7 +280,7 @@ Walking and cardio entries can include duration, distance, and steps when known.
 
 Track the origin of every imported or estimated value. Prefer an available trusted source for a given time interval; otherwise show a labeled estimate using the chosen reviewed estimation method. Do not claim that sets and repetitions alone establish accurate calorie expenditure.
 
-A manually logged walk may describe the same activity already included in the day's steps or a synced exercise session. Link or reconcile overlapping records, and preserve manual entries without adding their energy a second time. Daily step totals from multiple sources or multiple phones are not additive by default.
+A manually logged walk may describe the same activity already included in an imported step total or exercise session. Link or reconcile overlapping records, and preserve manual entries without adding their energy a second time. Daily step totals from multiple sources or multiple phones are not additive by default.
 
 ## 7. Progress graph and forecasting
 
@@ -349,107 +351,97 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 
 | Layer | Choice | Reason |
 | --- | --- | --- |
-| Mobile | Expo + React Native + TypeScript | Android development with native integrations and APK builds |
-| Navigation | Expo Router | File-based routing and deep-link support |
-| UI | React Native styles + shared design tokens | Precise control of the chosen minimalist theme |
-| Graphs | App-owned line-chart component using `react-native-svg` for the first release | Separate plan/actual/trend encodings with missing-data gaps; keep the data contract renderer-independent and reassess a chart package only if interactions require it |
-| Server data client | TanStack Query | Fetching, invalidation, and background refresh coordination |
-| Local UI state | Small Zustand stores where needed | Temporary UI preferences and navigation state |
-| Offline data | `expo-sqlite` plus explicit outbox/sync layer | Durable local edits and catalog cache |
-| Session storage | `expo-secure-store` | Protect session credentials on the device |
-| Forms/contracts | React Hook Form + Zod | Input validation and shared API schemas |
-| Backend | TypeScript HTTP API, proposed Hono router | Small modular API without a separate microservice for every feature |
-| Compute | Neon Functions initially | Keep application logic near Neon data; verify runtime/job needs |
-| Database | Neon Postgres + Drizzle ORM/migrations | Relational records, SQL transactions, repeatable schema changes |
-| Authentication | Managed Neon Auth | Managed identities; verify native session/deep-link integration |
-| Photos | Private Neon Object Storage | Private assets with signed access and lifecycle cleanup |
-| AI orchestration | `@langchain/langgraph` | Explicit state, branching, bounded repair, review checkpoints |
-| Model access | Server adapter to OpenRouter → `minimax/minimax-m3` | One chosen multimodal model behind a replaceable interface |
-| Notifications | `expo-notifications` | Local reminders; remote push later if needed |
-| Health data | Health Connect via a compatible React Native bridge | Android health records and aggregates |
-| Calendar | Google Calendar API + explicit OAuth connection | Optional cross-device calendar schedule |
-| Build | EAS Build with APK profiles | Signed internal distribution |
-| Updates | New APKs initially; optional EAS Update | Runtime-compatible JS/assets updates later |
+| App | Next.js App Router, React, TypeScript | One responsive web app that can be installed from Android Chrome as a PWA |
+| Hosting | Vercel | Hosts the Next.js UI and server routes at one HTTPS origin; no laptop or separately hosted API is needed |
+| UI and graph | CSS design tokens, Manrope, accessible SVG line chart | Matches the black/white/green references and makes actual-versus-plan progress clear |
+| Browser data | Same-origin requests; React state for temporary view state | Avoids a second API URL or secrets in the browser bundle |
+| API | Next Route Handlers forwarding into the Hono modular API | Reuses server-side contracts and domain modules within the same deployment |
+| Database | Neon Postgres + Drizzle ORM/migrations | Cloud source of truth, relational constraints, and versioned schema |
+| Authentication | Better Auth on the server with invite-gated email/password accounts | Keeps session validation and database credentials server-side |
+| Contracts/domain | Shared Zod contracts and pure deterministic TypeScript services | Validate input/output independently of the model |
+| AI orchestration | Two bounded LangGraph workflows for meal and workout plans | Persisted state, explicit branches, bounded repair, and user approval |
+| Model access | Server adapter to OpenRouter → MiniMax M3 | Multimodal model stays replaceable and its key never reaches the browser |
+| Food photos | Browser file picker plus private object storage when implemented | User confirms food and portion; the vision result only suggests candidates |
+| Calendar | Optional Google Calendar API through web OAuth | Cross-device schedule sync with explicit consent |
+| PWA cache | Service worker caches only the static shell and safe public assets | Avoids caching private health responses or authentication data |
 
-Install Expo-compatible native package versions and record a lockfile. Phase 0 selected a focused `react-native-svg` renderer for the first progress graph to keep the plan-versus-measured line, sample points, and missing-data gaps under direct control without adding Skia/Reanimated solely for one chart. Keep the chart data contract independent of its renderer and reassess a larger chart library if zooming or richer gestures become necessary.
+The current project already uses a modular Hono API and mounts it behind Next Route Handlers. Keep one deployable application for now. Do not split every domain into a service.
 
-Neon currently documents Postgres, Auth, Functions, and Object Storage as backend primitives. Treat account/region access, limits, scheduling, and mobile SDK compatibility as Phase 0 checks. Keep adapters so the same TypeScript API/worker can run on a small Node host if a required runtime feature is unavailable. [Neon backend][neon-backend] [Neon Functions][neon-functions]
+A PWA behaves like an installed web app for the main logging and graph experience, but it does not have the same Android privileges as a native APK. Direct Health Connect access and reliable background step collection are unavailable in this architecture; manually enter steps/activity. Browser notifications depend on browser/installation permissions, so keep in-app reminders available. Treat offline mutation/sync as a later explicit feature, not an automatic consequence of installing the PWA.
 
 ### 8.2 Architecture diagram
 
 ```mermaid
 flowchart TB
-  subgraph Phone[Android phone]
-    UI[Expo React Native screens]
-    Local[SQLite catalog cache and user logs]
-    Outbox[Sync outbox]
-    Secure[Secure session storage]
-    Native[Camera, notifications, Health Connect]
-    UI <--> Local
-    Local <--> Outbox
-    UI <--> Secure
-    UI <--> Native
+  subgraph Android[Android phone]
+    PWA[Next.js PWA in Chrome or home screen]
+    SW[Service worker: static shell only]
+    PWA <--> SW
   end
 
-  subgraph Backend[Application backend]
-    Auth[Managed auth and invitation checks]
-    API[Authenticated TypeScript API]
-    Domain[Food, goals, activity, and progress services]
-    Jobs[Postgres jobs and outbox]
-    Worker[Worker and two LangGraph workflows]
+  subgraph Vercel[Vercel: one Next.js project]
+    UI[Next.js pages and components]
+    Routes[Same-origin Route Handlers: /api and /v1]
+    Hono[Hono modular API]
+    Auth[Better Auth session and invitation checks]
+    Domain[Goals, foods, activity, progress, planning]
+    UI --> Routes
+    Routes --> Hono
+    Hono --> Auth
+    Hono --> Domain
+  end
+
+  subgraph Cloud[Managed cloud services]
     DB[(Neon Postgres)]
-    Files[Private object storage]
-    Schedule[Scheduled dispatcher and recovery]
-    API --> Auth
-    API --> Domain
-    Domain <--> DB
-    API --> Jobs
-    Jobs <--> DB
-    Schedule --> Worker
-    Worker <--> Jobs
-    Worker <--> DB
-    API --> Files
-    Worker --> Files
+    Worker[Durable planning worker when needed]
+    Model[OpenRouter: MiniMax M3]
+    Storage[Private object storage, when photo upload is enabled]
+    Calendar[Google Calendar, optional]
   end
 
-  Outbox <-->|HTTPS sync| API
-  UI <-->|HTTPS requests and run status| API
-  UI -->|Authorized upload| Files
-  Worker --> Model[OpenRouter: MiniMax M3]
-  Worker --> Calendar[Google Calendar API]
+  PWA -->|HTTPS, same origin| UI
+  Routes --> DB
+  Domain --> DB
+  Worker <--> DB
+  Worker --> Model
+  Domain --> Storage
+  Worker --> Storage
+  Worker --> Calendar
 ```
+
+The laptop runs the local development server and reviewed migration command. After deployment, Vercel serves the UI/API and Neon stores data independently. A user's phone does not connect to the laptop.
 
 ### 8.3 Design patterns and module boundaries
 
-Use a **modular monolith**: one backend codebase with modules for identity, catalog, food logs, goals, progress, activity, planning, integrations, and reminders. API handlers authenticate and validate; domain services perform calculations; repositories manage SQL; adapters isolate provider-specific calls.
+Use a **modular monolith**: one deployable TypeScript application with modules for identity, catalog, food logs, goals, progress, activity, planning, integrations, and reminders. HTTP handlers authenticate and validate; domain services calculate; repositories issue owner-scoped SQL; provider adapters contain external APIs.
 
-Use explicit state machines for plans, AI runs, synchronization operations, and Calendar delivery. Use an outbox plus idempotency keys for changes that must survive retries. Derived daily summaries are read models that can be rebuilt from source records.
+Use deterministic calculations for calories, macros, target paths, and graph series. LLMs return structured suggestions only. Validate every response against schemas and catalog/exercise IDs, show a draft, and require user approval before it changes an active plan.
+
+Use explicit state machines for plans and AI runs. Persist input snapshots, model/version metadata, checkpoints, status, and idempotency keys. Do not expose LangGraph state as a general-purpose user memory store; durable user preferences belong in normal profile tables.
 
 ```text
 apps/
-  mobile/                 Expo application
-  backend/                HTTP routes, workers, provider adapters
+  web/                    Next.js PWA, pages, manifest, service worker
+  backend/                Hono API, auth, domain routes, provider adapters
+  mobile/                 Legacy Expo prototype; not the deployment target
 packages/
   contracts/              Zod schemas and API types
   domain/                 Pure calculations and validation policies
   database/               Drizzle schema, migrations, repositories
-  ui/                     Tokens and reusable mobile components
   planning/               LangGraph definitions and state schemas
 scripts/
   catalog/                Source import, normalization, curation tools
 docs/
-  operations/             Deployment, recovery, release notes
+  operations/             Deployment, recovery, owner runbook
 ```
 
-These are proposed repository paths; this planning task does not create an application skeleton.
+Remove or clearly mark the legacy Expo prototype only after confirming no required domain code remains there; it is not involved in Vercel deployment.
 
 ### 8.4 Background execution
 
-An API response of `202 Accepted` must mean that a job has been durably recorded, not that an unawaited JavaScript promise was started. Commit the AI run and its job in one Postgres transaction. A worker claims jobs with a lease, runs the workflow, checkpoints, and persists status.
+Do not start a long workflow with an unawaited promise inside an API request. For an initial small release, keep each online request bounded and persist the run state. Before enabling multi-step plans, verify Vercel function duration against actual provider latency. If generation can outlive the function request, write a durable Postgres job and run it from a separate worker/dispatcher; the job row and LangGraph checkpoint are the source of truth.
 
-Use supported Neon scheduling/trigger capabilities if they satisfy durable dispatch. If they do not, an authenticated external scheduler invokes the worker and recovery endpoint. A lightweight Node worker host is the fallback if needed. Resolve this in Phase 0; do not assume an HTTP Function automatically provides a durable queue or scheduler.
-
-The app polls run status while visible; push completion notifications can be added later. Waiting for user review is a persisted state and does not keep a worker or HTTP request open.
+Return a run ID only after the job is durably stored. The UI polls status while visible; approval resumes/revalidates the saved draft. Retries must be idempotent. The worker is a later deployment addition only if real workflow duration requires it; simple web hosting does not require it.
 
 ## 9. AI calls and model configuration
 
@@ -501,7 +493,7 @@ total:                                  $0.0060
 100 such requests:                      $0.60
 ```
 
-This excludes additional image/reasoning token consumption, retries, route differences, and infrastructure costs. Track actual usage rather than using this example as a monthly quote. Database, storage, authentication/email, scheduling, EAS builds/updates, and optional push infrastructure are separate cost categories.
+This excludes additional image/reasoning token consumption, retries, route differences, and infrastructure costs. Track actual usage rather than using this example as a monthly quote. Database, storage, authentication/email, scheduling, Vercel hosting, and optional push infrastructure are separate cost categories.
 
 ## 10. Two LangGraph workflows and memory
 
@@ -656,7 +648,7 @@ The auth provider owns its own account/session tables. Application `users` map a
 | `recipe_versions` | `recipe_id`, yield grams, portions, instructions, resulting nutrient-version ID | Immutable composition and yield |
 | `recipe_ingredients` | recipe-version ID, ingredient nutrient-version ID, grams | Derive totals and propagate relevant restrictions |
 | `favorite_foods` | `user_id`, `food_id` | Unique user/food pair |
-| `meal_logs` | `id`, `user_id`, timestamp, local day, meal slot, notes | Meal container; client-generated ID supports offline creation |
+| `meal_logs` | `id`, `user_id`, timestamp, local day, meal slot, notes | Meal container; idempotency key makes retried online creates safe |
 | `meal_log_items` | meal ID, nutrient-version ID, quantity/unit, resolved grams, nutrition snapshot, origin, optional media reference | Historical values do not change with catalog edits |
 | `food_day_status` | `user_id`, local day, timezone, completeness status | Distinguish incomplete tracking from zero intake |
 | `hydration_logs` | `user_id`, timestamp, local day, volume in mL, original quantity/unit | Optional simple water log; no inferred fluid consumption |
@@ -679,9 +671,9 @@ Record a snapshot of the name, serving conversion, and calculated nutrient value
 | `workout_session_exercises` | workout-session ID, exercise ID, order, notes | Actual exercise grouping |
 | `workout_sets` | session-exercise ID, set number, reps, load/unit, duration, effort | Actual completed values |
 | `activity_entries` | owner, start/end, activity type, duration, distance, optional steps, energy estimate, source | Manual/cardio activity with overlap metadata |
-| `health_import_records` | owner, device, record type, origin, external ID, revision, deletion state | Minimal fields needed for supported Health Connect imports |
-| `health_daily_aggregates` | owner, local day, timezone, window boundaries, device/source selection, metrics, sync time | Replace/upsert the same source/window; do not add successive snapshots |
-| `activity_links` | manual record, imported record, relation/reconciliation choice | Prevent overlap from becoming additive energy |
+| `health_import_records` | owner, device, record type, origin, external ID, revision, deletion state | Reserved for a future native Health Connect companion; not used in the PWA MVP |
+| `health_daily_aggregates` | owner, local day, timezone, window boundaries, device/source selection, metrics, sync time | Future native companion: replace/upsert the same source/window, never add snapshots |
+| `activity_links` | manual record, imported record, relation/reconciliation choice | Future imported-source reconciliation to prevent duplicate energy |
 | `daily_summaries` | owner/day/timezone, food totals, completeness, selected steps/activity, target version, computation version | Derived cache; rebuildable |
 
 Manual plans use the same `plans` and structured child tables. Accepting a meal plan does not automatically mark its food as consumed. Completing a workout plan item creates/links actual activity records rather than editing the planned exercise.
@@ -690,20 +682,20 @@ Manual plans use the same `plans` and structured child tables. Accepting a meal 
 
 | Table | Important fields | Rules |
 | --- | --- | --- |
-| `devices` | owner, installation ID, platform, app version, last sync, reminder-owner flag | Multiple devices supported without merging step totals blindly |
-| `reminder_rules` | owner, type, local time, weekdays, timezone mode, enabled, quiet hours | Preferences synchronize; scheduling happens on selected devices |
-| `device_reminder_instances` | device ID, rule ID, occurrence, local notification ID | Idempotent cancel/reschedule |
-| `integration_connections` | owner, provider, scopes, encrypted credentials, key version, expiry/status | Google credentials stay server-side; Health Connect has no cloud OAuth token |
+| `devices` | owner, installation ID, platform, app version, last seen | Optional browser installation identity; future native extension |
+| `reminder_rules` | owner, type, local time, weekdays, timezone mode, enabled, quiet hours | Preferences are authoritative in Neon; delivery support is browser-dependent |
+| `device_reminder_instances` | installation ID, rule ID, occurrence, notification ID | Optional delivery bookkeeping; idempotent cancel/reschedule |
+| `integration_connections` | owner, provider, scopes, encrypted credentials, key version, expiry/status | Google credentials stay server-side; native Health Connect has no cloud OAuth token |
 | `calendar_event_links` | owner, calendar ID, logical occurrence key, remote event ID, plan revision, status | Create/update/delete only mapped app-owned items |
 | `ai_runs` | owner, type, status, input snapshot/hash, route, schema version, usage, error, result reference | Product-facing audit and status |
 | LangGraph checkpoint tables | Official checkpointer-managed schema | Durable workflow state; separate from normal user profile memory |
 | `jobs` | type, owner, payload reference, status, attempts, lease, next run, error | Durable work and recovery |
 | `idempotency_keys` | owner, endpoint, key, request hash, status, saved response, expiry | Same key/different payload is rejected |
-| `user_changes` | owner, ordered revision, entity type/ID, operation, version | Incremental sync feed including tombstones |
+| `user_changes` | owner, ordered revision, entity type/ID, operation, version | Reserved for a future offline/native sync feed; not part of online-first PWA MVP |
 | `audit_events` | owner/actor, action, entity, timestamp, redacted metadata | Log critical changes without recording secrets or full health payloads |
 | `push_subscriptions` | device, provider token, enabled, invalidated time | Optional later remote completion notifications |
 
-SQLite mirrors only the data needed for that logged-in user, with additional local `outbox`, `sync_state`, and upload-state tables. Never use the same unpartitioned local database for different signed-in accounts.
+Health import, browser/device-sync, and change-feed tables are future-extension points carried over from the earlier native design; the online-first PWA MVP does not use them. It does not mirror private logs into browser storage. The service worker caches only public static assets; authenticated health data remains server-side.
 
 ### 11.6 Main entity relationships
 
@@ -748,167 +740,120 @@ This is a conceptual relationship diagram; the table descriptions define interme
 - Use database constraints and owner-scoped repositories; add row-level security where the selected connection/auth pattern reliably supplies transaction-local user context. Do not claim RLS protection from a privileged service role that bypasses it.
 - Apply ordered migrations. Keep synthetic development data separate from production health data.
 
-## 12. API and offline synchronization
+## 12. API and connectivity
 
-### 12.1 Proposed API surface
+### 12.1 Same-origin API surface
 
-All routes are examples of the intended contract. Resolve identity from the validated session and expose only authorized records.
+The browser calls the Vercel deployment at the same origin. Resolve identity from the validated Better Auth session, validate all inputs with shared schemas, and scope each private query to the authenticated user.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /v1/me` | Profile, preferences, connection flags |
-| `PATCH /v1/me` | Version-checked profile/preference updates |
-| `POST /v1/goals/preview` | Deterministic proposed targets/timeline |
-| `POST /v1/goals` | Accept a versioned goal |
-| `GET /v1/foods?query=...` | Search accessible catalog entries |
-| `POST /v1/custom-foods` | Create a private food/version |
-| `POST /v1/recipes` | Create/validate a private recipe version |
-| `POST /v1/meal-logs` | Idempotent meal creation |
-| `PATCH/DELETE /v1/meal-logs/:id` | Version-checked changes and tombstones |
-| `POST /v1/measurements` | New measurement with source metadata |
-| `POST /v1/hydration-logs` | Optional water entry with explicit volume/unit |
-| `POST /v1/workout-sessions` | Actual workout, exercises, and sets |
-| `POST /v1/activity-entries` | Manual walking/cardio record |
-| `GET /v1/days/:date` | Daily summary with timezone/completeness |
-| `GET /v1/progress` | Raw/trend/planned/forecast series and method versions |
-| `POST /v1/uploads` | Scoped temporary authorization for a food image |
-| `POST /v1/food-recognition/runs` | Queue a photo-recognition operation |
-| `POST /v1/plans/meal/runs` | Queue meal planning |
-| `POST /v1/plans/workout/runs` | Queue workout planning |
-| `GET /v1/ai-runs/:id` | Read authorized status/result |
-| `PATCH /v1/plans/:id` | Validate and save draft edits |
-| `POST /v1/plans/:id/approve` | Revalidate, activate, and enqueue side effects |
-| `POST /v1/plans/:id/reject` | Reject a draft |
-| `POST /v1/sync/push` | Apply local outbox operations |
-| `GET /v1/sync/pull?cursor=...` | Return versioned changes/tombstones |
-| `POST /v1/health/import` | Upsert authorized-device records/aggregate snapshots |
-| `PUT /v1/reminders` | Update reminder preferences |
-| `POST /v1/connections/google/start` | Begin authorized Calendar connection |
-| `POST /v1/connections/google/disconnect` | Revoke/erase connection credentials |
-| `POST /v1/export` | Queue data export |
-| `DELETE /v1/account` | Confirmed account/data deletion process |
+| GET /v1/me | Profile, preferences, connection flags |
+| PUT /v1/me | Update profile and preferences |
+| POST /v1/goals/proposal | Deterministic goal and target proposal |
+| POST /v1/goals/accept | Accept a versioned goal |
+| GET /v1/foods?query=... | Search accessible catalog entries |
+| POST /v1/custom-foods | Create a private food/version |
+| POST /v1/recipes | Create/validate a private recipe version |
+| POST /v1/meal-logs | Idempotent meal creation |
+| PATCH/DELETE /v1/meal-logs/:id | Version-checked changes and deletion |
+| POST /v1/measurements | Add a measurement with source metadata |
+| POST /v1/hydration-logs | Optional water entry with explicit volume/unit |
+| POST /v1/workout-sessions | Actual workout, exercises, and sets |
+| POST /v1/activity-entries | Manual walking/cardio/step entry |
+| GET /v1/days/:date | Daily summary with timezone/completeness |
+| GET /v1/progress | Measured, trend, planned, and eligible forecast series |
+| POST /v1/uploads | Scoped temporary authorization for a food image |
+| POST /v1/food-recognition/runs | Start a photo-recognition operation |
+| POST /v1/plans/meal/runs | Start meal planning |
+| POST /v1/plans/workout/runs | Start workout planning |
+| GET /v1/ai-runs/:id | Read authorized run status/result |
+| PATCH /v1/plans/:id | Validate and save draft edits |
+| POST /v1/plans/:id/approve | Revalidate, activate, and enqueue side effects |
+| POST /v1/plans/:id/reject | Reject a draft |
+| PUT /v1/reminders | Update reminder preferences |
+| POST /v1/connections/google/start | Begin authorized Calendar connection |
+| POST /v1/connections/google/disconnect | Revoke/erase connection credentials |
+| POST /v1/export | Start a data export |
+| DELETE /v1/account | Confirmed account/data deletion process |
 
-Use consistent error codes such as `INPUT_REQUIRED`, `CONFLICT`, `PLAN_STALE`, `CATALOG_GAP`, `PERMISSION_REQUIRED`, `MODEL_UNAVAILABLE`, and `BUDGET_EXCEEDED`. Return a request ID and actionable message without exposing internal errors.
+Use consistent error codes such as INPUT_REQUIRED, CONFLICT, PLAN_STALE, CATALOG_GAP, PERMISSION_REQUIRED, MODEL_UNAVAILABLE, and BUDGET_EXCEEDED. Return a request ID and actionable message without exposing internal errors.
 
-### 12.2 Offline write flow
+### 12.2 Online-first writes
 
-```text
-User saves a food/activity log
-→ SQLite transaction saves the record and an outbox operation
-→ UI updates immediately with a pending-sync indicator
-→ Sync worker sends the operation with its idempotency key
-→ Server validates ownership, versions, and units
-→ Server commits the record plus its ordered change record
-→ Device receives canonical values and acknowledges the outbox item
-```
+For the first release, save user logs through authenticated HTTPS requests. Show a pending state while saving and confirm success only after the server commits. Use idempotency keys for create requests and expected versions for edits so browser retries or double taps cannot create duplicate meals/workouts or overwrite a newer edit.
 
-Client-generated entity IDs make retries safe. Store operation IDs, payload hashes, expected server versions, and dependencies such as meal header before its items. A retried mutation must not create an extra meal or workout.
+The PWA caches only public static assets. Do not persist private health records, session responses, or API data in a service-worker cache. If the connection is unavailable, explain that a log was not saved and provide a retry action.
 
-### 12.3 Pull cursors and conflict handling
+### 12.3 Concurrent edits and local-day handling
 
-Use an opaque per-user change cursor with a stable ordered revision. The revision mechanism must preserve committed visibility; do not rely on client timestamps or an ordinary sequence allocation that could skip a transaction committed later. One implementation is a transaction-locked per-user revision counter updated with the mutation/change rows.
+Use record versions and server transactions to detect a stale edit from another browser/device. Preserve the saved record and ask the user to reload/reapply their edit rather than silently overwriting newer values.
 
-Tombstones communicate deletion to every device. Retain enough history for the supported offline interval; an expired cursor requests a full authorized resync.
-
-For an edited record, send its expected version. On conflict, preserve the local edit and server version and offer a clear resolution. Avoid silently replacing quantities or deleting the other device's change. Imported Health Connect records use source revision semantics; server-derived summaries are recomputed instead of merged as user edits.
-
-Timezone/day keys must include their interpretation. Store actual timestamps and the logging timezone. Traveling can change the day view; choose and document whether historical logs retain their original local day. Proposed default: preserve the original logging day and timezone and provide clear display conversion where needed.
+Store actual timestamps and the logging timezone. Proposed default: preserve the original logging day and timezone, and display a clear converted time when the user travels. Compute day summaries with the recorded timezone so the same meal does not shift days without explanation.
 
 ### 12.4 Connectivity boundaries
 
-- Cached search, manual food/workout logs, measurements, and local reminders work offline.
-- AI generation, first-time catalog lookup, cloud restore, and Google Calendar synchronization require internet.
-- A photo can remain in a local pending-upload state; show the distinction between saved locally and recognized.
-- Sync on app open/resume, connectivity recovery, explicit refresh, and opportunistic native background work.
-- Android background execution is best effort; correctness cannot depend on the phone waking exactly on schedule.
-- On logout, clear/revoke that user's session, remove or lock their local records, cancel their notifications, and prevent late sync callbacks from writing into another account.
+- Viewing and writing private data, catalog search, photo recognition, AI planning, and Calendar sync require the deployed HTTPS API and an internet connection.
+- The service worker offers an offline shell and help text only; it does not imply that unsent logs are stored.
+- Static resources may remain cached. Do not cache authenticated API responses, session endpoints, or private images.
+- If Vercel, Neon, or a model provider is unavailable, show a retryable status and keep already saved cloud data intact.
+- Do not assume a phone will run background work on a schedule.
 
-## 13. Android and Health Connect
+## 13. Android PWA capabilities and limits
 
-### 13.1 Development approach
+### 13.1 Supported web-app path
 
-Create a custom Expo development build early. Health Connect and other native modules must be present in that build; Expo Go alone cannot validate the complete app. Native dependency or manifest changes require a rebuilt binary. Friends receive a standalone release APK with the JavaScript bundle embedded, so the developer's laptop and Metro server are not needed for normal use. [Expo development builds][expo-dev-build] [Development build FAQ][expo-dev-faq]
+The first Android experience is a responsive PWA opened at the deployed HTTPS URL. Android Chrome can offer Add to Home screen / Install app, and the installed shortcut opens the site in an app-like window. The same URL works in a normal browser. There is no Android package ID, APK signing, EAS build, or Play Store step.
 
-Use the system photo picker where possible and ask for camera access only when taking a photo. Store sessions with SecureStore, support Android back navigation, respect safe areas/font scaling, and verify notification deep links.
+Use a browser file picker for meal photos. Ask for camera access only through the browser's standard permission flow when the user chooses to take a photo. Keep account sessions in secure, same-origin cookies. Respect safe areas, touch sizes, keyboard behavior, font scaling, and Android browser navigation.
 
-### 13.2 Health Connect integration
+The service worker should cache the static shell and safe assets only. Do not cache authenticated API responses, meal logs, profile/goal data, session endpoints, or private images by default. Show an offline page when unavailable. Cloud writes need an active connection until a separate local data/outbox feature is designed and validated.
 
-Health Connect is an Android on-device data store, not a cloud feed that the backend can read on its own. The app reads approved data on the phone and uploads only the normalized records or aggregates needed by this product.
+### 13.2 Steps, Health Connect, and native capabilities
 
-Initial permission scope: steps, exercise sessions, and optionally weight when the user explicitly enables them. Add active energy only if it will be used meaningfully and its source/overlap policy is implemented. Do not request unrelated medical, sleep, or heart-rate data for a screen that does not need it.
+A web PWA cannot directly call the Android Health Connect SDK or reliably collect all-day steps in the background. The first release therefore supports manual step and activity entry. Do not display an unavailable Health Connect connection as if it were implemented.
 
-Implementation sequence:
+If reliable phone sensor collection becomes important, treat it as a later native companion decision. A native Android app would need explicit Health Connect availability checks, purpose explanations, minimal requested permissions, source-aware aggregate reads, revocation handling, deduplication, and real-device verification. Do not create a native wrapper solely to claim step sync without validating these behaviors.
 
-1. Check Android/Health Connect availability and bridge compatibility.
-2. Show the purpose of the connection and the data used.
-3. Request only supported needed permissions.
-4. Read initial available data in bounded date windows.
-5. Use the Aggregate API for step totals rather than summing every app's raw step records.
-6. Persist source identity, timestamps/window, device, sync time, and a replaceable aggregate version.
-7. Refresh on foreground/resume and explicit refresh.
-8. Add background reads only after feature checks and separate permission handling.
-9. Handle permission revocation, source edits/deletions, and account changes.
+### 13.3 Future native transition
 
-Health Connect availability depends on Android version and device support. Android documentation describes system integration on Android 14+ and a separate app on older supported versions. Check feature availability instead of promising every Android phone has the same data. [Availability][health-availability]
-
-On-device step capture requires specific Android/system extension support; on other phones another compatible app/device may need to supply records. A successful connection does not guarantee historical steps exist. Health Connect's step aggregation helps respect source priority and duplicates. [Reading phone steps][health-read] [Aggregate behavior][health-aggregate]
-
-Background reading and older history can require additional permissions and feature availability. Preserve manual logging and foreground sync when those capabilities are unavailable. Show the last-sync time and an “Access needs attention” state after revocation. [Health Connect integration guide][health-start] [Background/history codelab][health-codelab]
-
-### 13.3 Sideload and bridge feasibility check
-
-During Phase 0, build a minimal signed/sideloaded native integration and confirm the permission flow on the actual phone. Check current requirements for the package's Health Connect access, privacy-rationale activity, and distribution mode; do not assume that omitting Play Store publication removes Android's permission requirements.
-
-Use the maintained `react-native-health-connect` package and its version-appropriate Expo plugin, or a small native adapter if necessary. Check the package's current setup instructions: older separate plugin instructions may no longer apply to newer releases. [Bridge repository][health-bridge]
-
-Use native activity recognition/step-sensor collection only as a later optional fallback. A foreground pedometer value is not automatically reliable all-day tracking across app restarts and device reboots. Battery behavior, counter resets, permissions, and background execution need an explicit implementation.
+Keep contracts and domain calculations independent of the web UI so a future Android client could call the same API. Native Android/Health Connect is a separate product milestone with a new distribution and maintenance cost. It is not required to deploy or use this PWA.
 
 ## 14. Reminders and Google Calendar
 
-### 14.1 Local reminders
+### 14.1 PWA reminders
 
-Local notifications provide meal-log, workout, weigh-in, optional hydration, and weekly-review reminders. They should continue for their scheduled horizon without a network connection.
+Start with in-app reminders and user-selected time preferences. Browser notifications are optional and depend on browser support, install state, permissions, and user settings; they are not guaranteed background alarms. Never make food logging or workout completion depend on a notification arriving.
 
-Each rule stores its type, local time, weekdays, timezone mode, quiet hours, enabled state, and optional connection to an approved plan. Each device stores the generated notification IDs so changes can cancel/reschedule existing notifications without duplicates.
-
-Use a rolling bounded schedule, proposed as the next fourteen days, replenished on app launch and permitted background work. Document the offline horizon and show when scheduling needs refreshing. Prefer one primary reminder device per person, with an explicit multi-device option.
-
-Create Android notification channels and request notification permission in context. Default meal/workout reminders to ordinary best-effort timing. Exact-alarm access is not a baseline requirement for this app; do not present meal reminders as guaranteed minute-exact alarms. Verify reboot, timezone changes, disabled channels, quiet hours, and battery restrictions on real phones. [Expo Notifications][expo-notifications]
-
-Notification taps should open the relevant meal, workout, or weekly review. A completed action can cancel its outstanding reminder. Keep food/weight details out of lock-screen text by default.
+Keep reminder content private on lock screens. Add controls to pause, reschedule, and disable reminders. For dependable scheduled notifications on every supported phone, a later native client may be needed.
 
 ### 14.2 Optional Google Calendar connection
 
 Calendar is a separate opt-in connection from app login. Start with one-way synchronization from approved app schedules into a dedicated app-created calendar. Avoid reading or editing unrelated personal events.
 
-The proposed minimum scope is `https://www.googleapis.com/auth/calendar.app.created`, which permits creating secondary calendars and managing their events. Verify exact required API calls and scopes before implementation. [Calendar scopes][calendar-scopes]
+Use a supported Google web OAuth flow with exact redirect URLs registered in Google Cloud. Bind authorization state to the signed-in user, validate callbacks, request only the needed Calendar scope, and keep any confidential client secret and refresh-token encryption key on the server. Check Google consent-screen testing and refresh-token rules before inviting friends.
 
 Flow:
 
 ```text
 User enables Calendar and selects what to sync
-→ Supported Google authorization flow
-→ Backend receives/exchanges the authorized result
-→ Encrypt and store refresh credentials server-side
+→ Web OAuth authorization with state validation
+→ Server exchanges and encrypts the authorized token
 → Create/select this connection's app-created calendar
-→ Map approved workout/meal/reminder occurrences to events
+→ Map approved workout occurrences to events
 → Persist event links and delivery status
 ```
 
-Select a supported native Google authorization/server-auth-code integration or a supported browser flow during Phase 0. Register the package identity, signing certificate fingerprints, redirect configuration, and relevant OAuth clients. Keep any confidential client secret on the server. Bind authorization state to the signed-in user and validate callbacks; use PKCE where the selected flow requires it. Do not hand-roll an unsupported Android redirect scheme.
-
-Google OAuth testing status is separate from Play Store distribution. External OAuth apps left in Testing can receive refresh tokens that expire after seven days for Calendar access. Plan the appropriate production consent configuration/verification or clearly accept reconnection during testing; do not promise permanent sync from a test-user configuration. [Google OAuth token rules][google-oauth] [App state guidance][google-oauth-state]
-
 ### 14.3 Event delivery and duplicate prevention
 
-- Default to syncing workouts and weigh-ins; let the user opt into meal slots to avoid calendar clutter.
+- Default to syncing workouts; let the user opt into meal slots to avoid calendar clutter.
 - Use a stable logical occurrence key, plan revision, calendar ID, and remote event ID.
-- Make event insertion retry-safe using a valid deterministic Calendar event identifier where supported, or reconciliation against stored app metadata before re-creating an event.
+- Make event insertion retry-safe and reconcile against stored app metadata before re-creating an event.
 - Plan edits update/cancel only app-owned mapped events. Use a bounded future horizon and replenish it.
 - A failed Calendar update appears as pending/failed and retries without blocking food or workout logging.
-- Let users choose app notifications, Calendar notifications, or both, with a duplicate-reminder explanation.
+- Let users choose app reminders, Calendar notifications, or both, with a duplicate-reminder explanation.
 - Disconnect stops future delivery, revokes/deletes credentials, and offers an explicit choice about existing app-created events.
-- Initial synchronization is one-way. If the user edits/deletes an event in Calendar, detect the conflict and explain whether to stop managing it or restore the app schedule; do not silently claim two-way sync.
+- Initial synchronization is one-way. Explain conflicts if users edit/delete a mapped Calendar event.
 
 Calendar creation and reminders are deterministic side effects of an approved plan or explicit user setting. The model cannot publish events while merely generating a draft.
 
@@ -916,11 +861,11 @@ Calendar creation and reminders are deterministic side effects of an approved pl
 
 ### 15.1 Account and data boundaries
 
-Require an invitation at signup and enforce access at the backend. An APK download link is not authentication. Validate sessions, resource ownership, nested references, file access, AI run ownership, and integration ownership on every relevant request.
+Require an invitation at signup and enforce access at the backend. A private URL is not authentication. Validate sessions, resource ownership, nested references, file access, AI run ownership, and integration ownership on every relevant request.
 
-Use HTTPS, private file access, managed password handling, protected session storage, and encrypted Google refresh credentials with a server-held encryption key. Keep database passwords, OpenRouter keys, storage signing credentials, and OAuth secrets out of the APK. Values named `EXPO_PUBLIC_*` are public configuration, not secrets.
+Use HTTPS, private file access, managed password handling, secure same-origin session cookies, and encrypted Google refresh credentials with a server-held encryption key. Keep database passwords, OpenRouter keys, storage signing credentials, and OAuth secrets in server environment variables. Never expose them as NEXT_PUBLIC values.
 
-User data export should include profile, goals, logs, plans, and measurement history in understandable JSON/CSV. Deletion must cover operational rows, checkpoint state, temporary exports, photo objects, credentials, and active jobs, with an explicitly documented backup-retention window. Deletion tombstones must also remove synced local copies on the next connection; an offline device cannot be remotely guaranteed to erase instantly.
+User data export should include profile, goals, logs, plans, and measurement history in understandable JSON/CSV. Deletion must cover database records, checkpoint state, temporary exports, photo objects, credentials, and active jobs, with backup retention documented. The PWA should avoid persistent local health-data copies unless a later offline design defines account isolation and deletion behavior.
 
 ### 15.2 Provider exposure and prompt handling
 
@@ -936,7 +881,7 @@ Treat notes, food descriptions, imported text, and model outputs as untrusted da
 - Use versioned migrations, a pre-migration backup strategy, and a documented restore exercise.
 - Define environment-specific job dispatch and retry/dead-letter handling.
 - Lease jobs and recover expired leases; distinguish provider timeouts from invalid outputs.
-- Record redacted request IDs, execution durations, job backlog, sync conflicts, provider errors, and per-run token/cost usage.
+- Record redacted request IDs, execution durations, job backlog, concurrent-edit conflicts, provider errors, and per-run token/cost usage.
 - Avoid storing raw images, secrets, meal histories, or reasoning traces in generic logs/analytics.
 - Monitor database/storage usage, error rates, job age, and AI spend.
 - Keep essential tracking available during model or Calendar outages.
@@ -951,362 +896,241 @@ Reserve an estimated budget before starting a job and reconcile with actual usag
 
 ## 16. Implementation phases
 
-The order below delivers the core tracking and graph experience before AI and external integrations. A rough planning range for one experienced developer is approximately 9–16 weeks of development time for the complete private release, depending heavily on catalog curation and native/OAuth issues. It is not a delivery commitment; refine after Phase 0.
+The sequence delivers tracking and the signature progress graph before AI features. The current choice is a web PWA; APK, native Android, and Play Store work are outside this plan. Work estimates should be set after the first end-to-end deployment.
 
-### Phase 0 — Confirm feasibility and freeze the initial contracts
+### Phase 0 — Confirm the web deployment path
 
-**Build/decide**
+- Confirm the Vercel project domain, Neon region/database, and invitation-only access.
+- Confirm the root environment names and ensure the ignored local environment file stays out of Git.
+- Verify that the PWA manifest, service worker, same-origin API routes, and auth origins match the selected domain.
+- Record the PWA limitation: manual steps/activity first; no direct Health Connect integration.
+- Keep AI provider calls disabled until the server-side secret is configured.
 
-- Inventory the owner/friends' Android versions, phones, and target use cases.
-- Confirm the final working scope, app name/package-ID decision deadline, adult/general-wellness policy, and initial catalog categories.
-- Verify Neon Auth mobile session support, Functions runtime limits, private storage, durable dispatch/scheduler choice, and database region.
-- Verify M3 image input, thinking control, structured-output parameters, route/provider settings, usage reporting, and account limits.
-- Create a minimal custom development build with chart, notifications, and Health Connect dependencies.
-- Confirm Health Connect permission/data availability on a sideloaded build on the owner's phone.
-- Validate the Google Calendar authorization approach and expected testing/production consent requirements.
-- Select reviewed goal formulas, eligibility limits, measurement rules, and supported target policy.
+**Deliverables:** PWA/Vercel decision record, deployment checklist, safe environment template.
 
-**Deliverables:** Decision log, pinned compatible package set, provider configuration contract, native feasibility notes, initial schemas.
+### Phase 1 — PWA foundation and visual system
 
-**Exit criteria:** No unresolved assumption blocks the basic stack; unavailable integrations have documented fallbacks and are not required for manual tracking.
+- Build the Next.js responsive app shell with the supplied minimal black, white, gray, and lime-green theme and Manrope.
+- Implement dashboard, Food, Activity, and Progress navigation for mobile and desktop widths.
+- Implement the install manifest, original app icon, static-only offline fallback, and same-origin API bridge.
+- Ensure no server secret enters client JavaScript or service-worker caches.
 
-### Phase 1 — App foundation and design system
+**Deliverables:** Installable web shell with responsive sample screens.
 
-**Build**
+**Exit criteria:** It builds as a Next.js project and opens in Android Chrome; screen reader labels, keyboard, safe areas, and touch sizes are usable.
 
-- Initialize the TypeScript monorepo and Expo app.
-- Add Router, theme tokens, Inter, icons, spacing/typography, reusable cards/buttons/inputs.
-- Build the four-tab shell and representative Home, Food, Activity, and Progress screens with clearly marked sample data.
-- Implement loading/error/empty/offline components and accessibility labels.
-- Establish development and private-release app variants.
+### Phase 2 — Neon, authentication, invitations, and schema
 
-**Deliverables:** Navigable development build, component library, agreed screen designs.
+- Provision Neon Postgres and apply reviewed Drizzle/auth migrations from a trusted local checkout.
+- Verify Better Auth email/password signup, sign-in, cookie session, sign-out, and invite-code enforcement.
+- Check access isolation with separate accounts and ensure every private query is owner-scoped.
+- Deploy the same Next.js/Hono application to Vercel; do not create a separate API deployment.
+- Create a friend invitation through the owner CLI.
 
-**Exit criteria:** Theme matches the intended references, graph labels are readable on a real phone, and navigation works with Android back behavior and larger text.
+**Current status:** Auth, API, migrations, and environment placeholders are scaffolded locally. Live Neon migration, Vercel deployment, and two-account isolation remain to be completed.
 
-### Phase 2 — Backend, identity, database, and synchronization foundation
-
-**Current status:** Local code foundations are in place, but this phase is still open. Neon migrations, two-account isolation checks against a live database, a development API deployment, and an Android SQLCipher/SecureStore build require provider access and an Android device. See [the Phase 2 decision log](decisions/0003-phase-2.md).
-
-**Build**
-
-- Provision the selected development Neon resources and migration pipeline.
-- Implement managed auth, invitation enforcement, session renewal, secure local sessions, and account isolation.
-- Create core user/catalog/log/goal tables and sync/idempotency mechanisms.
-- Implement private upload authorization and storage ownership checks.
-- Add SQLite migrations, outbox, pull cursors, tombstones, and version conflicts.
-- Deploy an authenticated development API; establish worker dispatch/recovery infrastructure.
-
-**Deliverables:** Real authenticated API, repeatable migrations, offline sync foundation.
-
-**Exit criteria:** Two accounts cannot read/update each other's rows/files/runs. Repeated sync requests create one logical record, and an account switch cannot expose previous local records.
+**Deliverables:** Hosted login and invitation-backed accounts.
 
 ### Phase 3 — Onboarding and accepted goal engine
 
-**Build**
-
 - Implement the onboarding steps and editable review.
-- Store profile, restrictions, equipment, availability, and user units.
+- Store profile, restrictions, equipment, availability, units, and timezone.
 - Implement deterministic target calculation, manual target mode, feasibility feedback, and versioned acceptance.
-- Create planned trajectory points and measurement entry.
+- Create planned trajectory points and weight-measurement entry.
 - Preserve old goal versions when a goal changes.
 
-**Deliverables:** Complete signup-to-goal flow and deterministic calculation module.
-
-**Exit criteria:** Unit conversions, invalid timelines, gain/loss/maintenance modes, unsupported automatic-planning cases, and version history behave as specified.
+**Deliverables:** Signup-to-goal flow and deterministic calculation module.
 
 ### Phase 4 — Food catalog and manual food tracking
 
-**Build**
-
-- Create import/curation tools and the initial reviewed food catalog.
+- Create import/curation tools and the initial reviewed catalog of common group foods.
 - Add aliases, preparation states, portions, provenance, and catalog quality labels.
-- Implement food search, recents/favorites, custom foods, and the recipe builder.
+- Implement food search, recents/favorites, custom foods, and recipe creation.
 - Implement meal logs, quantities, copied meals, edits/deletes, and nutrition snapshots.
-- Add daily totals, macro display, day-completeness controls, and offline food logging.
-- Add the optional simple hydration log when enabled in the agreed scope.
+- Add daily totals, macro display, and a control distinguishing incomplete food logging from a complete zero-intake day.
 
 **Deliverables:** Usable daily manual nutrition tracker.
 
-**Exit criteria:** Known fixture meals/recipes produce correct quantity-based totals, raw/cooked entries are distinct, catalog edits preserve history, and offline retries do not duplicate meals.
-
 ### Phase 5 — Signature progress graph and daily dashboard
 
-**Build**
-
-- Connect actual measurements and planned goal trajectory to the hero chart.
-- Add dots, trend, target marker, date ranges, touch inspection, and revision annotations.
+- Connect actual measurements and the accepted goal trajectory to the main graph.
+- Add measured points, a trend line, target/date marker, range controls, and goal-revision annotations.
 - Add daily food/activity context with completeness and data-source labels.
-- Implement loss/gain/maintenance comparison and accessible graph summaries.
-- Add a weekly review payload. Forecasting remains gated until evidence rules are met.
+- Add accessible textual summaries and a weekly review payload. Gate forecasts until sufficient measurements exist.
 
-**Deliverables:** Home and full Progress views backed by real data.
+**Deliverables:** Home and Progress views backed by real data.
 
-**Exit criteria:** The user can explain their measured position relative to the accepted plan. Missing data, new goals, same-day readings, flat trends, and timezone boundaries display honestly.
+**Exit criteria:** Actual measurements are visually distinct from the planned path; missing data is never drawn as zero.
 
-### Phase 6 — Exercise library, custom plans, and manual activity
+### Phase 6 — Exercise, user plans, and manual activity
 
-**Build**
+- Create the reviewed exercise library and starter workout templates.
+- Support user-authored workout plans, weekly scheduling, sessions, sets/reps/load, walking/cardio, manual steps, and weight logging.
+- Add source/provenance labels to activity and calorie estimates.
+- Show exercise-specific progress without mixing unlike measures on the body-weight graph.
 
-- Create the reviewed exercise library and initial workout templates.
-- Implement user-entered plans, weekly scheduling, workout sessions, sets/reps/load, and walking/cardio entries.
-- Add estimated-energy provenance and overlap handling scaffolding.
-- Add exercise-specific progress and today's activity card.
-
-**Deliverables:** Complete manual tracking MVP and an internal preview APK.
-
-**Exit criteria:** A person can use the app for a full day without AI, including offline food/workout/weight entry and a later successful sync.
+**Deliverables:** Complete manual tracking MVP.
 
 ### Phase 7 — Food photo recognition
 
-**Build**
+- Add browser photo selection, image preprocessing, private uploads, and cleanup rules.
+- Add a server-side MiniMax M3 vision adapter with bounded output and schema validation.
+- Match candidate labels to the app catalog and let the person confirm food and quantity.
+- Record model usage and provide a fully functional manual fallback.
 
-- Add picker/camera, preprocessing, private uploads, and cleanup rules.
-- Add the M3 vision adapter with bounded output and structured validation.
-- Match candidate names to catalog entries and build confirmation/quantity screens.
-- Add manual fallback, ambiguous/multiple-item handling, and usage recording.
+**Deliverables:** Photo-assisted logging using the same catalog-based nutrition calculation path.
 
-**Deliverables:** Photo-assisted logging using the existing food-log calculation path.
-
-**Exit criteria:** No photo automatically establishes calories or portions; uncertain dishes can be corrected; failures preserve a usable manual path; objects expire as documented.
+**Exit criteria:** A photo never establishes exact portions or calories; uncertain/mixed dishes can be corrected.
 
 ### Phase 8 — Meal-planning LangGraph workflow
 
-**Build**
+- Implement shared planning state, Postgres checkpoints, durable run status, and review interrupts.
+- Retrieve eligible catalog/recipe records and send compact constraints to M3.
+- Calculate nutrition deterministically, validate IDs/restrictions/portions, allow at most one repair, then save a draft.
+- Add review, swaps/edits, stale-input detection, approval, and plan history.
+- Do not log planned food as eaten unless the user confirms it.
 
-- Implement common planning state, official Postgres checkpoints, jobs, and review interrupts.
-- Retrieve suitable catalog/recipe versions and construct explicit constraints.
-- Implement M3 generation, deterministic nutrient calculations, validation, one repair, and controlled failure.
-- Build plan review, swaps/edits, stale-input detection, approval, and history.
-- Ensure plan food becomes a consumption log only after the user confirms eating it.
-
-**Deliverables:** Reviewed weekly meal plans and reusable planning infrastructure.
-
-**Exit criteria:** Invalid IDs/restrictions/portions fail validation; an interrupted run resumes without duplicate drafts; stale drafts cannot silently replace the active plan.
+**Deliverables:** Reviewed weekly meal plans.
 
 ### Phase 9 — Workout-planning LangGraph workflow
 
-**Build**
+- Use goals, experience, available equipment, and schedule with reviewed templates.
+- Generate sessions using catalog exercise IDs; validate equipment, frequency, rest, and volume.
+- Add review, edits, approval, superseding, and completion links.
+- Reuse the same run/checkpoint/budget/ownership controls as meal planning.
 
-- Add goal/experience/equipment/schedule context and reviewed template retrieval.
-- Generate sessions using exercise IDs, validate scheduling/equipment/rest/volume, and permit one repair.
-- Build review, replacements, approval, superseding, and completion links.
-- Share the existing job, checkpoint, budget, ownership, and run-status mechanisms.
+**Deliverables:** Reviewed workout plans. No generated draft is an actual workout until the user records completion.
 
-**Deliverables:** Personalized reviewed workout plans.
+### Phase 10 — Reminders and optional Google Calendar
 
-**Exit criteria:** No unsupported equipment/exercise slips through; user edits are revalidated; generating a draft creates no actual workout or calendar event.
+- Add in-app reminder preferences and optional browser notifications with clear permission/failure states.
+- Implement web OAuth for Calendar only if desired; store tokens server-side.
+- Sync approved workout occurrences idempotently to an app-created Calendar.
+- Keep activity logging usable if reminders or Google are unavailable.
 
-### Phase 10 — Health Connect and activity reconciliation
+**Deliverables:** Optional web reminders and one-way Calendar integration.
 
-**Build**
+### Phase 11 — Production hardening and private release
 
-- Complete permissions, privacy rationale, foreground import, and step aggregation.
-- Import selected exercise/weight records and preserve record identity/revisions.
-- Reconcile manual/synced activity and selected device/source snapshots.
-- Add last-sync, missing-source, permission-revoked, and unsupported-device states.
-- Add background reads/history only where supported and useful.
+- Configure production Vercel environment variables and reviewed Neon migrations/backups.
+- Verify login, invitations, two-user isolation, responsive PWA behavior, error handling, deletion/export, and restore procedures.
+- Check accessibility, privacy/cache behavior, upload retention, provider limits, and actual AI cost before enabling each model workflow.
+- Share the HTTPS link privately and invite a small friend group.
 
-**Deliverables:** Reliable optional activity sync on supported phones.
+**Deliverables:** Stable Vercel PWA, owner runbook, friend onboarding instructions.
 
-**Exit criteria:** Reimporting the same window changes an existing snapshot instead of adding steps; manual walks and imported sessions do not double-count energy; no permission means graceful manual operation.
+**Exit criteria:** The app works from the deployed domain with the laptop off; a friend can sign in, log data, and view their own progress.
 
-### Phase 11 — Reminders and Google Calendar
+### Phase 12 — Real-use refinement
 
-**Build**
+- Gather explicit feedback on logging friction, missing foods, graph clarity, plans, and reminders.
+- Review actual model spend, latency, validation failures, and operational errors.
+- Expand the catalog from confirmed requests and quality sources.
+- Version changes to graph rules, goals, prompts, and templates.
 
-- Implement local reminder rules, notification channels, rolling schedules, deep links, and quiet hours.
-- Handle edits, completion, reboot/timezone behavior, logout, and multiple devices.
-- Configure Calendar consent/clients and secure authorization/token handling.
-- Create the dedicated calendar, idempotent event mappings, update/delete delivery jobs, reconnect/disconnect controls.
-- Expose sync status and notification-channel choices.
-
-**Deliverables:** Usable local reminders and optional approved-plan Calendar delivery.
-
-**Exit criteria:** Changing a plan does not create duplicate events/alarms. Calendar outage or expired authorization does not break tracking. OAuth testing limitations are understood before friend rollout.
-
-### Phase 12 — Hardening, deployment, and signed private APK
-
-**Build/prepare**
-
-- Finish production auth, migrations, secret setup, private storage, job scheduling, monitoring, backup/recovery, and data cleanup.
-- Add export/deletion and a concise privacy/data-use screen.
-- Run the release acceptance checklist in Section 19 against the release APK and production-like backend.
-- Freeze the Android package ID, preserve the signing keystore, increment versions, and create the standalone private APK.
-- Document installation, permission choices, account setup, update, and recovery procedures.
-- Invite a small group and distribute the APK through a chosen private access channel.
-
-**Deliverables:** Deployed backend, signed release APK, release notes, owner operations checklist, friend installation guide.
-
-**Exit criteria:** The APK launches and works without Metro/the developer's laptop; a returning user can update without losing data; the owner can recover service/data from the documented procedure.
-
-### Phase 13 — First weeks of real use
-
-**Operate/improve**
-
-- Gather explicit feedback on logging friction, missing foods, graph understanding, plan suitability, and reminder usefulness.
-- Review actual model spend, latency, validation failures, sync conflicts, battery behavior, and support issues.
-- Expand catalog coverage based on requests and confirmed food sources.
-- Adjust graph thresholds/prompts/templates only with versioned changes and representative regression checks.
-- Decide whether forecasts, optional AI weekly narratives, and compatible over-the-air updates are ready.
-
-**Exit criteria:** The group can sustain ordinary use, understand the graph, and trust the distinction between measured values and estimates.
+**Exit criteria:** The group can use the app routinely and understand measured data versus estimates.
 
 ### 16.1 Implementation dependency map
 
 ```mermaid
 flowchart LR
-  P0[0: Feasibility] --> P1[1: App and design]
-  P1 --> P2[2: Auth, DB, sync]
-  P2 --> P3[3: Goals]
-  P3 --> P4[4: Food logging]
-  P4 --> P5[5: Progress graph]
-  P5 --> P6[6: Activity and manual MVP APK]
-  P6 --> P7[7: Food vision]
-  P7 --> P8[8: Meal workflow]
-  P8 --> P9[9: Workout workflow]
-  P9 --> P10[10: Health Connect]
-  P10 --> P11[11: Reminders and Calendar]
-  P11 --> P12[12: Production and signed APK]
-  P12 --> P13[13: Real-use refinement]
+  P0[0: Web deployment path] --> P1[1: PWA foundation]
+  P1 --> P2[2: Neon and accounts]
+  P2 --> P3[3: Goal setup]
+  P3 --> P4[4: Food tracking]
+  P3 --> P5[5: Goal graph]
+  P4 --> P5
+  P5 --> P6[6: Activity tracking]
+  P4 --> P7[7: Food vision]
+  P7 --> P8[8: Meal planner]
+  P6 --> P9[9: Workout planner]
+  P8 --> P10[10: Reminders and Calendar]
+  P9 --> P10
+  P10 --> P11[11: Production release]
+  P11 --> P12[12: Real-use refinement]
 ```
 
-## 17. Deployment and APK runbook
+## 17. Vercel deployment runbook
 
-These are planned operational steps. Commands are illustrative until the repository/scripts, Expo project, provider accounts, and final app identifiers exist.
+Vercel is the web host and server runtime. Neon is the database host. The source repository connects to Vercel for automatic web deployments; neither service runs on the owner's laptop.
 
-### 17.1 Accounts and configuration
+### 17.1 One-time setup
 
-Prepare Neon, OpenRouter, Expo/EAS, and Google Cloud accounts/projects as required. Choose the production region, supported group size, and infrastructure budgets. Configure managed authentication email delivery/recovery rather than assuming it is automatically included in every plan.
+1. Create/select the Neon project and database. Copy the pooled PostgreSQL connection string into the ignored local root environment file as DATABASE_URL.
+2. Set your chosen AUTH_SECRET in that file and use the same value in Vercel's server environment.
+3. Choose the Vercel project name/domain first. Set AUTH_BASE_URL and AUTH_TRUSTED_ORIGINS to that exact HTTPS origin for production.
+4. Import the GitHub repository in Vercel and select apps/web as the project root. Keep the detected Next.js framework and npm workspace settings.
+5. Add DATABASE_URL, AUTH_SECRET, AUTH_BASE_URL, and AUTH_TRUSTED_ORIGINS as server-side Production Environment Variables in Vercel. Keep DATABASE_URL and AUTH_SECRET private.
+6. From a trusted checkout configured for the same database, run reviewed migrations once: npm run db:migrate.
+7. Deploy the project and open its HTTPS URL. Test sign-in and invite creation before sharing the URL.
 
-| Server-only configuration | Public/mobile configuration |
+Set AUTH_BASE_URL and the trusted origin to the exact production domain, such as https://your-project.vercel.app. If a custom domain is added, update both values and redeploy. Preview deployment URLs require separately scoped auth settings if authentication is tested there.
+
+The app uses relative API routes at the same origin. There is no EXPO_PUBLIC_API_BASE_URL and no separate API server to create.
+
+### 17.2 Environment variables
+
+| Vercel server-only variable | Required when |
 | --- | --- |
-| `DATABASE_URL` and migration credentials | `EXPO_PUBLIC_API_BASE_URL` |
-| Auth signing/session configuration | Auth public endpoint/configuration where applicable |
-| `OPENROUTER_API_KEY` | App name, Android package, URI scheme |
-| `AI_MODEL=minimax/minimax-m3` | EAS project ID and runtime/channel settings |
-| Storage signing credentials/bucket configuration | Public OAuth client IDs where the supported flow needs them |
-| Google confidential client secret if applicable | No confidential client secret |
-| Credential encryption key/version | No credential encryption key |
-| Dispatcher authentication secret | No dispatcher secret |
-| AI budgets, allowed providers, upload limits | UI feature flags that are not security controls |
+| DATABASE_URL | Database-backed app/auth is deployed |
+| AUTH_SECRET | Better Auth is enabled |
+| AUTH_BASE_URL | Better Auth is enabled; set to the public app origin |
+| AUTH_TRUSTED_ORIGINS | Set to the exact deployed app origin |
+| OPENROUTER_API_KEY | Only when server-side photo recognition/planning is enabled |
+| Storage/OAuth/worker variables | Only after those integrations are implemented and deployed |
 
-Use environment-specific configuration. The APK must use a reachable HTTPS backend URL; `localhost` on a phone refers to that phone. Mobile environment values are bundled and should be treated as readable.
+Do not add database URLs, auth keys, OpenRouter credentials, private storage keys, or token-encryption keys as NEXT_PUBLIC values. Vercel environment variables are set in project settings, not committed into the repository.
 
-### 17.2 Deploy backend before release testing
+### 17.3 Build and verify
 
-1. Create production database/auth/storage resources and private bucket policies.
-2. Apply reviewed migrations and seed only the reviewed shared catalog/exercise data.
-3. Deploy the API and worker with secrets; activate scheduled dispatch and lease recovery.
-4. Configure OAuth callbacks, native clients/fingerprints, auth links, and the minimum Calendar scopes.
-5. Verify real email recovery, authorization, storage access, AI route, and job completion using release-like configuration.
-6. Configure cleanup tasks, backups, monitoring, budgets, and invitation settings.
-7. Keep development credentials and synthetic fixtures out of the private release.
-
-### 17.3 Build profiles
-
-Use an early development build for engineering, a preview build for acceptance, and a signed private release build for friends. The profile name `private` is arbitrary.
-
-Example `eas.json`:
-
-```json
-{
-  "cli": {
-    "appVersionSource": "remote"
-  },
-  "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "android": { "buildType": "apk" }
-    },
-    "preview": {
-      "distribution": "internal",
-      "channel": "preview",
-      "android": { "buildType": "apk" }
-    },
-    "private": {
-      "distribution": "internal",
-      "channel": "private",
-      "autoIncrement": true,
-      "android": { "buildType": "apk" }
-    }
-  }
-}
-```
-
-Configure environment selection with the current EAS tooling so preview and private builds point to the intended backend. Channel fields matter when EAS Update is configured; they do not deploy the backend.
-
-Typical setup/build commands from the mobile project, after its configuration exists:
+From the repository root, the normal web commands are:
 
 ```bash
-npx eas-cli@latest login
-npx eas-cli@latest build:configure
-npx eas-cli@latest build --platform android --profile development
-npx eas-cli@latest build --platform android --profile preview
-npx eas-cli@latest build --platform android --profile private
+npm install
+npm run typecheck
+npm run lint
+npm run build
 ```
 
-These are separate milestones, not instructions to create all three builds every time. APK is the installable artifact for this distribution method. EAS normally targets AAB for store distribution unless configured otherwise. [Expo APK configuration][expo-apk] [Build configuration][expo-eas-config]
+Run them before inviting users. Keep migrations explicit and reviewed rather than running them in each build. A successful web build does not prove live Neon credentials, account isolation, OAuth, or model behavior; verify those against the deployed project.
 
-### 17.4 Signing and release records
+### 17.4 Share and update
 
-Use the same production package ID and signing key for future updates. Store the signing keystore and recovery information in secure owner-controlled storage and preserve EAS access. Record the release version, version code, commit, migration level, runtime version, checksum, and signing-certificate fingerprint.
+1. Open the deployed HTTPS URL in Android Chrome.
+2. Use Chrome's menu and choose Add to Home screen or Install app when available.
+3. Send friends the same URL and a private email-bound invitation code.
+4. Push reviewed source changes to the connected deployment branch; Vercel builds and deploys the new version.
+5. Keep Neon data and backups independent of web redeployments.
 
-Keep development variants separate so debug installs and Google OAuth fingerprints do not get confused with the friend-facing release. Validate Calendar/auth using the release signing identity before distribution.
+No APK signing, APK file sharing, Android package ID, Expo account, Play Store listing, or laptop-hosted backend is part of this workflow. The Vercel app must remain deployed for the shared URL and cloud API to be available.
 
-### 17.5 Install and share the APK
+### 17.5 Owner responsibilities and future AI jobs
 
-1. Build and download the signed private APK.
-2. Install it on the owner's actual phone and verify normal use without Metro or USB debugging.
-3. Use the selected private sharing channel or EAS build URL with intended access settings.
-4. A friend downloads the APK on their phone and allows installation from that specific browser/file source when Android requests it.
-5. Open the installed app, use an invitation, sign in, and complete onboarding.
-6. Enable only the desired permissions/connections; confirm the first local reminder and cloud sync.
+Keep Vercel/Neon accounts accessible, monitor usage/errors, maintain backups, and remove access for friends who should no longer use the service. AI requests must be bounded and recorded with owner, model route, status, and usage.
 
-EAS internal build links can be accessible to anyone who has the link unless access settings are restricted. Treat APK access and app-account invitation checks as separate controls. Normal direct APK installation does not require friends to enable developer mode. [Expo internal distribution][expo-internal]
-
-For developer diagnostics or an optional USB install:
-
-```bash
-adb install -r path/to/goal-health-release.apk
-```
-
-Check current Android developer-verification/sideload rules at release time, especially for users in different regions. Rules and rollout dates are changing; private distribution may use limited-distribution options where available. The Android FAQ currently distinguishes direct sideloading from participating-store enforcement. Keep this as a release compatibility check rather than assuming a Play Store listing is required. [Android verification FAQ][android-verification]
-
-### 17.6 Updates
-
-For normal private releases, increment Android version code, build a new APK using the same package/signing identity, and install it over the existing app. Preserve SQLite with migrations and keep older app API contracts compatible during a rollout. Do not instruct users to uninstall as the standard update procedure, because that can remove unsynced local data.
-
-If EAS Update is later enabled, it can deliver compatible JavaScript/assets to the installed native runtime. Changes to native libraries, permissions, Health Connect setup, or other native configuration require a new APK/runtime. Use explicit channels and a reviewed runtime-version policy, test the update on a matching preview binary, and retain rollback procedures. [Runtime compatibility][expo-runtime] [EAS Update][expo-update]
-
-### 17.7 Ongoing owner responsibilities
-
-Keep backend/provider accounts funded and keys valid, monitor cost/errors, review dead-letter jobs, maintain data backups, patch native dependencies, refresh the food catalog, and publish signed updates when required. The laptop can be off; the deployed services must remain available for AI and cloud synchronization.
+The first manual-tracking release needs only the deployed Next.js project and Neon. Add the OpenRouter server key when AI features are implemented. If multi-step LangGraph jobs outlast Vercel's request limits, add a durable worker/dispatcher then; it is not required to serve the PWA or deploy the manual MVP.
 
 ## 18. Using the app
 
 ### 18.1 First use
 
-Install the APK, sign up with an invitation, choose units, enter the profile/goal, and review the calculated targets. The Progress screen immediately shows the accepted plan, while actual history starts with the first confirmed measurement.
+Open the deployed HTTPS app link in Android Chrome. Sign up using the invitation tied to the account email, choose units, enter the profile and goal, and review the calculated targets. The Progress view shows the accepted plan; measured history starts with the first confirmed weigh-in.
 
-Connect Health Connect or Google Calendar when wanted. Choose reminder types/times. Request meal and workout plans, review the drafts, and approve only after confirming they fit preferences and available equipment.
+Optionally choose Add to Home screen from Chrome's menu. This creates a launcher shortcut to the same deployed web app; it does not install an APK. Open the same URL on a computer or other phone when needed.
 
 ### 18.2 A normal day
 
-1. Open Home to see the goal graph, today's totals, planned workout, and last activity sync.
-2. Log breakfast manually or use a photo; confirm foods and quantity.
-3. Repeat for meals/snacks. Planned meals remain suggestions until confirmed as consumed.
-4. Record a workout or walking/cardio activity; imported steps appear when available.
-5. Add a measurement on the chosen weigh-in schedule. Daily weigh-ins are optional.
-6. Mark the day's food logging complete when appropriate.
-7. View measured progress and context on Progress. The graph can refresh without an AI call.
+1. Open Home to see the goal graph, today's totals, planned workout, and activity status.
+2. Search and log a meal manually or select a photo when photo recognition is enabled. Confirm each food and quantity.
+3. Log activity, workouts, steps, and optional weight measurements.
+4. Mark the food day complete when appropriate so the app can distinguish a complete day from missing logging.
+5. View measured progress and context on Progress. The graph refresh is computed from stored data and does not need an AI call.
 
-If offline, ordinary entries show pending sync and remain locally available. AI and Calendar requests show a clear internet requirement. When connectivity returns, the app syncs without duplicating the entries.
+The first release requires an internet connection for cloud reads and writes. If offline, show a clear unavailable state and never tell the user a log was saved until it is safely stored. AI and Calendar requests also require internet.
 
 ### 18.3 Weekly review and revisions
 
-Review actual trend, data coverage, target adherence on complete days, and completed workouts. Adjust food choices or schedule if desired. Ask for a revised plan when constraints change. A new target/timeline requires explicit acceptance and creates a new goal version; previous measurements and plans remain in history.
+Review measured trend, data coverage, target adherence on complete days, and completed workouts. Adjust food choices or schedule if desired. Request a revised plan when constraints change. A new target/timeline requires explicit acceptance and creates a new goal version; previous measurements and plans remain available.
 
 ### 18.4 Common recovery paths
 
@@ -1314,137 +1138,107 @@ Review actual trend, data coverage, target adherence on complete days, and compl
 | --- | --- |
 | Photo identified the wrong food | Select another candidate or search manually |
 | No nutrition entry exists | Create a private sourced entry/recipe or request catalog review |
-| Meal/workout generation fails | Existing active plan stays available; show actionable reason |
-| Health data is missing | Show last sync/source and permission status; allow manual entry |
-| Calendar authorization expires | Reconnect without losing plans or logs |
-| Notification is delayed | Show schedule/channel settings and best-effort delivery explanation |
-| New phone | Install APK, sign in, pull cloud records, reconnect device-local Health Connect, rebuild local reminders |
-| Unsynced record conflicts | Preserve both versions and guide a resolution |
-| App update | Install the newer signed APK over the existing app |
+| Meal/workout generation fails | Existing active plan remains available; show an actionable reason |
+| Phone has no Health Connect path | Enter steps/workouts manually; the PWA does not claim native sync |
+| Google authorization expires | Reconnect without losing plans or logs |
+| Browser notifications are denied | Keep reminders visible in-app and allow permission settings to be changed |
+| Vercel is temporarily unavailable | Show a connection error; do not report unsaved changes as successful |
+| Friend changes phones | Open the same app URL and sign back in to retrieve cloud records |
+| App update | Reload the deployed URL; cloud data is stored in Neon and is not removed by a web deployment |
 
 ## 19. Release acceptance and future work
 
 ### 19.1 Acceptance checks to implement during development
 
-This is the planned validation strategy; no application tests have been executed as part of writing this document.
+This is the planned validation strategy; it is not evidence that these checks have already been run.
 
 | Area | Meaningful acceptance evidence |
 | --- | --- |
 | Nutrition | Known food/portion and recipe/yield fixtures, unit conversion, unknown nutrients, historical snapshots |
-| Goals/graphs | Gain/loss/maintenance, zero-length timeline rejection, sparse data, multiple daily measurements, revision history, forecast eligibility |
+| Goals/graphs | Gain/loss/maintenance, invalid timeline rejection, sparse data, multiple daily measurements, revision history, forecast eligibility |
 | Access | Two-user isolation for reads/writes/files/AI runs/Calendar links; private/shared catalog boundaries |
-| Offline | Restart during pending sync, retry duplication, tombstones, stale revisions, account switching, expired cursor resync |
-| AI | Representative Indian meals/mixed plates, ambiguous photos, malformed/truncated output, invented IDs, restriction conflicts, one-repair ceiling |
+| Web/PWA | Production HTTPS origin, manifest, add-to-home-screen flow, responsive Android Chrome layout, offline fallback, no private API response in service-worker cache |
+| AI | Representative Indian meals/mixed plates, ambiguous photos, malformed output, invented IDs, restriction conflicts, one-repair ceiling |
 | Workflow recovery | Process restart, expired lease, checkpoint replay, long review pause, stale-input approval, idempotent activation |
-| Activity | Repeated imports, overlapping manual/synced walks, source changes/deletions, multi-device snapshot selection |
-| Android | Actual phone installation, native permission denial/revocation, camera/picker, back navigation, font scaling, notification taps |
-| Reminders | Reschedule/cancel, quiet hours, timezone/reboot behavior, no cross-account notifications |
-| Calendar | Repeat delivery, plan edits, token expiry, disconnected state, external event changes, release-signing OAuth configuration |
-| Release | Standalone APK startup, signed upgrade preserving data, backend outage behavior, no bundled secrets |
-| Recovery/privacy | Export, account deletion including assets/checkpoints, cleanup, backup restore, redacted operational logs |
+| Activity | Repeated records, overlapping manual activities, source changes, multi-device edits, manual step entry |
+| Reminders | Browser permission denial, in-app fallback, quiet hours, timezone behavior, no cross-account reminders |
+| Calendar | Repeat delivery, plan edits, token expiry, disconnected state, external event changes |
+| Release | Vercel build/deployment, Neon connectivity, invitation onboarding, no bundled server secrets, friend account isolation |
+| Recovery/privacy | Export, account deletion including assets/checkpoints, photo cleanup, backup restore, redacted operational logs |
 
-Automate pure domain calculations, authorization integration cases, and retry/recovery invariants. Use focused UI smoke checks and real-device acceptance for native behavior. Avoid tests that merely repeat implementation details.
+Automate pure domain calculations, authorization integration cases, and retry/recovery invariants. Use focused UI checks and real Android Chrome acceptance. Native permission checks are required only if a separate native app is later approved.
 
 ### 19.2 Definition of the first complete private release
 
-- An invited friend can install the signed APK and create a private account.
+- An invited friend can open the HTTPS link, create a private account, and optionally add the PWA to their Android home screen.
 - Onboarding creates an accepted versioned goal and usable planned trajectory.
-- Manual/photo-assisted food logging produces catalog-derived calories and macros.
-- Actual measurements and the goal line are distinguishable and interactive.
-- Workouts can be user-entered or generated, reviewed, and logged.
-- Daily updates do not require unnecessary LLM calls.
-- Offline entries survive app restarts and synchronize safely.
-- Health Connect works where supported and fails gracefully elsewhere.
-- Local reminders and optional Calendar events follow approved choices without duplicates.
-- Secrets stay server-side; ownership boundaries, data export/deletion, and recovery work.
-- The app launches without the developer's laptop, and an APK upgrade preserves data.
+- Manual food logging produces catalog-derived calories and macros; photo suggestions are optional and user-confirmed.
+- Actual measurements and the goal path are distinguishable and readable on a phone.
+- Workouts can be entered or generated, reviewed, approved, and logged.
+- Daily tracking works without unnecessary LLM calls.
+- Private records are isolated by account and survive browser reloads/redeploys through Neon.
+- Manual activity/steps work without claiming direct Health Connect access.
+- Reminders and Calendar follow explicit choices and fail without breaking core tracking.
+- Secrets stay server-side; export/deletion and recovery behavior are documented.
+- The app works from the deployed domain with the developer's laptop off. No APK upgrade is part of the release.
 
 ### 19.3 Future backlog
 
-Consider these after the private release: barcode scanning, optional voice meal entry, larger regional catalogs, grocery lists from approved meal plans, meal preparation batches, wearable-specific connectors, better forecasting, optional AI weekly explanations, two-way Calendar conflict management, and explicit friend sharing.
+Consider these after the PWA private release: barcode scanning, optional voice meal entry, larger regional catalogs, grocery lists from approved plans, meal preparation batches, a native Android companion for Health Connect, better forecasting, optional AI weekly narratives, and richer offline support.
 
-Defer real-time coaching chat, unrestricted autonomous agents, multiple specialist models, a dedicated vector database, public social feeds, subscriptions, iOS release, and Play Store publication until a real need justifies them.
+Defer real-time coaching chat, unrestricted autonomous agents, multiple specialist models, a dedicated vector database, public social feeds, subscriptions, iOS-specific native work, and Play Store publication until a real need justifies them.
 
 ### 19.4 Decisions to finalize before implementation locks them in
 
 | Decision | Proposed default | Required by |
 | --- | --- | --- |
-| App name/package identity | Working name only; choose stable reverse-domain package | Before friend-facing signing/OAuth |
-| Automatic target policy | Reviewed adult general-fitness equations and bounds; manual override path | Phase 0/3 |
-| Initial foods/recipes | Group's common foods, 300–500 reviewed entries | Phase 4 |
-| Provider serving route | OpenRouter M3 route with required capabilities/privacy settings | Phase 0/7 |
-| Backend scheduler | Supported Neon mechanism or authenticated external dispatcher | Phase 0/2 |
-| Photo retention | Seven-day temporary retention, optional explicit saved photo | Phase 7 |
-| Goal trend/forecast rules | Documented initial rules above, versioned and gated | Phase 5 |
-| Calendar consent rollout | Proper production setup or documented test reconnection limitation | Phase 11 |
-| Distribution access | Private APK link plus server-side invitations | Phase 12 |
+| Public-facing app name | Goal Health working name | Before sharing friend-facing link |
+| Automatic target policy | Reviewed adult general-fitness equations and bounds; manual override path | Goal implementation |
+| Initial foods/recipes | Group's common foods, reviewed and versioned | Food catalog |
+| Provider serving route | OpenRouter M3 route with required capabilities/privacy settings | Before AI release |
+| Background planning execution | Bounded Vercel request if proven safe; durable worker only if real run times require it | Before meal/workout workflow release |
+| Photo retention | Seven-day temporary retention, optional explicit saved photo | Before photo recognition release |
+| Goal trend/forecast rules | Documented initial rules above, versioned and gated | Before progress forecasting |
+| Calendar consent rollout | Correct web OAuth production setup or keep Calendar disabled | Before Calendar release |
+| Offline logging | Online-first; add only with account-scoped local persistence and conflict policy | Before promising offline support |
+| Native Health Connect | Deferred; reconsider only if manual activity is insufficient | Future native app decision |
 
 ## 20. Reference documentation
 
-External capabilities and prices below were checked during planning on 20 October 2026. Recheck moving documentation before installing dependencies, paying for services, configuring OAuth, or issuing release instructions. Architecture, schemas, initial thresholds, and phase estimates in this document are proposed application decisions, not provider guarantees.
+Provider features, pricing, quotas, and platform support can change. Recheck vendor documentation before enabling production integrations. The architecture and phase boundaries in this document are application decisions, not provider guarantees.
 
-- [MiniMax M3 capabilities and thinking modes][minimax-m3]
-- [MiniMax API pricing][minimax-pricing]
+- [Next.js PWA guide][next-pwa]
+- [Vercel Next.js deployment][vercel-next]
+- [Vercel monorepo root directory][vercel-monorepo]
+- [Better Auth installation and base URL][better-auth]
+- [Neon Postgres documentation][neon-postgres]
 - [OpenRouter MiniMax M3 route][openrouter-m3]
 - [OpenRouter structured outputs][openrouter-structured]
 - [OpenRouter provider routing][openrouter-routing]
 - [LangGraph workflow concepts][langgraph-thinking]
 - [LangGraph persistence][langgraph-persistence]
-- [Neon backend primitives][neon-backend]
-- [Neon Functions][neon-functions]
 - [USDA FoodData Central API/licensing][usda]
 - [ICMR–NIN website and reuse notice][nin]
 - [IFCT 2017 reference][ifct]
 - [NIH Body Weight Planner][body-weight-planner]
-- [Victory Native chart repository][victory]
-- [Expo development builds][expo-dev-build]
-- [Expo development build FAQ][expo-dev-faq]
-- [Expo Android APK configuration][expo-apk]
-- [Expo EAS build configuration][expo-eas-config]
-- [Expo internal distribution][expo-internal]
-- [Expo Notifications][expo-notifications]
-- [Expo runtime versions][expo-runtime]
-- [Expo EAS Update][expo-update]
-- [Android Health Connect availability][health-availability]
-- [Android Health Connect setup and permissions][health-start]
-- [Android Health Connect raw data and phone steps][health-read]
-- [Android Health Connect aggregate data][health-aggregate]
-- [Android Health Connect background/history codelab][health-codelab]
-- [React Native Health Connect bridge][health-bridge]
 - [Google Calendar API authorization scopes][calendar-scopes]
 - [Google OAuth token lifecycle][google-oauth]
 - [Google OAuth application states][google-oauth-state]
-- [Android developer verification FAQ][android-verification]
 
-[minimax-m3]: https://www.minimax.io/blog/minimax-m3
-[minimax-pricing]: https://platform.minimax.io/docs/pricing/overview
+[next-pwa]: https://nextjs.org/docs/app/guides/progressive-web-apps
+[vercel-next]: https://vercel.com/docs/frameworks/full-stack/nextjs
+[vercel-monorepo]: https://vercel.com/docs/monorepos
+[better-auth]: https://better-auth.com/docs/installation
+[neon-postgres]: https://neon.com/docs/introduction
 [openrouter-m3]: https://openrouter.ai/minimax/minimax-m3
 [openrouter-structured]: https://openrouter.ai/docs/guides/features/structured-outputs
 [openrouter-routing]: https://openrouter.ai/docs/guides/routing/provider-selection
 [langgraph-thinking]: https://docs.langchain.com/oss/javascript/langgraph/thinking-in-langgraph
 [langgraph-persistence]: https://docs.langchain.com/oss/javascript/langgraph/persistence
-[neon-backend]: https://neon.com/blog/neon-backend-is-ga
-[neon-functions]: https://neon.com/blog/neon-functions-backend-logic-next-to-your-data
 [usda]: https://fdc.nal.usda.gov/api-guide/
 [nin]: https://www.nin.res.in/
 [ifct]: https://www.nin.res.in/ebooks/IFCT2017.pdf
 [body-weight-planner]: https://www.niddk.nih.gov/bwp
-[victory]: https://github.com/FormidableLabs/victory-native-xl
-[expo-dev-build]: https://docs.expo.dev/develop/development-builds/introduction/
-[expo-dev-faq]: https://docs.expo.dev/develop/development-builds/faq/
-[expo-apk]: https://docs.expo.dev/build-reference/apk/
-[expo-eas-config]: https://docs.expo.dev/build/eas-json/
-[expo-internal]: https://docs.expo.dev/build/internal-distribution/
-[expo-notifications]: https://docs.expo.dev/versions/latest/sdk/notifications/
-[expo-runtime]: https://docs.expo.dev/eas-update/runtime-versions/
-[expo-update]: https://docs.expo.dev/eas-update/introduction/
-[health-availability]: https://developer.android.com/health-and-fitness/health-connect/availability
-[health-start]: https://developer.android.com/health-and-fitness/health-connect/get-started
-[health-read]: https://developer.android.com/health-and-fitness/health-connect/read-data
-[health-aggregate]: https://developer.android.com/health-and-fitness/health-connect/aggregate-data
-[health-codelab]: https://developer.android.com/codelabs/health-connect
-[health-bridge]: https://github.com/matinzd/react-native-health-connect
 [calendar-scopes]: https://developers.google.com/workspace/calendar/api/auth
 [google-oauth]: https://developers.google.com/identity/protocols/oauth2
 [google-oauth-state]: https://developers.google.com/identity/protocols/oauth2/production-readiness/overview
-[android-verification]: https://developer.android.com/developer-verification/guides/faq
