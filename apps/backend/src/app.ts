@@ -22,7 +22,7 @@ import {
   syncPushSchema,
   updateFoodLogRequestSchema,
 } from "@healthcare/contracts";
-import { buildGoalProposal } from "@healthcare/domain";
+import { buildGoalProposal, findExerciseById } from "@healthcare/domain";
 import { auth } from "./auth/config.js";
 import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
@@ -476,6 +476,12 @@ app.post("/v1/activity-logs", async (c) => {
   }
   const parsed = createActivityLogRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_activity_log" }, 400);
+  const invalidExerciseReference = parsed.data.exercises?.some((exercise) => {
+    if (!exercise.exerciseId) return false;
+    const catalogExercise = findExerciseById(exercise.exerciseId);
+    return !catalogExercise || catalogExercise.name !== exercise.exerciseName;
+  });
+  if (invalidExerciseReference) return c.json({ error: "invalid_exercise_reference" }, 400);
   const data = activityLogRecordSchema.parse({
     activityType: parsed.data.activityType,
     occurredAt: parsed.data.occurredAt,
@@ -827,6 +833,9 @@ app.post("/v1/sync/push", async (c) => {
   } catch (error) {
     if (error instanceof Error && error.message === "catalog_food_not_found") {
       return c.json({ error: "catalog_food_not_found" }, 422);
+    }
+    if (error instanceof Error && error.message === "invalid_exercise_reference") {
+      return c.json({ error: "invalid_exercise_reference" }, 422);
     }
     if (error instanceof Error && error.message === "sync_request_in_progress") {
       return c.json({ error: "request_in_progress" }, 409);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { WorkoutExercise } from "@healthcare/contracts";
+import { exerciseCatalog } from "@healthcare/domain";
 import {
   postJson,
   requestJson,
@@ -363,10 +364,10 @@ function FoodLogEntry({ item, onChanged }: { item: FoodLog; onChanged: () => Pro
   </div>;
 }
 
-type ExerciseDraft = { exerciseName: string; sets: Array<{ reps: string; loadKg: string }> };
+type ExerciseDraft = { exerciseId: string | null; exerciseName: string; sets: Array<{ reps: string; loadKg: string }> };
 
 function emptyExercise(): ExerciseDraft {
-  return { exerciseName: "", sets: [{ reps: "", loadKg: "" }] };
+  return { exerciseId: null, exerciseName: "", sets: [{ reps: "", loadKg: "" }] };
 }
 
 export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { unitSystem: "metric" | "imperial" }) {
@@ -411,6 +412,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
         ...(activityType === "strength" ? {
           workoutTitle: workoutTitle.trim(),
           exercises: exercises.map((exercise) => ({
+            exerciseId: exercise.exerciseId,
             exerciseName: exercise.exerciseName.trim(),
             sets: exercise.sets.map((set) => {
               const load = set.loadKg.trim() ? Number(set.loadKg) : null;
@@ -448,9 +450,16 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
           <label className="field"><span>Workout name</span><input value={workoutTitle} onChange={(event) => setWorkoutTitle(event.target.value)} maxLength={100} placeholder="e.g. Upper body" required /></label>
           <label className="field"><span>Duration (minutes · optional)</span><input type="number" min="1" max="1440" step="1" value={durationMinutes} onChange={(event) => setDurationMinutes(event.target.value)} placeholder="How long you trained" /></label>
           <div className="workout-exercise-builder">
-            {exercises.map((exercise, exerciseIndex) => <article className="workout-exercise-card" key={exerciseIndex}>
+            {exercises.map((exercise, exerciseIndex) => {
+              const catalogExercise = exercise.exerciseId ? exerciseCatalog.find((candidate) => candidate.id === exercise.exerciseId) : undefined;
+              return <article className="workout-exercise-card" key={exerciseIndex}>
               <div className="workout-exercise-heading"><strong>Exercise {exerciseIndex + 1}</strong>{exercises.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => setExercises((current) => current.filter((_, index) => index !== exerciseIndex))}>Remove</button> : null}</div>
-              <label className="field"><span>Exercise</span><input value={exercise.exerciseName} onChange={(event) => updateExercise(exerciseIndex, (current) => ({ ...current, exerciseName: event.target.value }))} maxLength={100} placeholder="e.g. Dumbbell shoulder press" required /></label>
+              <label className="field"><span>Exercise</span><input list="exercise-library" value={exercise.exerciseName} onChange={(event) => {
+                const value = event.target.value;
+                const match = exerciseCatalog.find((candidate) => candidate.name.toLocaleLowerCase() === value.trim().toLocaleLowerCase());
+                updateExercise(exerciseIndex, (current) => ({ ...current, exerciseId: match?.id ?? null, exerciseName: match?.name ?? value }));
+              }} maxLength={100} placeholder="Search or enter an exercise" required /></label>
+              {catalogExercise ? <p className="source-note">{catalogExercise.movementPattern} · {catalogExercise.primaryMuscles.join(", ")} · {catalogExercise.equipment.length ? catalogExercise.equipment.join(", ") : "no added equipment"}</p> : null}
               <div className="workout-set-list">{exercise.sets.map((set, setIndex) => <div className="workout-set-row" key={setIndex}>
                 <span className="set-number">Set {setIndex + 1}</span>
                 <label className="field"><span>Reps</span><input type="number" min="1" max="200" step="1" value={set.reps} onChange={(event) => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.map((item, index) => index === setIndex ? { ...item, reps: event.target.value } : item) }))} required /></label>
@@ -458,7 +467,9 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
                 {exercise.sets.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => updateExercise(exerciseIndex, (current) => ({ ...current, sets: current.sets.filter((_, index) => index !== setIndex) }))}>Remove set</button> : null}
               </div>)}</div>
               <button type="button" className="text-button" disabled={exercise.sets.length >= 20 || totalSets >= 100} onClick={() => updateExercise(exerciseIndex, (current) => ({ ...current, sets: [...current.sets, { reps: "", loadKg: "" }] }))}>＋ Add set</button>
-            </article>)}
+              </article>;
+            })}
+            <datalist id="exercise-library">{exerciseCatalog.map((exercise) => <option key={exercise.id} value={exercise.name} />)}</datalist>
             <button type="button" className="button button-secondary" disabled={exercises.length >= 20 || totalSets >= 100} onClick={() => setExercises((current) => [...current, emptyExercise()])}>＋ Add exercise</button>
           </div>
         </> : <div className="form-grid">

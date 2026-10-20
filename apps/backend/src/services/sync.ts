@@ -8,6 +8,7 @@ import {
   userSyncCounters,
 } from "@healthcare/database/schema";
 import type { SyncOperation, SyncPushRequest } from "@healthcare/contracts";
+import { findExerciseById } from "@healthcare/domain";
 
 type SyncResult =
   | { status: "applied"; entity: string; id: string; version: number; cursor: number }
@@ -52,8 +53,15 @@ async function normalizeOperation(
         },
       };
     }
-    case "activity_log":
+    case "activity_log": {
+      const invalidExerciseReference = operation.data.exercises?.some((exercise) => {
+        if (!exercise.exerciseId) return false;
+        const catalogExercise = findExerciseById(exercise.exerciseId);
+        return !catalogExercise || catalogExercise.name !== exercise.exerciseName;
+      });
+      if (invalidExerciseReference) throw new Error("invalid_exercise_reference");
       return operation.data;
+    }
     case "body_measurement":
       return operation.data;
     case "goal":

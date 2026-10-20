@@ -143,6 +143,7 @@ const workoutSetSchema = z.object({
 }).strict();
 
 const workoutExerciseSchema = z.object({
+  exerciseId: z.string().trim().min(1).max(80).nullable().optional(),
   exerciseName: z.string().trim().min(1).max(100),
   sets: z.array(workoutSetSchema).min(1).max(20),
 }).strict();
