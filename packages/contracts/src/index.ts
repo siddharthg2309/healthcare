@@ -188,6 +188,37 @@ export const createActivityLogRequestSchema = z.object({
   }
 });
 
+export const updateActivityLogRequestSchema = z.object({
+  baseVersion: z.number().int().positive(),
+  activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
+  occurredAt: isoDateTime,
+  durationMinutes: z.number().int().min(1).max(1440).nullable(),
+  steps: z.number().int().min(0).max(200000).nullable(),
+  notes: z.string().trim().max(500).nullable(),
+  workoutTitle: z.string().trim().min(1).max(100).optional(),
+  exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.durationMinutes === null && value.steps === null && !(value.activityType === "strength" && value.exercises?.length)) {
+    context.addIssue({ code: "custom", path: ["durationMinutes"], message: "Enter a duration or step count." });
+  }
+  if (value.activityType === "steps" && value.steps === null) {
+    context.addIssue({ code: "custom", path: ["steps"], message: "Enter a step count for a steps entry." });
+  }
+  if (value.activityType === "strength" && ((value.workoutTitle === undefined) !== (value.exercises === undefined) || (value.workoutTitle !== undefined && !value.exercises?.length))) {
+    context.addIssue({ code: "custom", path: ["exercises"], message: "Provide both a workout name and at least one exercise with sets." });
+  }
+  if (value.activityType !== "strength" && (value.workoutTitle !== undefined || value.exercises !== undefined)) {
+    context.addIssue({ code: "custom", path: ["exercises"], message: "Strength details are only valid for a strength session." });
+  }
+  if ((value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0) > 100) {
+    context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
+  }
+});
+
+export const deleteActivityLogRequestSchema = z.object({
+  baseVersion: z.number().int().positive(),
+}).strict();
+
 export const activityLogRecordSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
@@ -251,6 +282,8 @@ export type FoodDayStatusRequest = z.infer<typeof foodDayStatusRequestSchema>;
 export type CreateCustomFoodRequest = z.infer<typeof createCustomFoodRequestSchema>;
 export type FoodLogRecord = z.infer<typeof foodLogRecordSchema>;
 export type CreateActivityLogRequest = z.infer<typeof createActivityLogRequestSchema>;
+export type UpdateActivityLogRequest = z.infer<typeof updateActivityLogRequestSchema>;
+export type DeleteActivityLogRequest = z.infer<typeof deleteActivityLogRequestSchema>;
 export type ActivityLogRecord = z.infer<typeof activityLogRecordSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;

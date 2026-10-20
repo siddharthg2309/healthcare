@@ -12,6 +12,7 @@ import {
   createCustomFoodRequestSchema,
   createFoodLogRequestSchema,
   createMeasurementRequestSchema,
+  deleteActivityLogRequestSchema,
   deleteFoodLogRequestSchema,
   foodDayStatusRequestSchema,
   foodLogRecordSchema,
@@ -20,6 +21,7 @@ import {
   profileSchema,
   syncPullQuerySchema,
   syncPushSchema,
+  updateActivityLogRequestSchema,
   updateFoodLogRequestSchema,
 } from "@healthcare/contracts";
 import { buildGoalProposal, findExerciseById } from "@healthcare/domain";
@@ -494,7 +496,7 @@ app.post("/v1/activity-logs", async (c) => {
   const userId = c.get("session").user.id;
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-    const [existing] = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+    const [existing] = await tx.select({ data: userRecords.data, version: userRecords.version }).from(userRecords).where(and(
       eq(userRecords.userId, userId),
       eq(userRecords.entity, "activity_log"),
       eq(userRecords.recordId, parsed.data.activityId),
@@ -503,7 +505,7 @@ app.post("/v1/activity-logs", async (c) => {
     if (existing) {
       const prior = activityLogRecordSchema.safeParse(existing.data);
       const same = prior.success && JSON.stringify(prior.data) === JSON.stringify(data);
-      return { status: same ? "saved" as const : "conflict" as const, data: existing.data, idempotent: same };
+      return { status: same ? "saved" as const : "conflict" as const, data: existing.data, version: existing.version, idempotent: same };
     }
     await tx.insert(userRecords).values({
       userId,
@@ -515,10 +517,109 @@ app.post("/v1/activity-logs", async (c) => {
       serverUpdatedAt: new Date(),
     });
     await appendSyncChange(tx, userId, "activity_log", parsed.data.activityId, data);
-    return { status: "saved" as const, data, idempotent: false };
+    return { status: "saved" as const, data, version: 1, idempotent: false };
   });
   if (result.status === "conflict") return c.json({ error: "activity_log_id_conflict" }, 409);
-  return c.json({ id: parsed.data.activityId, data: result.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+  return c.json({ id: parsed.data.activityId, data: result.data, version: result.version, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+});
+
+app.patch("/v1/activity-logs/:id", async (c) => {
+  const recordId = c.req.param("id");
+  if (!isUuid(recordId)) return c.json({ error: "invalid_activity_log_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = updateActivityLogRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_activity_log_update" }, 400);
+  const invalidExerciseReference = parsed.data.exercises?.some((exercise) => {
+    if (!exercise.exerciseId) return false;
+    const catalogExercise = findExerciseById(exercise.exerciseId);
+    return !catalogExercise || catalogExercise.name !== exercise.exerciseName;
+  });
+  if (invalidExerciseReference) return c.json({ error: "invalid_exercise_reference" }, 400);
+  const data = activityLogRecordSchema.parse({
+    activityType: parsed.data.activityType,
+    occurredAt: parsed.data.occurredAt,
+    durationMinutes: parsed.data.durationMinutes,
+    steps: parsed.data.steps,
+    notes: parsed.data.notes,
+    ...(parsed.data.workoutTitle ? { workoutTitle: parsed.data.workoutTitle } : {}),
+    ...(parsed.data.exercises ? { exercises: parsed.data.exercises } : {}),
+  });
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select({ data: userRecords.data, version: userRecords.version }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.deleted, false),
+    )).limit(1);
+    if (!existing) return { status: "missing" as const };
+    if (existing.version !== parsed.data.baseVersion) return { status: "conflict" as const, version: existing.version };
+    if (!activityLogRecordSchema.safeParse(existing.data).success) return { status: "invalid_record" as const };
+    const version = existing.version + 1;
+    const [saved] = await tx.update(userRecords).set({
+      data,
+      version,
+      serverUpdatedAt: new Date(),
+    }).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.version, parsed.data.baseVersion),
+      eq(userRecords.deleted, false),
+    )).returning({ data: userRecords.data, version: userRecords.version });
+    if (!saved) return { status: "conflict" as const, version: existing.version + 1 };
+    await appendSyncChange(tx, userId, "activity_log", recordId, data, version);
+    return { status: "saved" as const, data: saved.data, version: saved.version };
+  });
+  if (result.status === "missing") return c.json({ error: "activity_log_not_found" }, 404);
+  if (result.status === "conflict") return c.json({ error: "activity_log_version_conflict", currentVersion: result.version }, 409);
+  if (result.status === "invalid_record") return c.json({ error: "activity_log_record_invalid" }, 409);
+  return c.json({ id: recordId, data: result.data, version: result.version });
+});
+
+app.delete("/v1/activity-logs/:id", async (c) => {
+  const recordId = c.req.param("id");
+  if (!isUuid(recordId)) return c.json({ error: "invalid_activity_log_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = deleteActivityLogRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_activity_log_delete" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select({ version: userRecords.version }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.deleted, false),
+    )).limit(1);
+    if (!existing) return { status: "missing" as const };
+    if (existing.version !== parsed.data.baseVersion) return { status: "conflict" as const, version: existing.version };
+    const version = existing.version + 1;
+    const [deleted] = await tx.update(userRecords).set({ deleted: true, version, serverUpdatedAt: new Date() }).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.recordId, recordId),
+      eq(userRecords.version, parsed.data.baseVersion),
+      eq(userRecords.deleted, false),
+    )).returning({ version: userRecords.version });
+    if (!deleted) return { status: "conflict" as const, version: existing.version + 1 };
+    await appendSyncChange(tx, userId, "activity_log", recordId, null, version, true);
+    return { status: "deleted" as const, version: deleted.version };
+  });
+  if (result.status === "missing") return c.json({ error: "activity_log_not_found" }, 404);
+  if (result.status === "conflict") return c.json({ error: "activity_log_version_conflict", currentVersion: result.version }, 409);
+  return c.json({ id: recordId, version: result.version, deleted: true });
 });
 
 app.get("/v1/days/:date", async (c) => {
@@ -536,7 +637,7 @@ app.get("/v1/days/:date", async (c) => {
       eq(userRecords.entity, "food_log"),
       eq(userRecords.deleted, false),
     ));
-    const activityRecords = await tx.select({ id: userRecords.recordId, data: userRecords.data }).from(userRecords).where(and(
+    const activityRecords = await tx.select({ id: userRecords.recordId, version: userRecords.version, data: userRecords.data }).from(userRecords).where(and(
       eq(userRecords.userId, userId),
       eq(userRecords.entity, "activity_log"),
       eq(userRecords.deleted, false),
@@ -562,7 +663,7 @@ app.get("/v1/days/:date", async (c) => {
   const activityLogs = result.activityRecords.flatMap((record) => {
     const parsed = activityLogRecordSchema.safeParse(record.data);
     return parsed.success && localDateInZone(parsed.data.occurredAt, timezone) === date
-      ? [{ id: record.id, data: parsed.data }]
+      ? [{ id: record.id, version: record.version, data: parsed.data }]
       : [];
   }).sort((a, b) => a.data.occurredAt.localeCompare(b.data.occurredAt));
   const foodTotals = foodLogs.reduce((totals, item) => ({

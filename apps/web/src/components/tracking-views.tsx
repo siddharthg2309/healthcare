@@ -39,6 +39,7 @@ export type FoodLog = {
 
 export type ActivityLog = {
   id: string;
+  version: number;
   data: {
     activityType: "steps" | "walk" | "cardio" | "strength" | "other";
     occurredAt: string;
@@ -378,6 +379,9 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
   const [notes, setNotes] = useState("");
   const [workoutTitle, setWorkoutTitle] = useState("");
   const [exercises, setExercises] = useState<ExerciseDraft[]>([emptyExercise()]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingVersion, setEditingVersion] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -396,14 +400,65 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     setExercises((current) => current.map((exercise, exerciseIndex) => exerciseIndex === index ? update(exercise) : exercise));
   }
 
+  function resetForm() {
+    setEditingId(null);
+    setEditingVersion(null);
+    setActivityType("steps");
+    setOccurredAt(dateTimeLocalNow());
+    setDurationMinutes("");
+    setSteps("");
+    setNotes("");
+    setWorkoutTitle("");
+    setExercises([emptyExercise()]);
+  }
+
+  function beginEdit(item: ActivityLog) {
+    setEditingId(item.id);
+    setEditingVersion(item.version);
+    setActivityType(item.data.activityType);
+    setOccurredAt(toLocalInput(item.data.occurredAt));
+    setDurationMinutes(item.data.durationMinutes === null ? "" : String(item.data.durationMinutes));
+    setSteps(item.data.steps === null ? "" : String(item.data.steps));
+    setNotes(item.data.notes ?? "");
+    setWorkoutTitle(item.data.workoutTitle ?? "Strength session");
+    setExercises(item.data.exercises?.map((exercise) => ({
+      exerciseId: exercise.exerciseId ?? null,
+      exerciseName: exercise.exerciseName,
+      sets: exercise.sets.map((set) => ({
+        reps: String(set.reps),
+        loadKg: set.loadKg === null ? "" : String(unitSystem === "imperial" ? set.loadKg * poundsPerKilogram : set.loadKg),
+      })),
+    })) ?? [emptyExercise()]);
+    setMessage("");
+    setError("");
+  }
+
+  async function removeActivity(item: ActivityLog) {
+    const name = item.data.workoutTitle ?? item.data.activityType;
+    if (!window.confirm(`Delete ${name} from this activity log?`)) return;
+    setDeletingId(item.id);
+    setError("");
+    try {
+      await requestJson(`/v1/activity-logs/${item.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ baseVersion: item.version }),
+      });
+      if (editingId === item.id) resetForm();
+      await onSaved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not delete this activity.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError("");
     setMessage("");
     try {
-      await postJson("/v1/activity-logs", {
-        activityId: globalThis.crypto.randomUUID(),
+      const data = {
         activityType,
         occurredAt: new Date(occurredAt).toISOString(),
         durationMinutes: durationMinutes ? Number(durationMinutes) : null,
@@ -420,15 +475,25 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
             }),
           })),
         } : {}),
-      });
-      setDurationMinutes("");
-      setSteps("");
-      setNotes("");
-      if (activityType === "strength") {
-        setWorkoutTitle("");
-        setExercises([emptyExercise()]);
+      };
+      if (editingId && editingVersion !== null) {
+        await requestJson(`/v1/activity-logs/${editingId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ baseVersion: editingVersion, ...data }),
+        });
+        resetForm();
+        setMessage("Activity updated.");
+      } else {
+        await postJson("/v1/activity-logs", { activityId: globalThis.crypto.randomUUID(), ...data });
+        setDurationMinutes("");
+        setSteps("");
+        setNotes("");
+        if (activityType === "strength") {
+          setWorkoutTitle("");
+          setExercises([emptyExercise()]);
+        }
+        setMessage(activityType === "strength" ? "Workout saved." : "Activity saved.");
       }
-      setMessage(activityType === "strength" ? "Workout saved." : "Activity saved.");
       await onSaved();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save this activity.");
@@ -441,7 +506,7 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
     <div className="page-heading"><div><span className="eyebrow">ACTIVITY TRACKING</span><h1>Record your movement</h1><p>Enter steps or a workout. Health Connect is not available in this web app.</p></div><span className="date-chip">{day.date}</span></div>
     <section className="tracking-grid">
       <form className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
-        <div className="panel-heading"><div><span className="eyebrow">ADD AN ENTRY</span><h2>Today’s activity</h2></div><span className="panel-symbol">↗</span></div>
+        <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : "Today’s activity"}</h2></div><span className="panel-symbol">↗</span></div>
         <div className="form-grid">
           <label className="field"><span>Activity</span><select value={activityType} onChange={(event) => setActivityType(event.target.value as ActivityLog["data"]["activityType"])}><option value="steps">Steps</option><option value="walk">Walk</option><option value="cardio">Cardio</option><option value="strength">Strength session</option><option value="other">Other</option></select></label>
           <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
@@ -480,7 +545,10 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
         <p className="source-note">{activityType === "strength" ? "Strength sessions save each exercise, set, rep count, and optional load. Calories burned are not estimated." : "Steps and duration are entered manually. Calories burned are not estimated."}</p>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {message ? <p className="form-message" role="status">{message}</p> : null}
-        <button className="button button-primary" disabled={busy || (activityType === "strength" ? !workoutIsReady : activityType === "steps" ? !steps : !durationMinutes && !steps)}>{busy ? "Saving…" : activityType === "strength" ? "Save workout" : "Save activity"}</button>
+        <div className="activity-form-actions">
+          <button className="button button-primary" disabled={busy || (activityType === "strength" ? !workoutIsReady : activityType === "steps" ? !steps : !durationMinutes && !steps)}>{busy ? "Saving…" : editingId ? "Save changes" : activityType === "strength" ? "Save workout" : "Save activity"}</button>
+          {editingId ? <button type="button" className="button button-secondary" onClick={resetForm} disabled={busy}>Cancel edit</button> : null}
+        </div>
       </form>
       <section className="panel daily-log-panel">
         <div className="panel-heading"><div><span className="eyebrow">TODAY · {day.date}</span><h2>Movement log</h2></div><span className="count-badge">{day.activityLogs.length}</span></div>
@@ -493,6 +561,10 @@ export function ActivityTrackingView({ day, unitSystem, onSaved }: Props & { uni
             <span className="meal-badge">↗</span>
             <span className="daily-entry-main"><strong>{title}</strong><small>{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
             {item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}
+            <div className="entry-actions">
+              <button type="button" className="quiet-button" onClick={() => editingId === item.id ? resetForm() : beginEdit(item)} disabled={busy || deletingId !== null}>{editingId === item.id ? "Editing" : "Edit"}</button>
+              <button type="button" className="quiet-button entry-delete" onClick={() => void removeActivity(item)} disabled={busy || deletingId !== null}>{deletingId === item.id ? "Deleting…" : "Delete"}</button>
+            </div>
           </div>;
         })}</div> : <div className="empty-inline"><strong>No activity logged yet</strong><span>Log steps or a workout when you’re ready.</span></div>}
       </section>
