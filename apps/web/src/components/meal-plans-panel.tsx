@@ -24,6 +24,7 @@ function mealPlanError(error: unknown): string {
       meal_plan_food_metadata_required: "Add reviewed food and allergen tags to the catalog before asking for a plan with dietary preferences or restrictions.",
       meal_plan_catalog_coverage_insufficient: "The reviewed catalog needs more foods before it can build a useful week. Add more reviewed entries and try again.",
       meal_planning_not_configured: "Meal planning is not enabled on the server yet. Add the OpenRouter key in Vercel environment settings.",
+      ai_daily_limit_reached: "You have reached the shared AI limit for the last 24 hours. Manual food and activity logging still work; try again later.",
       meal_plan_provider_unavailable: "The meal planner could not reach the model. Try again in a little while.",
       meal_plan_draft_exists: "Review or reject your current draft before creating another plan.",
       meal_plan_generation_failed: "The plan could not be completed. Your current plan has not changed.",

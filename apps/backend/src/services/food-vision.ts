@@ -52,9 +52,20 @@ function parseRecognition(text: string): FoodPhotoRecognitionResponse {
   return parsed.data;
 }
 
+export interface FoodVisionResult {
+  response: FoodPhotoRecognitionResponse;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+function safeTokenCount(value: unknown): number {
+  const count = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+}
+
 export async function recognizeFoodPhoto(
   image: FoodPhotoRecognitionRequest,
-): Promise<FoodPhotoRecognitionResponse> {
+): Promise<FoodVisionResult> {
   const bytes = Buffer.from(image.base64, "base64");
   if (bytes.toString("base64") !== image.base64 || bytes.length < 128 || bytes.length > 2_500_000
     || !imageMatchesMimeType(bytes, image.mimeType)) {
@@ -127,10 +138,17 @@ export async function recognizeFoodPhoto(
 
     if (response.status === 429) throw new FoodVisionError("ai_rate_limited", 429);
     if (!response.ok) throw new FoodVisionError("ai_provider_unavailable", 503);
-    const body: unknown = await response.json().catch(() => null);
+    const body = await response.json().catch(() => null) as {
+      choices?: unknown;
+      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+    } | null;
     const text = responseText(body);
     if (!text) throw new FoodVisionError("ai_invalid_response", 502);
-    return parseRecognition(text);
+    return {
+      response: parseRecognition(text),
+      inputTokens: safeTokenCount(body?.usage?.prompt_tokens),
+      outputTokens: safeTokenCount(body?.usage?.completion_tokens),
+    };
   } catch (error) {
     if (error instanceof FoodVisionError) throw error;
     if (error instanceof Error && error.name === "AbortError") {

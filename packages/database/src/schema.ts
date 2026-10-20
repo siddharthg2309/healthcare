@@ -158,7 +158,7 @@ export const aiRuns = pgTable("ai_runs", {
 }, (table) => [
   uniqueIndex("ai_runs_owner_kind_idempotency_idx").on(table.userId, table.kind, table.idempotencyKey),
   index("ai_runs_owner_created_idx").on(table.userId, table.createdAt),
-  check("ai_runs_kind_valid", sql`${table.kind} IN ('meal_plan', 'workout_plan')`),
+  check("ai_runs_kind_valid", sql`${table.kind} IN ('meal_plan', 'workout_plan', 'food_vision')`),
   check("ai_runs_status_valid", sql`${table.status} IN ('running', 'pending_review', 'completed', 'failed', 'rejected', 'stale')`),
   check("ai_runs_usage_nonnegative", sql`(${table.inputTokens} IS NULL OR ${table.inputTokens} >= 0) AND (${table.outputTokens} IS NULL OR ${table.outputTokens} >= 0)`),
   pgPolicy("ai_runs_owner_policy", {

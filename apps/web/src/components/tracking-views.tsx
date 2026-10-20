@@ -270,6 +270,8 @@ export function FoodTrackingView({ day, onSaved }: Props) {
         setPhotoError("Photo suggestions need the OpenRouter key in the server environment.");
       } else if (caught instanceof ApiError && caught.code === "ai_rate_limited") {
         setPhotoError("The AI service is busy. Try again shortly or search by name.");
+      } else if (caught instanceof ApiError && caught.code === "ai_daily_limit_reached") {
+        setPhotoError("You have reached the shared AI limit for the last 24 hours. Search by name or try again later.");
       } else {
         setPhotoError(caught instanceof Error ? caught.message : "Could not recognize this photo.");
       }

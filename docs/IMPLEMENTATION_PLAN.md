@@ -910,11 +910,11 @@ Treat notes, food descriptions, imported text, and model outputs as untrusted da
 
 ### 15.4 Cost policy
 
-Apply configurable per-user request limits, a global daily/monthly budget, upload-size limits, image compression, and bounded model output. Cache repeated eligible catalog retrieval and allow reuse of a still-valid draft rather than silently regenerating it.
+Apply configurable per-user request limits, a global daily/monthly budget, upload-size limits, image compression, and bounded model output. The app currently applies a configurable limit of 10 AI operations per account per rolling 24-hour window across photo recognition and meal/workout planning; each plan operation can make at most two model requests because it allows one repair. Cache repeated eligible catalog retrieval and allow reuse of a still-valid draft rather than silently regenerating it.
 
 Cache planning results only within the proper owner and input version: goal, preferences, catalog/exercise versions, schedule, and request variant. A preference change must invalidate an unsuitable plan cache.
 
-Reserve an estimated budget before starting a job and reconcile with actual usage afterward. Report actual input/output/reasoning/image usage where the provider exposes it. Set provider spending limits as an additional boundary. Recheck all infrastructure plan limits before inviting more people.
+Token counts are recorded for successful photo-recognition and plan calls. Global dollar-budget reservation and settlement are still outstanding; configure an OpenRouter account spending limit before inviting friends. Recheck all infrastructure plan limits before inviting more people.
 
 ## 16. Implementation phases
 
@@ -999,7 +999,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 7 — Food photo recognition
 
-**Current status:** The authenticated API sends a browser-compressed image to the configured OpenRouter model and validates a bounded list of food-name candidates. The PWA lets the person search those names in the catalog, choose a food, enter the amount, and save through the existing nutrition calculation. Photo files are not stored by the app. Per-user AI quotas and usage accounting, live provider checks, and Android Chrome verification remain outstanding.
+**Current status:** The authenticated API sends a browser-compressed image to the configured OpenRouter model and validates a bounded list of food-name candidates. The PWA lets the person search those names in the catalog, choose a food, enter the amount, and save through the existing nutrition calculation. Photo files are not stored by the app. Each request is counted in the shared per-account rolling 24-hour AI quota, and successful calls record provider token counts without retaining the image. Live provider checks and Android Chrome verification remain outstanding.
 
 - Keep browser image processing bounded to a 2.5 MB JPEG, PNG, or WebP payload.
 - Send the image through the authenticated server API; keep the OpenRouter key server-only and do not persist the photo.
@@ -1013,20 +1013,20 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 8 — Meal-planning LangGraph workflow
 
-**Current status:** The authenticated backend now creates idempotent AI runs, retrieves reviewed shared foods and account-owned foods, calls M3 through OpenRouter with structured output, calculates all meal and day nutrition from catalog snapshots, validates seven consecutive dates and daily calorie bounds, performs at most one repair, saves an editable draft, and pauses a Postgres-checkpointed LangGraph run for explicit review. The PWA screen selects days, shows daily calories/macros, supports version-checked portion edits, recalculates totals on the server, approves/rejects plans, and lists plan history. Approval rechecks the accepted goal/profile snapshot before activation. The one-time checkpoint schema setup is included in `npm run db:migrate`. Food swaps, reviewed dietary/allergen tags and catalog coverage, daily quota/cost limits, timeout behavior against the live Vercel plan, and live Neon/OpenRouter validation remain outstanding. Until reviewed food tags exist, the API refuses plan generation when dietary preferences or restrictions are present.
+**Current status:** The authenticated backend now creates idempotent AI runs, retrieves reviewed shared foods and account-owned foods, calls M3 through OpenRouter with structured output, calculates all meal and day nutrition from catalog snapshots, validates seven consecutive dates and daily calorie bounds, performs at most one repair, saves an editable draft, and pauses a Postgres-checkpointed LangGraph run for explicit review. The PWA screen selects days, shows daily calories/macros, supports version-checked portion edits, recalculates totals on the server, approves/rejects plans, and lists plan history. Approval rechecks the accepted goal/profile snapshot before activation. The one-time checkpoint schema setup is included in `npm run db:migrate`. Food swaps, reviewed dietary/allergen tags and catalog coverage, global dollar-budget enforcement, timeout behavior against the live Vercel plan, and live Neon/OpenRouter validation remain outstanding. The shared per-account rolling 24-hour quota is enforced for this and the other AI operations. Until reviewed food tags exist, the API refuses plan generation when dietary preferences or restrictions are present.
 
 - Add catalog search-based food swaps and clearer stale-input recovery in the review screen.
 - Add reviewed dietary/allergen metadata to foods, then filter candidates and validate preferences/restrictions deterministically.
-- Add per-user daily run quotas and spend tracking, and verify provider latency/repair behavior on the deployed function limits.
+- Add global dollar-budget reservation/settlement and verify provider latency/repair behavior on the deployed function limits; per-account operation quotas and token counts are shared across AI features.
 - Do not log planned food as eaten unless the user confirms it.
 
 **Deliverables:** Reviewed weekly meal plans.
 
 ### Phase 9 — Workout-planning LangGraph workflow
 
-**Current status:** The profile collects experience, available training days, preferred session length, equipment, and movement limitations. The authenticated API filters the reviewed exercise catalog by equipment, includes only aggregated recent activity, calls M3 with structured output, and validates exercise IDs, tracking mode, frequency, rest, set/repetition ranges, weekly volume, and server-estimated duration. It allows one repair, stores an idempotent run and Postgres checkpoint, and creates a reviewable draft. The PWA supports edits, explicit rejection or activation, history, stale-input checks, and transactional superseding. Starting an active planned workout creates a blank actual-log form; the saved activity links back to the plan version and session only after the user records it. Minors, pregnancy/breastfeeding, and stated movement limitations are blocked from AI suggestions; template and manual logging paths remain available. Live Neon/OpenRouter, real Vercel duration/cost limits, quota enforcement, and real-device review remain outstanding.
+**Current status:** The profile collects experience, available training days, preferred session length, equipment, and movement limitations. The authenticated API filters the reviewed exercise catalog by equipment, includes only aggregated recent activity, calls M3 with structured output, and validates exercise IDs, tracking mode, frequency, rest, set/repetition ranges, weekly volume, and server-estimated duration. It allows one repair, stores an idempotent run and Postgres checkpoint, and creates a reviewable draft. The PWA supports edits, explicit rejection or activation, history, stale-input checks, and transactional superseding. Starting an active planned workout creates a blank actual-log form; the saved activity links back to the plan version and session only after the user records it. Minors, pregnancy/breastfeeding, and stated movement limitations are blocked from AI suggestions; template and manual logging paths remain available. Live Neon/OpenRouter, real Vercel duration/cost limits, global dollar-budget enforcement, and real-device review remain outstanding. The shared per-account rolling 24-hour operation quota is enforced.
 
-- Add per-user daily run quotas and usage budgets shared with meal planning.
+- Add global dollar-budget reservation/settlement shared with meal planning; per-account rolling 24-hour operation limits already apply across both planners and photo recognition.
 - Verify prompt/schema compatibility and actual function duration against the deployed model route.
 - Expand reviewed exercise/equipment metadata and improve recovery when profile inputs have changed.
 
@@ -1045,7 +1045,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 11 — Production hardening and private release
 
-**Current status: in progress.** The app now has an owner-scoped JSON export, password-confirmed account deletion, LangGraph checkpoint cleanup, and a migration that forces row-level security on personal food, day-status, plan, and AI-run tables. That migration also adds account-delete cascades. Authenticated API responses use `Cache-Control: private, no-store`. Production Neon application of the migration, two-account isolation checks, backup/restore exercise, live OAuth/provider verification, cost limits, Vercel deployment, EAS project linking, and Android APK installation checks remain outstanding.
+**Current status: in progress.** The app now has an owner-scoped JSON export, password-confirmed account deletion, LangGraph checkpoint cleanup, and a migration that forces row-level security on personal food, day-status, plan, and AI-run tables. That migration also adds account-delete cascades. Authenticated API responses use `Cache-Control: private, no-store`. Production Neon application of the migration, two-account isolation checks, backup/restore exercise, live OAuth/provider verification, global dollar-budget enforcement, Vercel deployment, EAS project linking, and Android APK installation checks remain outstanding. A configurable per-account rolling 24-hour quota and token accounting now cover food vision and both planners.
 
 - Configure production Vercel environment variables and reviewed Neon migrations/backups.
 - Verify login, invitations, two-user isolation, browser and APK behavior, error handling, deletion/export, and restore procedures.

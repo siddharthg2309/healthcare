@@ -28,6 +28,7 @@ const environmentSchema = z.object({
   JOB_DISPATCH_SECRET: z.string().min(32).optional(),
   OPENROUTER_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default("minimax/minimax-m3"),
+  AI_USER_DAILY_OPERATION_LIMIT: z.coerce.number().int().min(1).max(100).default(10),
   GOOGLE_CLIENT_ID: optionalText,
   GOOGLE_CLIENT_SECRET: optionalText,
   GOOGLE_REDIRECT_URI: optionalUrl,

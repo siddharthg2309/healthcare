@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
@@ -50,6 +50,7 @@ import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
 import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
+import { hasAiOperationCapacity, lockAiUsageWindow } from "./services/ai-usage.js";
 import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
 import { buildWorkoutPlanningContext, hashWorkoutPlanningContext, resumeWorkoutPlan, runWorkoutPlan, workoutPlanningVersions } from "./services/workout-planning.js";
 import { pullSync, pushSync } from "./services/sync.js";
@@ -822,13 +823,51 @@ app.post("/v1/foods/recognize-photo", async (c) => {
   }
   const parsed = foodPhotoRecognitionRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_food_photo" }, 400);
+  if (!env.OPENROUTER_API_KEY) return c.json({ error: "ai_not_configured" }, 503);
+
+  const userId = c.get("session").user.id;
+  const runId = randomUUID();
+  const reserved = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await lockAiUsageWindow(tx, userId);
+    if (!(await hasAiOperationCapacity(tx, userId))) return false;
+    await tx.insert(aiRuns).values({
+      id: runId,
+      userId,
+      kind: "food_vision",
+      status: "running",
+      idempotencyKey: randomUUID(),
+      inputHash: createHash("sha256").update(runId).digest("hex"),
+      inputSnapshot: { mimeType: parsed.data.mimeType, base64Characters: parsed.data.base64.length },
+      model: env.AI_MODEL,
+      promptVersion: "food-photo-v1",
+      schemaVersion: "food-photo-candidates-v1",
+    });
+    return true;
+  });
+  if (!reserved) return c.json({ error: "ai_daily_limit_reached" }, 429);
 
   try {
     const result = await recognizeFoodPhoto(parsed.data);
-    return c.json(result);
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+      await tx.update(aiRuns).set({
+        status: "completed",
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        updatedAt: new Date(),
+      }).where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId)));
+    });
+    return c.json(result.response);
   } catch (error) {
+    const code = error instanceof FoodVisionError ? error.code : "ai_provider_unavailable";
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+      await tx.update(aiRuns).set({ status: "failed", errorCode: code, updatedAt: new Date() })
+        .where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId), eq(aiRuns.status, "running")));
+    });
     if (error instanceof FoodVisionError) return c.json({ error: error.code }, error.status);
-    throw error;
+    return c.json({ error: "ai_provider_unavailable" }, 503);
   }
 });
 
@@ -1854,6 +1893,7 @@ app.post("/v1/plans/meal/runs", async (c) => {
   const runId = randomUUID();
   const runSetup = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await lockAiUsageWindow(tx, userId);
     const [prior] = await tx.select().from(aiRuns).where(and(
       eq(aiRuns.userId, userId), eq(aiRuns.kind, "meal_plan"), eq(aiRuns.idempotencyKey, parsed.data.idempotencyKey),
     )).limit(1);
@@ -1871,6 +1911,7 @@ app.post("/v1/plans/meal/runs", async (c) => {
       eq(plans.userId, userId), eq(plans.kind, "meal"), eq(plans.status, "draft"),
     )).limit(1);
     if (draft) return { status: "draft_conflict" as const, planId: draft.id };
+    if (!(await hasAiOperationCapacity(tx, userId))) return { status: "quota_exceeded" as const };
     const groupId = active?.groupId ?? runId;
     const [latest] = await tx.select({ version: plans.version }).from(plans).where(and(
       eq(plans.userId, userId), eq(plans.groupId, groupId), eq(plans.kind, "meal"),
@@ -1895,6 +1936,7 @@ app.post("/v1/plans/meal/runs", async (c) => {
     };
   });
   if (runSetup.status === "draft_conflict") return c.json({ error: "meal_plan_draft_exists", planId: runSetup.planId }, 409);
+  if (runSetup.status === "quota_exceeded") return c.json({ error: "ai_daily_limit_reached" }, 429);
   if (runSetup.status === "idempotency_conflict") return c.json({ error: "idempotency_key_reused_with_different_input" }, 409);
   if (runSetup.status === "idempotency_race") return c.json({ error: "meal_plan_run_in_progress" }, 409);
   if (runSetup.status === "existing") {
@@ -2342,6 +2384,7 @@ app.post("/v1/plans/workout/runs", async (c) => {
   const runId = randomUUID();
   const runSetup = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await lockAiUsageWindow(tx, userId);
     const [prior] = await tx.select().from(aiRuns).where(and(
       eq(aiRuns.userId, userId), eq(aiRuns.kind, "workout_plan"), eq(aiRuns.idempotencyKey, parsed.data.idempotencyKey),
     )).limit(1);
@@ -2359,6 +2402,7 @@ app.post("/v1/plans/workout/runs", async (c) => {
       eq(plans.userId, userId), eq(plans.kind, "workout"), eq(plans.status, "draft"),
     )).limit(1);
     if (draft) return { status: "draft_conflict" as const, planId: draft.id };
+    if (!(await hasAiOperationCapacity(tx, userId))) return { status: "quota_exceeded" as const };
     const groupId = active?.groupId ?? runId;
     const [latest] = await tx.select({ version: plans.version }).from(plans).where(and(
       eq(plans.userId, userId), eq(plans.groupId, groupId), eq(plans.kind, "workout"),
@@ -2379,6 +2423,7 @@ app.post("/v1/plans/workout/runs", async (c) => {
     return { status: "created" as const, groupId, planVersion: (latest?.version ?? 0) + 1 };
   });
   if (runSetup.status === "draft_conflict") return c.json({ error: "workout_plan_draft_exists", planId: runSetup.planId }, 409);
+  if (runSetup.status === "quota_exceeded") return c.json({ error: "ai_daily_limit_reached" }, 429);
   if (runSetup.status === "idempotency_conflict") return c.json({ error: "idempotency_key_reused_with_different_input" }, 409);
   if (runSetup.status === "idempotency_race") return c.json({ error: "workout_plan_run_in_progress" }, 409);
   if (runSetup.status === "existing") {
