@@ -1,10 +1,10 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { and, asc, desc, eq, ilike, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, foodFavorites, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, foodFavorites, foodPortions, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
   approveMealPlanRequestSchema,
   approveWorkoutPlanRequestSchema,
@@ -13,6 +13,7 @@ import {
   deleteAccountRequestSchema,
   createActivityLogRequestSchema,
   createCustomFoodRequestSchema,
+  createFoodPortionRequestSchema,
   createFoodLogRequestSchema,
   createWorkoutPlanRequestSchema,
   createMeasurementRequestSchema,
@@ -563,19 +564,21 @@ app.get("/v1/foods", async (c) => {
       ? sharedIds.length ? await tx.select().from(catalogFoods).where(and(
         inArray(catalogFoods.id, sharedIds),
         eq(catalogFoods.active, true),
-        ilike(catalogFoods.name, pattern),
+        or(ilike(catalogFoods.name, pattern), sql`array_to_string(${catalogFoods.aliases}, ' ') ILIKE ${pattern}`),
       )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(100) : []
       : await tx.select().from(catalogFoods).where(and(
         eq(catalogFoods.active, true),
-        ilike(catalogFoods.name, pattern),
+        or(ilike(catalogFoods.name, pattern), sql`array_to_string(${catalogFoods.aliases}, ' ') ILIKE ${pattern}`),
       )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(30);
     const personal = favoritesOnly || recentOnly
       ? personalIds.length ? await tx.select().from(userFoods).where(and(
         inArray(userFoods.id, personalIds),
         eq(userFoods.userId, userId),
-        ilike(userFoods.name, pattern),
+        or(ilike(userFoods.name, pattern), sql`array_to_string(${userFoods.aliases}, ' ') ILIKE ${pattern}`),
       )).orderBy(asc(userFoods.name)).limit(100) : []
-      : await tx.select().from(userFoods).where(ilike(userFoods.name, pattern))
+      : await tx.select().from(userFoods).where(or(
+        ilike(userFoods.name, pattern), sql`array_to_string(${userFoods.aliases}, ' ') ILIKE ${pattern}`,
+      ))
         .orderBy(asc(userFoods.name)).limit(20);
     return { shared, personal, favorites, recentKeys };
   });
@@ -584,6 +587,7 @@ app.get("/v1/foods", async (c) => {
     ...result.shared.map((food) => ({
       id: food.id,
       name: food.name,
+      aliases: food.aliases,
       category: food.category,
       source: "shared_catalog" as const,
       isFavorite: favoriteKeys.has(`shared_catalog:${food.id}`),
@@ -597,6 +601,7 @@ app.get("/v1/foods", async (c) => {
     ...result.personal.map((food) => ({
       id: food.id,
       name: food.name,
+      aliases: food.aliases,
       category: food.category,
       source: "personal" as const,
       isFavorite: favoriteKeys.has(`personal:${food.id}`),
@@ -654,6 +659,86 @@ app.put("/v1/foods/:foodId/favorite", async (c) => {
   return c.json({ foodId, foodSource: parsed.data.foodSource, favorite: parsed.data.favorite });
 });
 
+app.get("/v1/foods/:foodId/portions", async (c) => {
+  const foodId = c.req.param("foodId");
+  const foodSource = c.req.query("source");
+  if (!isUuid(foodId)) return c.json({ error: "invalid_food_id" }, 400);
+  if (foodSource !== "shared_catalog" && foodSource !== "personal") {
+    return c.json({ error: "invalid_food_source" }, 400);
+  }
+  const userId = c.get("session").user.id;
+  const portions = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return await tx.select({ id: foodPortions.id, label: foodPortions.label, grams: foodPortions.grams })
+      .from(foodPortions).where(and(
+        eq(foodPortions.userId, userId),
+        eq(foodPortions.foodSource, foodSource),
+        eq(foodPortions.foodId, foodId),
+      )).orderBy(asc(foodPortions.label));
+  });
+  return c.json({ portions });
+});
+
+app.post("/v1/foods/:foodId/portions", async (c) => {
+  const foodId = c.req.param("foodId");
+  if (!isUuid(foodId)) return c.json({ error: "invalid_food_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = createFoodPortionRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_portion" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [food] = parsed.data.foodSource === "shared_catalog"
+      ? await tx.select({ id: catalogFoods.id }).from(catalogFoods).where(and(
+        eq(catalogFoods.id, foodId), eq(catalogFoods.active, true),
+      )).limit(1)
+      : await tx.select({ id: userFoods.id }).from(userFoods).where(and(
+        eq(userFoods.id, foodId), eq(userFoods.userId, userId),
+      )).limit(1);
+    if (!food) return { status: "food_not_found" as const };
+    const existing = await tx.select({ id: foodPortions.id }).from(foodPortions).where(and(
+      eq(foodPortions.userId, userId),
+      eq(foodPortions.foodSource, parsed.data.foodSource),
+      eq(foodPortions.foodId, foodId),
+    )).limit(20);
+    if (existing.length >= 20) return { status: "portion_limit" as const };
+    const [portion] = await tx.insert(foodPortions).values({
+      userId,
+      foodSource: parsed.data.foodSource,
+      foodId,
+      label: parsed.data.label,
+      grams: parsed.data.grams,
+    }).onConflictDoNothing().returning({ id: foodPortions.id, label: foodPortions.label, grams: foodPortions.grams });
+    return portion ? { status: "saved" as const, portion } : { status: "duplicate" as const };
+  });
+  if (result.status === "food_not_found") return c.json({ error: "food_not_found" }, 404);
+  if (result.status === "portion_limit") return c.json({ error: "food_portion_limit_reached" }, 409);
+  if (result.status === "duplicate") return c.json({ error: "food_portion_label_exists" }, 409);
+  return c.json({ portion: result.portion }, 201);
+});
+
+app.delete("/v1/foods/:foodId/portions/:portionId", async (c) => {
+  const foodId = c.req.param("foodId");
+  const portionId = c.req.param("portionId");
+  if (!isUuid(foodId) || !isUuid(portionId)) return c.json({ error: "invalid_food_portion_id" }, 400);
+  const userId = c.get("session").user.id;
+  const deleted = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    return await tx.delete(foodPortions).where(and(
+      eq(foodPortions.id, portionId),
+      eq(foodPortions.userId, userId),
+      eq(foodPortions.foodId, foodId),
+    )).returning({ id: foodPortions.id });
+  });
+  if (!deleted.length) return c.json({ error: "food_portion_not_found" }, 404);
+  return c.body(null, 204);
+});
+
 app.post("/v1/foods/recognize-photo", async (c) => {
   let body: unknown;
   try {
@@ -692,6 +777,7 @@ app.post("/v1/foods/custom", async (c) => {
     )).limit(1);
     if (existing) {
       const same = existing.name === food.name
+        && JSON.stringify(existing.aliases) === JSON.stringify(food.aliases)
         && existing.category === food.category
         && nutritionValue(existing.caloriesKcalPer100g) === food.caloriesKcalPer100g
         && nutritionValue(existing.proteinGPer100g) === food.proteinGPer100g
@@ -703,6 +789,7 @@ app.post("/v1/foods/custom", async (c) => {
       id: food.foodId,
       userId,
       name: food.name,
+      aliases: food.aliases,
       category: food.category,
       caloriesKcalPer100g: String(food.caloriesKcalPer100g),
       proteinGPer100g: String(food.proteinGPer100g),
@@ -719,6 +806,7 @@ app.post("/v1/foods/custom", async (c) => {
     food: {
       id: result.food.id,
       name: result.food.name,
+      aliases: result.food.aliases,
       category: result.food.category,
       source: "personal",
       isFavorite: false,
@@ -757,9 +845,20 @@ app.post("/v1/food-logs", async (c) => {
         && prior.data.foodId === parsed.data.foodId
         && prior.data.occurredAt === parsed.data.occurredAt
         && prior.data.mealType === parsed.data.mealType
-        && prior.data.quantityGrams === parsed.data.quantityGrams;
+        && prior.data.quantityGrams === parsed.data.quantityGrams
+        && (prior.data.portionId ?? null) === (parsed.data.portionId ?? null);
       return { status: same ? "saved" as const : "conflict" as const, data: existing.data, version: existing.version, idempotent: same };
     }
+
+    const [requestedPortion] = parsed.data.portionId
+      ? await tx.select().from(foodPortions).where(and(
+        eq(foodPortions.id, parsed.data.portionId),
+        eq(foodPortions.userId, userId),
+        eq(foodPortions.foodId, parsed.data.foodId),
+        eq(foodPortions.grams, parsed.data.quantityGrams),
+      )).limit(1)
+      : [];
+    if (parsed.data.portionId && !requestedPortion) return { status: "portion_invalid" as const };
 
     const [shared] = await tx.select().from(catalogFoods).where(and(
       eq(catalogFoods.id, parsed.data.foodId),
@@ -771,6 +870,9 @@ app.post("/v1/food-logs", async (c) => {
     )).limit(1);
     const food = shared ?? personal;
     if (!food) return { status: "food_not_found" as const };
+    if (requestedPortion && requestedPortion.foodSource !== (shared ? "shared_catalog" : "personal")) {
+      return { status: "portion_invalid" as const };
+    }
     const nutritionPer100g = {
       caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
       proteinG: nutritionValue(food.proteinGPer100g),
@@ -786,6 +888,8 @@ app.post("/v1/food-logs", async (c) => {
       occurredAt: parsed.data.occurredAt,
       mealType: parsed.data.mealType,
       quantityGrams: parsed.data.quantityGrams,
+      portionId: requestedPortion?.id ?? null,
+      portionLabel: requestedPortion?.label ?? null,
       nutritionPer100g,
       nutritionTotal: {
         caloriesKcal: roundNutrition(nutritionPer100g.caloriesKcal * multiplier),
@@ -807,6 +911,7 @@ app.post("/v1/food-logs", async (c) => {
     return { status: "saved" as const, data, version: 1, idempotent: false };
   });
   if (result.status === "food_not_found") return c.json({ error: "food_not_found" }, 404);
+  if (result.status === "portion_invalid") return c.json({ error: "food_portion_invalid" }, 400);
   if (result.status === "conflict") return c.json({ error: "food_log_id_conflict" }, 409);
   return c.json({ id: parsed.data.logId, version: result.version, data: result.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
 });
@@ -836,12 +941,15 @@ app.patch("/v1/food-logs/:id", async (c) => {
     const prior = foodLogRecordSchema.safeParse(existing.data);
     if (!prior.success) return { status: "invalid_record" as const };
     const quantityGrams = parsed.data.quantityGrams ?? prior.data.quantityGrams;
+    const quantityChanged = quantityGrams !== prior.data.quantityGrams;
     const factor = quantityGrams / 100;
     const data = foodLogRecordSchema.parse({
       ...prior.data,
       occurredAt: parsed.data.occurredAt ?? prior.data.occurredAt,
       mealType: parsed.data.mealType ?? prior.data.mealType,
       quantityGrams,
+      portionId: quantityChanged ? null : prior.data.portionId ?? null,
+      portionLabel: quantityChanged ? null : prior.data.portionLabel ?? null,
       nutritionTotal: {
         caloriesKcal: roundNutrition(prior.data.nutritionPer100g.caloriesKcal * factor),
         proteinG: roundNutrition(prior.data.nutritionPer100g.proteinG * factor),

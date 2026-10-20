@@ -79,6 +79,22 @@ function categoryOption(): (typeof allowedCategories)[number] {
   return category as (typeof allowedCategories)[number];
 }
 
+function aliasValues(canonicalName: string): string[] {
+  const raw = option("aliases");
+  if (!raw) return [];
+  const aliases = raw.split(",").map((value) => value.trim()).filter(Boolean);
+  if (aliases.length > 20 || aliases.some((value) => value.length > 80)) {
+    throw new Error("Provide up to 20 catalog aliases, each no longer than 80 characters.");
+  }
+  const seen = new Set([canonicalName.toLocaleLowerCase()]);
+  return aliases.filter((alias) => {
+    const key = alias.toLocaleLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function nutrientValues(food: FoodDetail) {
   const values = new Map<string, number>();
   for (const entry of food.foodNutrients ?? []) {
@@ -116,6 +132,7 @@ async function importFood() {
   const nutrition = nutrientValues(food);
   const displayName = option("name")?.trim() || food.description.trim();
   if (!displayName || displayName.length > 120) throw new Error("Display name must contain 1–120 characters.");
+  const aliases = aliasValues(displayName);
   const category = categoryOption();
   const source = `USDA FoodData Central (${food.dataType})`;
 
@@ -128,6 +145,7 @@ async function importFood() {
     const [saved] = await tx.insert(catalogFoods).values({
       id: randomUUID(),
       name: displayName,
+      aliases,
       category,
       caloriesKcalPer100g: String(nutrition.calories),
       proteinGPer100g: String(nutrition.protein),
@@ -151,6 +169,22 @@ async function importFood() {
   if (result.status === "draft") console.log(`After reviewing these values, publish with: npm run catalog:publish -- --food-id ${result.id}`);
 }
 
+async function updateAliases() {
+  const id = option("food-id");
+  if (option("aliases") === undefined) {
+    throw new Error('Provide --aliases "alias one, alias two". Use an empty value to clear aliases.');
+  }
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error('Usage: npm run catalog:aliases -- --food-id <catalog-uuid> --aliases "dosai, thosai"');
+  }
+  const [food] = await db.select({ id: catalogFoods.id, name: catalogFoods.name })
+    .from(catalogFoods).where(eq(catalogFoods.id, id)).limit(1);
+  if (!food) throw new Error("Catalog food not found. No aliases were changed.");
+  const aliases = aliasValues(food.name);
+  await db.update(catalogFoods).set({ aliases, updatedAt: new Date() }).where(eq(catalogFoods.id, id));
+  console.log(`Search aliases updated for ${food.name}: ${aliases.length ? aliases.join(", ") : "none"}.`);
+}
+
 async function publishFood() {
   const id = option("food-id");
   if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
@@ -169,7 +203,8 @@ async function main() {
   if (action === "search") return await searchFoods();
   if (action === "import") return await importFood();
   if (action === "publish") return await publishFood();
-  throw new Error("Use one of: catalog:search, catalog:import, catalog:publish.");
+  if (action === "aliases") return await updateAliases();
+  throw new Error("Use one of: catalog:search, catalog:import, catalog:publish, catalog:aliases.");
 }
 
 try {

@@ -54,7 +54,7 @@ npm run db:migrate
 
 The command applies Better Auth and Drizzle application migrations, then prepares the official LangGraph checkpoint tables in the isolated `langgraph` schema. Review migration files before running them against production. Do not automatically run schema migrations as part of every Vercel build.
 
-Migration `0010_account_privacy.sql` forces row-level security on personal food, food-day status, plan, and AI-run tables and adds the user-delete cascades required by account deletion. Migration `0011_food_favorites.sql` adds account-scoped favorites with forced row-level security and a user-delete cascade. Apply the full migration set before using these features. The account-deletion endpoint checks that the expected constraints and protections exist before calling Better Auth; otherwise it returns an error without deleting the account.
+Migration `0010_account_privacy.sql` forces row-level security on personal food, food-day status, plan, and AI-run tables and adds the user-delete cascades required by account deletion. Migration `0011_food_favorites.sql` adds account-scoped favorites. Migration `0012_food_portions_aliases.sql` adds catalog aliases and account-scoped household portions. Both user-specific tables use forced row-level security and user-delete cascades. Apply the full migration set before using these features. The account-deletion endpoint checks that the expected constraints and protections exist before calling Better Auth; otherwise it returns an error without deleting the account.
 
 ### Friend access
 
@@ -106,9 +106,10 @@ The app does not call a nutrition provider whenever someone logs a meal. A maint
 npm run catalog:search -- --query "cooked lentils"
 npm run catalog:import -- --fdc-id <id-from-search> --category ingredient
 npm run catalog:publish -- --food-id <catalog-id-printed-by-import>
+npm run catalog:aliases -- --food-id <catalog-id> --aliases "dosai, thosai"
 ```
 
-Use only a matching generic Foundation, SR Legacy, or Survey food. Check the description and per-100-g calories/macros before publishing. Imports remain invisible to food search until published. USDA FoodData Central data are CC0/public domain; keep attribution and the FDC ID in the catalog. The Indian Food Composition Tables have separate reuse restrictions: their official publication prohibits storing/reproducing the data electronically for a product without prior written permission. Do not bulk-import IFCT values without that permission. [USDA API and license](https://fdc.nal.usda.gov/api-guide/) · [ICMR-NIN IFCT 2017 terms](https://www.nin.res.in/ebooks/IFCT2017_16122024.pdf)
+Use only a matching generic Foundation, SR Legacy, or Survey food. Check the description and per-100-g calories/macros before publishing. Imports remain invisible to food search until published. Aliases are search labels only and do not change nutrition data. USDA FoodData Central data are CC0/public domain; keep attribution and the FDC ID in the catalog. The Indian Food Composition Tables have separate reuse restrictions: their official publication prohibits storing/reproducing the data electronically for a product without prior written permission. Do not bulk-import IFCT values without that permission. [USDA API and license](https://fdc.nal.usda.gov/api-guide/) · [ICMR-NIN IFCT 2017 terms](https://www.nin.res.in/ebooks/IFCT2017_16122024.pdf)
 
 ## Phone and PWA behavior
 

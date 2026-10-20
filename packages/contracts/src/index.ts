@@ -110,6 +110,7 @@ const foodLogSchema = z.object({
 export const createFoodLogRequestSchema = z.object({
   logId: uuidSchema,
   foodId: uuidSchema,
+  portionId: uuidSchema.nullable().optional(),
   occurredAt: isoDateTime,
   mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
   quantityGrams: z.number().finite().positive().max(5000),
@@ -150,6 +151,8 @@ export const foodDayStatusRequestSchema = z.object({
 export const createCustomFoodRequestSchema = z.object({
   foodId: uuidSchema,
   name: z.string().trim().min(1).max(120),
+  aliases: z.array(z.string().trim().min(1).max(80)).max(20).default([])
+    .transform((values) => [...new Map(values.map((value) => [value.toLocaleLowerCase(), value])).values()]),
   category: z.enum(["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"]),
   caloriesKcalPer100g: z.number().finite().min(0).max(1000),
   proteinGPer100g: z.number().finite().min(0).max(100),
@@ -161,6 +164,12 @@ export const createCustomFoodRequestSchema = z.object({
 export const setFoodFavoriteRequestSchema = z.object({
   foodSource: z.enum(["shared_catalog", "personal"]),
   favorite: z.boolean(),
+}).strict();
+
+export const createFoodPortionRequestSchema = z.object({
+  foodSource: z.enum(["shared_catalog", "personal"]),
+  label: z.string().trim().min(1).max(40),
+  grams: z.number().int().min(1).max(5000),
 }).strict();
 
 export const nutritionSnapshotSchema = z.object({
@@ -178,6 +187,8 @@ export const foodLogRecordSchema = z.object({
   occurredAt: isoDateTime,
   mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
   quantityGrams: z.number().finite().positive().max(5000),
+  portionId: uuidSchema.nullable().optional(),
+  portionLabel: z.string().trim().min(1).max(40).nullable().optional(),
   nutritionPer100g: nutritionSnapshotSchema,
   nutritionTotal: nutritionSnapshotSchema,
 }).strict();
@@ -625,6 +636,7 @@ export type Profile = z.infer<typeof profileSchema>;
 export type ReminderPreferences = z.infer<typeof reminderPreferencesResponseSchema>;
 export type DeleteAccountRequest = z.infer<typeof deleteAccountRequestSchema>;
 export type SetFoodFavoriteRequest = z.infer<typeof setFoodFavoriteRequestSchema>;
+export type CreateFoodPortionRequest = z.infer<typeof createFoodPortionRequestSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;

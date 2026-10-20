@@ -5,6 +5,7 @@ import {
   calendarEventLinks,
   foodDayStatuses,
   foodFavorites,
+  foodPortions,
   googleCalendarConnections,
   plans,
   privateUploads,
@@ -26,8 +27,9 @@ const accountCascadeConstraints = [
   "ai_runs_result_plan_id_plans_id_fk",
   "invitations_redeemed_by_user_id_fk",
   "food_favorites_user_id_user_id_fk",
+  "food_portions_user_id_user_id_fk",
 ];
-const accountPrivateTables = ["user_foods", "food_day_statuses", "plans", "ai_runs", "food_favorites"];
+const accountPrivateTables = ["user_foods", "food_day_statuses", "plans", "ai_runs", "food_favorites", "food_portions"];
 
 export async function assertAccountDeletionReady(): Promise<void> {
   const [constraints, protectedTables] = await Promise.all([
@@ -55,6 +57,7 @@ export async function exportAccountData(userId: string) {
     const changes = await tx.select().from(syncChanges).where(eq(syncChanges.userId, userId));
     const personalFoods = await tx.select().from(userFoods).where(eq(userFoods.userId, userId));
     const favorites = await tx.select().from(foodFavorites).where(eq(foodFavorites.userId, userId));
+    const portions = await tx.select().from(foodPortions).where(eq(foodPortions.userId, userId));
     const dayStatuses = await tx.select().from(foodDayStatuses).where(eq(foodDayStatuses.userId, userId));
     const savedPlans = await tx.select().from(plans).where(eq(plans.userId, userId));
     const aiHistory = await tx.select().from(aiRuns).where(eq(aiRuns.userId, userId));
@@ -91,6 +94,7 @@ export async function exportAccountData(userId: string) {
       })),
       personalFoods,
       foodFavorites: favorites,
+      foodPortions: portions,
       foodDayStatuses: dayStatuses,
       plans: savedPlans,
       aiPlanningHistory: aiHistory,

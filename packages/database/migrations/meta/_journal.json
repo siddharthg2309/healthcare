@@ -85,6 +85,13 @@
       "when": 1792519867781,
       "tag": "0011_food_favorites",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792520214195,
+      "tag": "0012_food_portions_aliases",
+      "breakpoints": true
     }
   ]
 }

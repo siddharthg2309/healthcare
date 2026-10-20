@@ -15,6 +15,7 @@
     "catalog:search": "tsx scripts/catalog-foods.ts search",
     "catalog:import": "tsx scripts/catalog-foods.ts import",
     "catalog:publish": "tsx scripts/catalog-foods.ts publish",
+    "catalog:aliases": "tsx scripts/catalog-foods.ts aliases",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src scripts --config eslint.config.cjs"
   },

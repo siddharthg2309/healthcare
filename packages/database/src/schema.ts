@@ -183,6 +183,7 @@ export const invitations = pgTable("invitations", {
 export const catalogFoods = pgTable("catalog_foods", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
+  aliases: text("aliases").array().default([]).notNull(),
   category: text("category").notNull(),
   caloriesKcalPer100g: numeric("calories_kcal_per_100g", { precision: 9, scale: 2 }).notNull(),
   proteinGPer100g: numeric("protein_g_per_100g", { precision: 8, scale: 2 }).notNull(),
@@ -207,6 +208,7 @@ export const userFoods = pgTable("user_foods", {
   id: uuid("id").primaryKey(),
   userId: text("user_id").notNull(),
   name: text("name").notNull(),
+  aliases: text("aliases").array().default([]).notNull(),
   category: text("category").notNull(),
   caloriesKcalPer100g: numeric("calories_kcal_per_100g", { precision: 9, scale: 2 }).notNull(),
   proteinGPer100g: numeric("protein_g_per_100g", { precision: 8, scale: 2 }).notNull(),
@@ -222,6 +224,33 @@ export const userFoods = pgTable("user_foods", {
     AND ${table.carbohydrateGPer100g} >= 0 AND ${table.fatGPer100g} >= 0
   `),
   pgPolicy("user_foods_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
+export const foodPortions = pgTable("food_portions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: text("user_id").notNull(),
+  foodSource: text("food_source").notNull(),
+  foodId: uuid("food_id").notNull(),
+  label: text("label").notNull(),
+  grams: integer("grams").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("food_portions_owner_food_idx").on(table.userId, table.foodSource, table.foodId),
+  uniqueIndex("food_portions_owner_food_label_idx").on(
+    table.userId,
+    table.foodSource,
+    table.foodId,
+    sql`lower(${table.label})`,
+  ),
+  check("food_portions_source_valid", sql`${table.foodSource} IN ('shared_catalog', 'personal')`),
+  check("food_portions_label_valid", sql`length(trim(${table.label})) BETWEEN 1 AND 40`),
+  check("food_portions_grams_valid", sql`${table.grams} BETWEEN 1 AND 5000`),
+  pgPolicy("food_portions_owner_policy", {
     for: "all",
     to: "public",
     using: sql`user_id = current_setting('app.user_id', true)`,

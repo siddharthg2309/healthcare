@@ -19,6 +19,7 @@ import { WorkoutPlansPanel } from "./workout-plans-panel";
 export type FoodOption = {
   id: string;
   name: string;
+  aliases: string[];
   category: string;
   source: "shared_catalog" | "personal";
   isFavorite: boolean;
@@ -29,6 +30,9 @@ export type FoodOption = {
   carbohydrateGPer100g: number;
   fatGPer100g: number;
 };
+
+type FoodPortion = { id: string; label: string; grams: number };
+type PortionState = { key: string | null; portions: FoodPortion[]; loading: boolean; error: string };
 
 export type FoodLog = {
   id: string;
@@ -41,6 +45,7 @@ export type FoodLog = {
     occurredAt: string;
     mealType: "breakfast" | "lunch" | "dinner" | "snack";
     quantityGrams: number;
+    portionLabel?: string | null;
     nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
     nutritionTotal: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
   };
@@ -168,6 +173,10 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   const [searchRevision, setSearchRevision] = useState(0);
   const [foods, setFoods] = useState<FoodOption[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodOption | null>(null);
+  const [selectedPortionId, setSelectedPortionId] = useState<string | null>(null);
+  const [portionState, setPortionState] = useState<PortionState>({ key: null, portions: [], loading: false, error: "" });
+  const [portionLabel, setPortionLabel] = useState("");
+  const [portionBusy, setPortionBusy] = useState(false);
   const [quantity, setQuantity] = useState("100");
   const [mealType, setMealType] = useState<(typeof meals)[number]>("lunch");
   const [occurredAt, setOccurredAt] = useState(dateTimeLocalNow);
@@ -182,6 +191,12 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [photoResult, setPhotoResult] = useState<FoodPhotoRecognitionResponse | null>(null);
+  const selectedFoodId = selectedFood?.id ?? null;
+  const selectedFoodSource = selectedFood?.source ?? null;
+  const selectedFoodKey = selectedFoodId && selectedFoodSource ? `${selectedFoodSource}:${selectedFoodId}` : null;
+  const portions = selectedFoodKey && portionState.key === selectedFoodKey ? portionState.portions : [];
+  const portionLoading = Boolean(selectedFoodKey) && portionState.key !== selectedFoodKey;
+  const portionError = selectedFoodKey && portionState.key === selectedFoodKey ? portionState.error : "";
 
   useEffect(() => {
     const controller = new AbortController();
@@ -203,6 +218,23 @@ export function FoodTrackingView({ day, onSaved }: Props) {
       controller.abort();
     };
   }, [foodFilter, query, searchRevision]);
+
+  useEffect(() => {
+    if (!selectedFoodId || !selectedFoodSource) return;
+    const controller = new AbortController();
+    const key = `${selectedFoodSource}:${selectedFoodId}`;
+    const update = (portionsForFood: FoodPortion[], error = "") => {
+      setPortionState({ key, portions: portionsForFood, loading: false, error });
+    };
+    void requestJson<{ portions: FoodPortion[] }>(
+      `/v1/foods/${encodeURIComponent(selectedFoodId)}/portions?source=${selectedFoodSource}`,
+      { signal: controller.signal },
+    ).then((response) => update(response.portions)).catch((caught: unknown) => {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      update([], caught instanceof Error ? caught.message : "Could not load saved portions.");
+    });
+    return () => controller.abort();
+  }, [selectedFoodId, selectedFoodSource]);
 
   async function recognizePhoto(file: File) {
     setPhotoBusy(true);
@@ -247,12 +279,13 @@ export function FoodTrackingView({ day, onSaved }: Props) {
       await postJson("/v1/food-logs", {
         logId: globalThis.crypto.randomUUID(),
         foodId: selectedFood.id,
+        portionId: selectedPortionId,
         occurredAt: new Date(occurredAt).toISOString(),
         mealType,
         quantityGrams,
       });
       setMessage("Food entry saved.");
-      setSelectedFood(null);
+      selectFood(null);
       setQuantity("100");
       setSearchRevision((current) => current + 1);
       await onSaved();
@@ -265,10 +298,16 @@ export function FoodTrackingView({ day, onSaved }: Props) {
 
   function customFoodCreated(food: FoodOption) {
     setFoods((current) => [food, ...current.filter((item) => item.id !== food.id)]);
-    setSelectedFood(food);
+    selectFood(food);
     setQuery(food.name);
     setShowCustomFood(false);
     setMessage("Personal food saved. Check the label values before logging.");
+  }
+
+  function selectFood(food: FoodOption | null) {
+    setSelectedFood(food);
+    setSelectedPortionId(null);
+    setPortionLabel("");
   }
 
   async function toggleFavorite(food: FoodOption) {
@@ -295,6 +334,71 @@ export function FoodTrackingView({ day, onSaved }: Props) {
     }
   }
 
+  async function savePortion() {
+    if (!selectedFood) return;
+    const foodKey = `${selectedFood.source}:${selectedFood.id}`;
+    const grams = Number(quantity);
+    if (!portionLabel.trim() || !Number.isInteger(grams) || grams < 1 || grams > 5000) {
+      setPortionState((current) => ({
+        key: foodKey,
+        portions: current.key === foodKey ? current.portions : [],
+        loading: false,
+        error: "Enter a portion name and a whole-number gram amount from 1 to 5,000.",
+      }));
+      return;
+    }
+    setPortionBusy(true);
+    try {
+      const response = await postJson<{ portion: FoodPortion }>(
+        `/v1/foods/${encodeURIComponent(selectedFood.id)}/portions`,
+        { foodSource: selectedFood.source, label: portionLabel.trim(), grams },
+      );
+      setPortionState((current) => ({
+        key: foodKey,
+        portions: [...(current.key === foodKey ? current.portions : []), response.portion]
+          .sort((left, right) => left.label.localeCompare(right.label)),
+        loading: false,
+        error: "",
+      }));
+      setSelectedPortionId(response.portion.id);
+      setPortionLabel("");
+    } catch (caught) {
+      setPortionState((current) => ({
+        key: foodKey,
+        portions: current.key === foodKey ? current.portions : [],
+        loading: false,
+        error: caught instanceof Error ? caught.message : "Could not save this portion.",
+      }));
+    } finally {
+      setPortionBusy(false);
+    }
+  }
+
+  async function deletePortion(portion: FoodPortion) {
+    if (!selectedFood) return;
+    const foodKey = `${selectedFood.source}:${selectedFood.id}`;
+    setPortionBusy(true);
+    try {
+      await requestJson(`/v1/foods/${encodeURIComponent(selectedFood.id)}/portions/${encodeURIComponent(portion.id)}`, { method: "DELETE" });
+      setPortionState((current) => ({
+        key: foodKey,
+        portions: current.key === foodKey ? current.portions.filter((item) => item.id !== portion.id) : [],
+        loading: false,
+        error: "",
+      }));
+      if (selectedPortionId === portion.id) setSelectedPortionId(null);
+    } catch (caught) {
+      setPortionState((current) => ({
+        key: foodKey,
+        portions: current.key === foodKey ? current.portions : [],
+        loading: false,
+        error: caught instanceof Error ? caught.message : "Could not remove this portion.",
+      }));
+    } finally {
+      setPortionBusy(false);
+    }
+  }
+
   return (
     <>
       <div className="page-heading">
@@ -309,7 +413,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
       {foodView === "log" ? <section className="tracking-grid">
         <div className="panel food-entry-panel">
           <div className="panel-heading"><div><span className="eyebrow">ADD A FOOD</span><h2>Search your catalog</h2></div><span className="panel-symbol">◉</span></div>
-          <label className="field" htmlFor="food-search"><span>Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); setSelectedFood(null); }} placeholder="Try dosa, rice, paneer…" autoComplete="off" /></label>
+          <label className="field" htmlFor="food-search"><span>Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); selectFood(null); }} placeholder="Try dosa, rice, paneer…" autoComplete="off" /></label>
           <div className="food-search-filters" role="group" aria-label="Filter food search results">
             {(["all", "favorites", "recent"] as const).map((filter) => <button type="button" key={filter} aria-pressed={foodFilter === filter} className={foodFilter === filter ? "food-filter-active" : ""} onClick={() => setFoodFilter(filter)}>
               {filter === "all" ? "All foods" : filter === "favorites" ? "Favorites" : "Recent"}
@@ -355,7 +459,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
                         className={index === 0 ? "photo-candidate-primary" : ""}
                         onClick={() => {
                           setQuery(name);
-                          setSelectedFood(null);
+                          selectFood(null);
                           setMessage("");
                         }}
                       >
@@ -376,8 +480,8 @@ export function FoodTrackingView({ day, onSaved }: Props) {
               const key = `${food.source}:${food.id}`;
               const selected = selectedFood?.id === food.id && selectedFood.source === food.source;
               return <div className={selected ? "food-result food-result-selected" : "food-result"} role="listitem" key={key}>
-                <button type="button" className="food-result-select" aria-pressed={selected} onClick={() => { setSelectedFood(food); setMessage(""); }}>
-                  <span className="food-result-main"><strong>{food.name}</strong><small>{food.category.replaceAll("_", " ")} · {foodLabel(food)}</small></span>
+                <button type="button" className="food-result-select" aria-pressed={selected} onClick={() => { selectFood(food); setMessage(""); }}>
+                  <span className="food-result-main"><strong>{food.name}</strong><small>{food.category.replaceAll("_", " ")} · {foodLabel(food)}{food.aliases.length ? ` · ${food.aliases.join(", ")}` : ""}</small></span>
                   <span className="food-result-kcal">{formatNumber(food.caloriesKcalPer100g)}<small> kcal / 100 g</small></span>
                 </button>
                 <button type="button" className="food-favorite-toggle" aria-pressed={food.isFavorite} aria-label={food.isFavorite ? `Remove ${food.name} from favorites` : `Add ${food.name} to favorites`} disabled={favoriteBusy[key]} onClick={() => void toggleFavorite(food)}>
@@ -391,13 +495,25 @@ export function FoodTrackingView({ day, onSaved }: Props) {
           {showCustomFood ? <CustomFoodForm onCreated={customFoodCreated} onCancel={() => setShowCustomFood(false)} /> : null}
 
           {selectedFood ? <form className="selected-food-form" onSubmit={(event) => void saveFood(event)}>
-            <div className="selected-food-heading"><div><span className="eyebrow">SELECTED FOOD</span><strong>{selectedFood.name}</strong></div><button type="button" className="quiet-button" onClick={() => setSelectedFood(null)}>Change</button></div>
-            <p className="source-note">{selectedFood.reviewed ? "Reviewed" : "Not reviewed"} · {selectedFood.sourceNote}</p>
+            <div className="selected-food-heading"><div><span className="eyebrow">SELECTED FOOD</span><strong>{selectedFood.name}</strong></div><button type="button" className="quiet-button" onClick={() => selectFood(null)}>Change</button></div>
+            <p className="source-note">{selectedFood.reviewed ? "Reviewed" : "Not reviewed"} · {selectedFood.sourceNote}{selectedFood.aliases.length ? ` · Also called ${selectedFood.aliases.join(", ")}` : ""}</p>
             <div className="form-grid">
-              <label className="field"><span>Quantity (grams)</span><input type="number" min="1" max="5000" step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label>
+              <label className="field"><span>Quantity (grams)</span><input type="number" min="1" max="5000" step="1" value={quantity} onChange={(event) => { setQuantity(event.target.value); setSelectedPortionId(null); }} required /></label>
               <label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as (typeof meals)[number])}>{meals.map((meal) => <option key={meal} value={meal}>{meal[0].toUpperCase() + meal.slice(1)}</option>)}</select></label>
               <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
             </div>
+            {portions.length ? <div className="food-portion-list" role="group" aria-label="Saved household portions">
+              {portions.map((portion) => <div className="food-portion-chip" key={portion.id}>
+                <button type="button" aria-pressed={selectedPortionId === portion.id} onClick={() => { setQuantity(String(portion.grams)); setSelectedPortionId(portion.id); }}>{portion.label}<small>{portion.grams} g</small></button>
+                <button type="button" className="food-portion-remove" aria-label={`Remove ${portion.label} portion`} disabled={portionBusy} onClick={() => void deletePortion(portion)}>×</button>
+              </div>)}
+            </div> : null}
+            {portionLoading ? <p className="muted-copy">Loading your saved portions…</p> : null}
+            <div className="food-portion-save">
+              <label className="field"><span>Save this gram amount as a portion</span><input value={portionLabel} onChange={(event) => setPortionLabel(event.target.value)} maxLength={40} placeholder="1 katori, 1 medium roti…" /></label>
+              <button type="button" className="button button-secondary" disabled={portionBusy || portions.length >= 20 || !portionLabel.trim()} onClick={() => void savePortion()}>{portionBusy ? "Saving…" : `Save ${quantity || "this amount"} g`}</button>
+            </div>
+            {portionError ? <p className="form-error" role="alert">{portionError}</p> : null}
             {preview ? <div className="nutrition-preview"><strong>{formatNumber(preview.calories)} kcal</strong><span>Protein {formatNumber(preview.protein, 1)} g</span><span>Carbs {formatNumber(preview.carbs, 1)} g</span><span>Fat {formatNumber(preview.fat, 1)} g</span></div> : null}
             {message ? <p className="form-message" role="status">{message}</p> : null}
             <button className="button button-primary" type="submit" disabled={busy || !preview}>{busy ? "Saving…" : "Add to food log"}</button>
@@ -413,6 +529,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
 
 function CustomFoodForm({ onCreated, onCancel }: { onCreated: (food: FoodOption) => void; onCancel: () => void }) {
   const [name, setName] = useState("");
+  const [aliases, setAliases] = useState("");
   const [category, setCategory] = useState<(typeof categories)[number]>("prepared_meal");
   const [calories, setCalories] = useState("");
   const [protein, setProtein] = useState("");
@@ -430,6 +547,7 @@ function CustomFoodForm({ onCreated, onCancel }: { onCreated: (food: FoodOption)
       const response = await postJson<{ food: FoodOption }>("/v1/foods/custom", {
         foodId: globalThis.crypto.randomUUID(),
         name,
+        aliases: aliases.split(",").map((alias) => alias.trim()).filter(Boolean),
         category,
         caloriesKcalPer100g: Number(calories),
         proteinGPer100g: Number(protein),
@@ -448,6 +566,7 @@ function CustomFoodForm({ onCreated, onCancel }: { onCreated: (food: FoodOption)
   return <form className="custom-food-form" onSubmit={(event) => void submit(event)}>
     <div><span className="eyebrow">PERSONAL FOOD</span><h3>Add nutrition per 100 g</h3></div>
     <label className="field"><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></label>
+    <label className="field"><span>Also called (comma-separated)</span><input value={aliases} onChange={(event) => setAliases(event.target.value)} maxLength={800} placeholder="dosai, thosai" /></label>
     <label className="field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value as (typeof categories)[number])}>{categories.map((item) => <option value={item} key={item}>{item.replaceAll("_", " ")}</option>)}</select></label>
     <div className="form-grid form-grid-four">
       <label className="field"><span>Calories</span><input type="number" min="0" max="1000" step="0.1" value={calories} onChange={(event) => setCalories(event.target.value)} required /></label>
@@ -547,7 +666,7 @@ function FoodLogEntry({ item, onChanged }: { item: FoodLog; onChanged: () => Pro
   return <div className="food-log-entry">
     <div className="daily-entry">
       <span className="meal-badge">{item.data.mealType.slice(0, 1).toUpperCase()}</span>
-      <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams)} g · {formatClock(item.data.occurredAt)}</small></span>
+      <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams)} g{item.data.portionLabel ? ` (${item.data.portionLabel})` : ""} · {formatClock(item.data.occurredAt)}</small></span>
       <strong>{formatNumber(item.data.nutritionTotal.caloriesKcal)}<small> kcal</small></strong>
       <div className="entry-actions"><button type="button" className="quiet-button" onClick={() => { setError(""); setEditing((current) => !current); }} disabled={busy}>{editing ? "Close" : "Edit"}</button><button type="button" className="quiet-button entry-delete" onClick={() => void remove()} disabled={busy}>Delete</button></div>
     </div>
