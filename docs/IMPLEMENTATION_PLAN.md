@@ -971,12 +971,13 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 6 — Exercise, user plans, and manual activity
 
-**Current status:** Manual step counts and activity type/duration logging are implemented. The reviewed exercise library, user-authored workout plans, sets/reps/load, weekly scheduling, and richer activity progress remain outstanding.
+**Current status:** Manual steps/walks/cardio and structured strength sessions are implemented. Strength logs support multiple named exercises, per-set reps, and optional load in the profile's units (stored canonically in kg), with input limits validated on the server. The reviewed exercise library, suggested/user-authored workout plans, weekly scheduling, edits, and richer activity progress remain outstanding.
 
 - Create the reviewed exercise library and starter workout templates.
-- Support user-authored workout plans, weekly scheduling, sessions, sets/reps/load, walking/cardio, manual steps, and weight logging.
+- Add suggested and user-authored workout plans with weekly scheduling and approved plan versions.
+- Add editing/history for strength sessions and show exercise-specific progress.
 - Add source/provenance labels to activity and calorie estimates.
-- Show exercise-specific progress without mixing unlike measures on the body-weight graph.
+- Keep exercise progress separate from the body-weight graph; do not invent calorie-burn values.
 
 **Deliverables:** Complete manual tracking MVP.
 

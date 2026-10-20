@@ -476,6 +476,15 @@ app.post("/v1/activity-logs", async (c) => {
   }
   const parsed = createActivityLogRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_activity_log" }, 400);
+  const data = activityLogRecordSchema.parse({
+    activityType: parsed.data.activityType,
+    occurredAt: parsed.data.occurredAt,
+    durationMinutes: parsed.data.durationMinutes,
+    steps: parsed.data.steps,
+    notes: parsed.data.notes,
+    ...(parsed.data.workoutTitle ? { workoutTitle: parsed.data.workoutTitle } : {}),
+    ...(parsed.data.exercises ? { exercises: parsed.data.exercises } : {}),
+  });
   const userId = c.get("session").user.id;
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
@@ -487,22 +496,9 @@ app.post("/v1/activity-logs", async (c) => {
     )).limit(1);
     if (existing) {
       const prior = activityLogRecordSchema.safeParse(existing.data);
-      const same = prior.success && JSON.stringify(prior.data) === JSON.stringify({
-        activityType: parsed.data.activityType,
-        occurredAt: parsed.data.occurredAt,
-        durationMinutes: parsed.data.durationMinutes,
-        steps: parsed.data.steps,
-        notes: parsed.data.notes,
-      });
+      const same = prior.success && JSON.stringify(prior.data) === JSON.stringify(data);
       return { status: same ? "saved" as const : "conflict" as const, data: existing.data, idempotent: same };
     }
-    const data = activityLogRecordSchema.parse({
-      activityType: parsed.data.activityType,
-      occurredAt: parsed.data.occurredAt,
-      durationMinutes: parsed.data.durationMinutes,
-      steps: parsed.data.steps,
-      notes: parsed.data.notes,
-    });
     await tx.insert(userRecords).values({
       userId,
       entity: "activity_log",

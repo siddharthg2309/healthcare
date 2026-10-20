@@ -122,7 +122,7 @@ export function DashboardApp() {
         <div className="content-wrap">
           {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} /> : null}
           {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} onSaved={reloadData} /> : null}
-          {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} onSaved={reloadData} /> : null}
+          {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} unitSystem={profile.unitSystem} onSaved={reloadData} /> : null}
           {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} onMeasurementAdded={reloadData} /> : null}
         </div>
       </main>

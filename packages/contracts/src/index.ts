@@ -137,13 +137,28 @@ export const foodLogRecordSchema = z.object({
   nutritionTotal: nutritionSnapshotSchema,
 }).strict();
 
+const workoutSetSchema = z.object({
+  reps: z.number().int().min(1).max(200),
+  loadKg: z.number().finite().min(0).max(1000).nullable(),
+}).strict();
+
+const workoutExerciseSchema = z.object({
+  exerciseName: z.string().trim().min(1).max(100),
+  sets: z.array(workoutSetSchema).min(1).max(20),
+}).strict();
+
 const activityLogSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
   durationMinutes: z.number().int().min(0).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
-}).strict();
+  workoutTitle: z.string().trim().min(1).max(100).optional(),
+  exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
+}).strict().superRefine((value, context) => {
+  const setCount = value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0;
+  if (setCount > 100) context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
+});
 
 export const createActivityLogRequestSchema = z.object({
   activityId: uuidSchema,
@@ -152,12 +167,23 @@ export const createActivityLogRequestSchema = z.object({
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
+  workoutTitle: z.string().trim().min(1).max(100).optional(),
+  exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
 }).strict().superRefine((value, context) => {
-  if (value.durationMinutes === null && value.steps === null) {
+  if (value.durationMinutes === null && value.steps === null && !(value.activityType === "strength" && value.exercises?.length)) {
     context.addIssue({ code: "custom", path: ["durationMinutes"], message: "Enter a duration or step count." });
   }
   if (value.activityType === "steps" && value.steps === null) {
     context.addIssue({ code: "custom", path: ["steps"], message: "Enter a step count for a steps entry." });
+  }
+  if (value.activityType === "strength" && ((value.workoutTitle === undefined) !== (value.exercises === undefined) || (value.workoutTitle !== undefined && !value.exercises?.length))) {
+    context.addIssue({ code: "custom", path: ["exercises"], message: "Provide both a workout name and at least one exercise with sets." });
+  }
+  if (value.activityType !== "strength" && (value.workoutTitle !== undefined || value.exercises !== undefined)) {
+    context.addIssue({ code: "custom", path: ["exercises"], message: "Strength details are only valid for a strength session." });
+  }
+  if ((value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0) > 100) {
+    context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
   }
 });
 
@@ -167,7 +193,12 @@ export const activityLogRecordSchema = z.object({
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().max(500).nullable(),
-}).strict();
+  workoutTitle: z.string().trim().min(1).max(100).optional(),
+  exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
+}).strict().superRefine((value, context) => {
+  const setCount = value.exercises?.reduce((total, exercise) => total + exercise.sets.length, 0) ?? 0;
+  if (setCount > 100) context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
+});
 
 const bodyMeasurementSchema = z.object({
   measuredAt: isoDateTime,
@@ -220,6 +251,8 @@ export type CreateCustomFoodRequest = z.infer<typeof createCustomFoodRequestSche
 export type FoodLogRecord = z.infer<typeof foodLogRecordSchema>;
 export type CreateActivityLogRequest = z.infer<typeof createActivityLogRequestSchema>;
 export type ActivityLogRecord = z.infer<typeof activityLogRecordSchema>;
+export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
+export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 export type SyncPushRequest = z.infer<typeof syncPushSchema>;
 export type SyncPullQuery = z.infer<typeof syncPullQuerySchema>;
