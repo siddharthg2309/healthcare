@@ -13,11 +13,6 @@
     "preview": {
       "extends": "production",
       "environment": "preview"
-    },
-    "development": {
-      "extends": "production",
-      "environment": "development",
-      "developmentClient": true
     }
   }
 }

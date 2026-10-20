@@ -1,4 +1,4 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This workspace builds the optional Android shell for the hosted Next.js PWA. Keep it limited to WebView loading, safe external-link handling, back navigation, and connection feedback. Do not add duplicate food, activity, profile, authentication, or local health-data features here unless the user explicitly asks for native functionality.
 
 ## Expo has changed — do not trust your training data
 
@@ -23,11 +23,11 @@ npx expo install --fix      # fix incompatible package versions
 
 Run lint and typecheck before declaring any task done.
 
-## Navigation & Routing
+## App entry
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+- This shell does not use Expo Router. `src/index.ts` registers `src/App.tsx` with Expo's `registerRootComponent`.
+- Keep the hosted PWA URL in `EXPO_PUBLIC_APP_URL`. The shell uses the same origin for both UI and API and does not need a native API client.
+- Use native navigation or data modules only when the user explicitly approves a native capability and the PWA cannot provide it.
 
 ## Building with EAS
 

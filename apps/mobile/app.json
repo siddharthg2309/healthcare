@@ -17,19 +17,7 @@
       },
       "predictiveBackGestureEnabled": true
     },
-    "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
-    },
     "plugins": [
-      "expo-router",
-      [
-        "expo-sqlite",
-        {
-          "useSQLCipher": true
-        }
-      ],
-      "expo-secure-store",
       [
         "expo-splash-screen",
         {
@@ -39,12 +27,8 @@
         }
       ]
     ],
-    "experiments": {
-      "typedRoutes": true
-    },
     "platforms": [
-      "android",
-      "web"
+      "android"
     ]
   }
 }

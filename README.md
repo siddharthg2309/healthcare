@@ -65,8 +65,8 @@ Vercel hosts both the pages and `/api/*` and `/v1/*` server routes, so no separa
 Use this only if you prefer a separately installed Android package. The APK is a thin Expo WebView shell that opens the same hosted PWA; it does not run the backend on your phone or laptop.
 
 1. Deploy and verify the PWA using the steps above.
-2. Create or sign in to an Expo account. From `apps/mobile`, run `npx eas-cli init` once if this app is not linked to an EAS project yet.
-3. In the EAS project's **production** environment, set `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_API_BASE_URL` to the public Vercel origin. These URLs are public configuration, not secrets. Do not put Neon or OpenRouter credentials in the mobile app.
+2. Create or sign in to an Expo account. From `apps/mobile`, run `npx eas-cli@latest init` once if this app is not linked to an EAS project yet.
+3. In the EAS project's **production** environment, set only `EXPO_PUBLIC_APP_URL` to the public Vercel origin. This public URL is packaged into the WebView shell; do not put Neon or OpenRouter credentials in the mobile app.
 4. From `apps/mobile`, run `npm run build:apk`. Download the resulting APK from the private EAS build page and share it privately. Friends install it directly on Android; no Play Store account is involved.
 
 Vercel web deployments update the content inside an installed APK. Changes to the native shell require a new APK. Browser notifications are optional and checked while the PWA is open; they are not scheduled background alarms. The WebView shell does not provide direct Health Connect integration or reliable background step collection. Steps can be entered manually. After Google OAuth is configured, Settings can sync approved workouts to a separate app-created calendar.

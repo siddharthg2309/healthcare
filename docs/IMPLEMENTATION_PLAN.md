@@ -353,7 +353,7 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 | Layer | Choice | Reason |
 | --- | --- | --- |
 | Product UI | Next.js App Router, React, TypeScript | One responsive web app powers both the browser PWA and Android APK shell |
-| Android package | Expo SDK 57, Expo Router, `react-native-webview` | Small Android shell that opens the hosted product UI and is distributed as a private APK |
+| Android package | Expo SDK 57, React Native, `react-native-webview` | Single-entry Android shell that opens the hosted product UI and is distributed as a private APK |
 | Hosting | Vercel | Hosts the Next.js UI and server routes at one HTTPS origin; no laptop or separately hosted API is needed |
 | UI and graph | CSS design tokens, Manrope, accessible SVG line chart | Matches the black/white/green references and makes actual-versus-plan progress clear |
 | Browser data | Same-origin requests; React state for temporary view state | Avoids a second API URL or secrets in the browser bundle |
@@ -1101,7 +1101,7 @@ Vercel is the web host and server runtime. Neon is the database host. The defaul
 
 Set AUTH_BASE_URL and the trusted origin to the exact production domain, such as https://your-project.vercel.app. If a custom domain is added, update both values and redeploy. Preview deployment URLs require separately scoped auth settings if authentication is tested there.
 
-The web app uses relative API routes at the same origin. The optional Android shell uses `EXPO_PUBLIC_APP_URL` to load that origin; `EXPO_PUBLIC_API_BASE_URL` is a public URL used only by any native screens that call the API directly. Neither variable may contain credentials.
+The web app uses relative API routes at the same origin. The optional Android shell uses only `EXPO_PUBLIC_APP_URL` to load the hosted app in a WebView. The shell has no separate API client or native feature screens. The URL is public configuration and must not contain credentials.
 
 ### 17.2 Environment variables
 
@@ -1131,8 +1131,8 @@ Run them before inviting users. Keep migrations explicit and reviewed rather tha
 
 Only if you want the optional APK, configure the Expo app after Vercel is live:
 
-1. Install/sign in to EAS and link `apps/mobile` to an Expo project once: `npx eas-cli login`, then `npx eas-cli init` from `apps/mobile`.
-2. In that EAS project's `production` environment, set the public `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_API_BASE_URL` values to the production origin.
+1. Install/sign in to EAS and link `apps/mobile` to an Expo project once: `npx eas-cli@latest login`, then `npx eas-cli@latest init` from `apps/mobile`.
+2. In that EAS project's `production` environment, set the public `EXPO_PUBLIC_APP_URL` to the production origin.
 3. Build the installable APK from `apps/mobile`: `npm run build:apk`.
 4. Download the APK from the completed internal build and install it on Android. No Play Store submission is part of this flow.
 

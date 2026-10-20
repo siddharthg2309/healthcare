@@ -19,7 +19,7 @@ For local development, use:
 | `AUTH_BASE_URL` | `http://localhost:3000` | Local Next.js origin. For deployed production, use the exact HTTPS Vercel/custom domain. |
 | `AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` | The exact origin allowed to use auth. Separate multiple origins with commas. |
 
-The browser calls relative same-origin routes such as `/api/auth/*` and `/v1/*`. The APK uses public `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_API_BASE_URL` URLs at build time; these are not secret values. Never place credentials in `EXPO_PUBLIC_*` variables.
+The browser calls relative same-origin routes such as `/api/auth/*` and `/v1/*`. The optional APK shell needs only the public `EXPO_PUBLIC_APP_URL` at build time; it loads the same web app and API in a WebView. Never place credentials in `EXPO_PUBLIC_*` variables.
 
 Run the auth, application, and LangGraph checkpoint migrations once, then launch the app:
 
@@ -79,13 +79,12 @@ Choose this only if you want a separate Android package. The APK is an Expo WebV
 ### One-time EAS setup
 
 1. Create or sign in to an Expo account.
-2. From `apps/mobile`, run `npx eas-cli init` to link the app to your EAS project. This adds the public project ID to `apps/mobile/app.json`.
+2. From `apps/mobile`, run `npx eas-cli@latest init` to link the app to your EAS project. This adds the public project ID to `apps/mobile/app.json`.
 3. In the Expo dashboard, open the project's **production** environment variables and add:
 
    | Variable | Value | Visibility |
    | --- | --- | --- |
    | `EXPO_PUBLIC_APP_URL` | `https://your-project.vercel.app` | Plain text; this URL is packaged into the APK |
-   | `EXPO_PUBLIC_API_BASE_URL` | `https://your-project.vercel.app` | Plain text; same origin for native API/auth screens |
 
    These URLs are public configuration. Do not add Neon, Better Auth, OpenRouter, Google OAuth, storage, or token-encryption secrets to Expo/EAS or the APK.
 4. Build an installable APK from `apps/mobile`:
@@ -98,7 +97,7 @@ Choose this only if you want a separate Android package. The APK is an Expo WebV
 
 The repo ignores `.apk` files and signing material. The APK uses the deployed app URL at runtime. A Vercel web deployment updates the content for existing installs; changes to the wrapper, app identifier, or native permissions require another APK build. EAS internal-build URLs are bearer links, so do not post them publicly.
 
-For local Android development, copy `apps/mobile/.env.example` to `apps/mobile/.env` and set the two public URL variables to your development machine's LAN address. Do not use `localhost` from a physical phone. The production EAS variables are independent of the ignored local file.
+For local Android development, copy `apps/mobile/.env.example` to `apps/mobile/.env` and set `EXPO_PUBLIC_APP_URL` to your development machine's LAN address. Do not use `localhost` from a physical phone. The production EAS variable is independent of the ignored local file.
 
 ## Feature-specific configuration
 

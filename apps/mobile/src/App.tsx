@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, BackHandler, Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 import { WebView } from "react-native-webview";
 
-import { colors, fonts, radius } from "@/constants/theme";
+import { colors, radius } from "@/constants/theme";
 
 function getAppUrl(): URL | null {
   const configured = process.env.EXPO_PUBLIC_APP_URL?.trim();
@@ -47,7 +48,7 @@ function OfflineMessage({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-export default function AppScreen() {
+function AppContent() {
   const webView = useRef<WebView>(null);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -117,17 +118,26 @@ export default function AppScreen() {
   );
 }
 
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <StatusBar style="dark" />
+      <AppContent />
+    </SafeAreaProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   webView: { flex: 1, backgroundColor: colors.background },
   loading: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
   messageWrap: { flex: 1, justifyContent: "center", alignItems: "flex-start", paddingHorizontal: 28, gap: 12 },
   brandMark: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: radius.card, backgroundColor: colors.lime },
-  brandMarkText: { color: colors.green, fontFamily: fonts.bold, fontSize: 13 },
-  eyebrow: { color: colors.green, fontFamily: fonts.semibold, fontSize: 9, letterSpacing: 1 },
-  title: { color: colors.text, fontFamily: fonts.bold, fontSize: 27, letterSpacing: -0.7 },
-  body: { maxWidth: 360, color: colors.muted, fontFamily: fonts.regular, fontSize: 13, lineHeight: 21 },
+  brandMarkText: { color: colors.green, fontSize: 13, fontWeight: "700" },
+  eyebrow: { color: colors.green, fontSize: 9, fontWeight: "600", letterSpacing: 1 },
+  title: { color: colors.text, fontSize: 27, fontWeight: "700", letterSpacing: -0.7 },
+  body: { maxWidth: 360, color: colors.muted, fontSize: 13, lineHeight: 21 },
   retryButton: { minHeight: 46, justifyContent: "center", alignItems: "center", marginTop: 5, paddingHorizontal: 22, borderRadius: radius.pill, backgroundColor: colors.lime },
-  retryLabel: { color: colors.text, fontFamily: fonts.semibold, fontSize: 12 },
+  retryLabel: { color: colors.text, fontSize: 12, fontWeight: "600" },
   pressed: { opacity: 0.78 },
 });
