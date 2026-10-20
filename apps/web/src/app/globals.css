@@ -503,3 +503,11 @@ a { color: inherit; text-decoration: none; }
 .copy-meal-preview { display: grid; gap: 8px; color: var(--ink); font-size: 11px; }
 .copy-meal-preview > span { color: var(--green); font-weight: 700; }
 .copy-meal-preview ul { display: grid; gap: 5px; margin: 0; padding-left: 18px; color: var(--muted); }
+
+.recipe-composer .field textarea { width: 100%; min-height: 104px; resize: vertical; padding: 10px 12px; border: 1px solid var(--line); border-radius: 13px; background: #fbfcfa; color: var(--ink); font-size: 12px; line-height: 1.55; }
+.recipe-instructions { display: grid; gap: 6px; margin: 10px 0; padding-left: 20px; color: var(--muted); line-height: 1.5; }
+.recipe-history { display: grid; gap: 7px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); }
+.recipe-history ol { display: grid; gap: 8px; margin: 0; padding-left: 19px; color: var(--muted); }
+.recipe-history li { display: grid; gap: 3px; font-size: 10px; }
+.recipe-history li strong { color: var(--ink); }
+.recipe-edit-button { width: 100%; margin-top: 9px; }

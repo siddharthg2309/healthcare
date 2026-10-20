@@ -204,6 +204,30 @@ export const catalogFoods = pgTable("catalog_foods", {
   `),
 ]);
 
+export type UserFoodRecipe = {
+  yieldGrams: number;
+  instructions?: string[];
+  ingredients: Array<{
+    foodId: string;
+    foodSource: "shared_catalog" | "personal";
+    foodName: string;
+    quantityGrams: number;
+    nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
+  }>;
+};
+
+export type UserFoodRecipeVersionSnapshot = {
+  name: string;
+  aliases: string[];
+  category: string;
+  caloriesKcalPer100g: number;
+  proteinGPer100g: number;
+  carbohydrateGPer100g: number;
+  fatGPer100g: number;
+  sourceNote: string;
+  recipe: UserFoodRecipe;
+};
+
 export const userFoods = pgTable("user_foods", {
   id: uuid("id").primaryKey(),
   userId: text("user_id").notNull(),
@@ -215,16 +239,8 @@ export const userFoods = pgTable("user_foods", {
   carbohydrateGPer100g: numeric("carbohydrate_g_per_100g", { precision: 8, scale: 2 }).notNull(),
   fatGPer100g: numeric("fat_g_per_100g", { precision: 8, scale: 2 }).notNull(),
   sourceNote: text("source_note").notNull(),
-  recipe: jsonb("recipe").$type<{
-    yieldGrams: number;
-    ingredients: Array<{
-      foodId: string;
-      foodSource: "shared_catalog" | "personal";
-      foodName: string;
-      quantityGrams: number;
-      nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
-    }>;
-  }>(),
+  recipe: jsonb("recipe").$type<UserFoodRecipe>(),
+  recipeVersion: integer("recipe_version"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
@@ -234,6 +250,24 @@ export const userFoods = pgTable("user_foods", {
     AND ${table.carbohydrateGPer100g} >= 0 AND ${table.fatGPer100g} >= 0
   `),
   pgPolicy("user_foods_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
+export const userFoodRecipeVersions = pgTable("user_food_recipe_versions", {
+  userId: text("user_id").notNull(),
+  foodId: uuid("food_id").notNull().references(() => userFoods.id, { onDelete: "cascade" }),
+  version: integer("version").notNull(),
+  snapshot: jsonb("snapshot").$type<UserFoodRecipeVersionSnapshot>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.foodId, table.version] }),
+  index("user_food_recipe_versions_owner_food_idx").on(table.userId, table.foodId),
+  check("user_food_recipe_versions_version_positive", sql`${table.version} > 0`),
+  pgPolicy("user_food_recipe_versions_owner_policy", {
     for: "all",
     to: "public",
     using: sql`user_id = current_setting('app.user_id', true)`,

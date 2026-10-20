@@ -32,6 +32,7 @@ export type FoodOption = {
   fatGPer100g: number;
   recipe?: {
     yieldGrams: number;
+    instructions?: string[];
     ingredients: Array<{
       foodId: string;
       foodSource: "shared_catalog" | "personal";
@@ -40,6 +41,7 @@ export type FoodOption = {
       nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
     }>;
   } | null;
+  recipeVersion?: number | null;
 };
 
 type FoodPortion = { id: string; label: string; grams: number };
@@ -206,6 +208,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   const [message, setMessage] = useState("");
   const [showCustomFood, setShowCustomFood] = useState(false);
   const [showRecipe, setShowRecipe] = useState(false);
+  const [recipeToEdit, setRecipeToEdit] = useState<FoodOption | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [photoResult, setPhotoResult] = useState<FoodPhotoRecognitionResponse | null>(null);
@@ -328,7 +331,10 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   }
 
   function recipeCreated(food: FoodOption) {
-    selectCreatedFood(food, "Recipe saved with nutrition calculated from its ingredients and finished weight.");
+    selectCreatedFood(food, food.recipeVersion && food.recipeVersion > 1
+      ? `Recipe updated as version ${food.recipeVersion}; earlier versions remain available.`
+      : "Recipe saved with nutrition calculated from its ingredients and finished weight.");
+    setRecipeToEdit(null);
   }
 
   function selectFood(food: FoodOption | null) {
@@ -520,17 +526,20 @@ export function FoodTrackingView({ day, onSaved }: Props) {
           {!loading && !foods.length && !error ? <div className="empty-inline"><strong>{foodFilter === "favorites" ? "No favorites match" : foodFilter === "recent" ? "No recent foods match" : "No match yet"}</strong><span>{foodFilter === "favorites" ? "Star foods from All foods to keep them here." : foodFilter === "recent" ? "Foods you log will appear here for quick access." : "Add it as a personal food from its nutrition label or recipe."}</span></div> : null}
           <div className="food-create-actions">
             <button type="button" className="text-button add-custom-trigger" onClick={() => { setShowCustomFood((current) => !current); setShowRecipe(false); }}>{showCustomFood ? "Close personal food form" : "＋ Add a personal food"}</button>
-            <button type="button" className="text-button add-custom-trigger" onClick={() => { setShowRecipe((current) => !current); setShowCustomFood(false); }}>{showRecipe ? "Close recipe builder" : "＋ Build a recipe"}</button>
+            <button type="button" className="text-button add-custom-trigger" onClick={() => { const next = !showRecipe; setShowRecipe(next); setRecipeToEdit(null); setShowCustomFood(false); }}>{showRecipe ? "Close recipe builder" : "＋ Build a recipe"}</button>
           </div>
           {showCustomFood ? <CustomFoodForm onCreated={customFoodCreated} onCancel={() => setShowCustomFood(false)} /> : null}
-          {showRecipe ? <RecipeComposer onCreated={recipeCreated} onCancel={() => setShowRecipe(false)} /> : null}
+          {showRecipe ? <RecipeComposer key={recipeToEdit?.id ?? "new-recipe"} initialRecipe={recipeToEdit ?? undefined} onCreated={recipeCreated} onCancel={() => { setShowRecipe(false); setRecipeToEdit(null); }} /> : null}
 
           {selectedFood ? <form className="selected-food-form" onSubmit={(event) => void saveFood(event)}>
             <div className="selected-food-heading"><div><span className="eyebrow">SELECTED FOOD</span><strong>{selectedFood.name}</strong></div><button type="button" className="quiet-button" onClick={() => selectFood(null)}>Change</button></div>
             <p className="source-note">{selectedFood.reviewed ? "Reviewed" : "Not reviewed"} · {selectedFood.sourceNote}{selectedFood.aliases.length ? ` · Also called ${selectedFood.aliases.join(", ")}` : ""}</p>
             {selectedFood.recipe ? <details className="recipe-details">
-              <summary>Recipe · {selectedFood.recipe.ingredients.length} ingredients · {formatNumber(selectedFood.recipe.yieldGrams)} g finished</summary>
+              <summary>Recipe · {selectedFood.recipeVersion ? `version ${selectedFood.recipeVersion} · ` : ""}{selectedFood.recipe.ingredients.length} ingredients · {formatNumber(selectedFood.recipe.yieldGrams)} g finished</summary>
               <ul>{selectedFood.recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.foodSource}:${ingredient.foodId}:${index}`}><span>{ingredient.foodName}</span><strong>{formatNumber(ingredient.quantityGrams)} g</strong></li>)}</ul>
+              {selectedFood.recipe.instructions?.length ? <ol className="recipe-instructions">{selectedFood.recipe.instructions.map((instruction, index) => <li key={`${index}:${instruction}`}>{instruction}</li>)}</ol> : <p className="source-note">No cooking instructions saved.</p>}
+              <RecipeHistoryPanel key={`${selectedFood.id}:${selectedFood.recipeVersion ?? 1}`} foodId={selectedFood.id} />
+              <button type="button" className="button button-secondary recipe-edit-button" onClick={() => { setRecipeToEdit(selectedFood); setShowRecipe(true); setShowCustomFood(false); }}>Edit recipe</button>
             </details> : null}
             <div className="form-grid">
               <label className="field"><span>Quantity (grams)</span><input type="number" min="1" max="5000" step="1" value={quantity} onChange={(event) => { setQuantity(event.target.value); setSelectedPortionId(null); }} required /></label>
@@ -618,17 +627,83 @@ function CustomFoodForm({ onCreated, onCancel }: { onCreated: (food: FoodOption)
 
 type RecipeIngredientDraft = { food: FoodOption; quantityGrams: number };
 
-function RecipeComposer({ onCreated, onCancel }: { onCreated: (food: FoodOption) => void; onCancel: () => void }) {
-  const [name, setName] = useState("");
-  const [aliases, setAliases] = useState("");
+type RecipeHistoryItem = {
+  version: number;
+  createdAt: string;
+  snapshot: {
+    name: string;
+    caloriesKcalPer100g: number;
+    proteinGPer100g: number;
+    carbohydrateGPer100g: number;
+    fatGPer100g: number;
+    recipe: NonNullable<FoodOption["recipe"]>;
+  };
+};
+
+function RecipeHistoryPanel({ foodId }: { foodId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [history, setHistory] = useState<RecipeHistoryItem[]>([]);
+  const [historyError, setHistoryError] = useState("");
+
+  async function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (loaded || loadingHistory) return;
+    setLoadingHistory(true);
+    setHistoryError("");
+    try {
+      const response = await requestJson<{ versions: RecipeHistoryItem[] }>(`/v1/foods/recipes/${foodId}/versions`);
+      setHistory(response.versions);
+      setLoaded(true);
+    } catch (caught) {
+      setHistoryError(caught instanceof Error ? caught.message : "Could not load recipe history.");
+    } finally {
+      setLoadingHistory(false);
+    }
+  }
+
+  return <div className="recipe-history">
+    <button type="button" className="quiet-button" aria-expanded={open} onClick={() => void toggle()}>{open ? "Hide version history" : "View version history"}</button>
+    {open ? loadingHistory ? <p className="source-note">Loading saved versions…</p> : historyError ? <p className="form-error" role="alert">{historyError}</p> : <ol>{history.map((item) => <li key={item.version}>
+      <strong>Version {item.version} · {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(item.createdAt))}</strong>
+      <span>{item.snapshot.name} · {formatNumber(item.snapshot.caloriesKcalPer100g)} kcal / 100 g · {item.snapshot.recipe.ingredients.length} ingredients</span>
+    </li>)}</ol> : null}
+  </div>;
+}
+
+function RecipeComposer({ initialRecipe, onCreated, onCancel }: { initialRecipe?: FoodOption; onCreated: (food: FoodOption) => void; onCancel: () => void }) {
+  const [name, setName] = useState(() => initialRecipe?.name ?? "");
+  const [aliases, setAliases] = useState(() => initialRecipe?.aliases.join(", ") ?? "");
+  const [instructions, setInstructions] = useState(() => initialRecipe?.recipe?.instructions?.join("\n") ?? "");
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FoodOption[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [selectedIngredient, setSelectedIngredient] = useState<FoodOption | null>(null);
   const [ingredientGrams, setIngredientGrams] = useState("100");
-  const [ingredients, setIngredients] = useState<RecipeIngredientDraft[]>([]);
-  const [yieldGrams, setYieldGrams] = useState("");
-  const [recipeId, setRecipeId] = useState<string | null>(null);
+  const [ingredients, setIngredients] = useState<RecipeIngredientDraft[]>(() => (initialRecipe?.recipe?.ingredients ?? []).map((ingredient) => ({
+    food: {
+      id: ingredient.foodId,
+      name: ingredient.foodName,
+      aliases: [],
+      category: "ingredient",
+      source: ingredient.foodSource,
+      isFavorite: false,
+      sourceNote: "Saved recipe ingredient",
+      reviewed: false,
+      caloriesKcalPer100g: ingredient.nutritionPer100g.caloriesKcal,
+      proteinGPer100g: ingredient.nutritionPer100g.proteinG,
+      carbohydrateGPer100g: ingredient.nutritionPer100g.carbohydrateG,
+      fatGPer100g: ingredient.nutritionPer100g.fatG,
+    },
+    quantityGrams: ingredient.quantityGrams,
+  })));
+  const [yieldGrams, setYieldGrams] = useState(() => initialRecipe?.recipe ? String(initialRecipe.recipe.yieldGrams) : "");
+  const [recipeId, setRecipeId] = useState<string | null>(initialRecipe?.id ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -689,17 +764,23 @@ function RecipeComposer({ onCreated, onCancel }: { onCreated: (food: FoodOption)
     try {
       const stableRecipeId = recipeId ?? globalThis.crypto.randomUUID();
       setRecipeId(stableRecipeId);
-      const response = await postJson<{ food: FoodOption }>("/v1/foods/recipes", {
-        recipeId: stableRecipeId,
+      const payload = {
         name,
         aliases: aliases.split(",").map((alias) => alias.trim()).filter(Boolean),
         yieldGrams: yieldWeight,
+        instructions: instructions.split(/\r?\n/).map((instruction) => instruction.trim()).filter(Boolean),
         ingredients: ingredients.map((ingredient) => ({
           foodId: ingredient.food.id,
           foodSource: ingredient.food.source,
           quantityGrams: ingredient.quantityGrams,
         })),
-      });
+      };
+      const response = initialRecipe
+        ? await requestJson<{ food: FoodOption }>(`/v1/foods/recipes/${initialRecipe.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ ...payload, baseVersion: initialRecipe.recipeVersion ?? 1 }),
+        })
+        : await postJson<{ food: FoodOption }>("/v1/foods/recipes", { ...payload, recipeId: stableRecipeId });
       onCreated(response.food);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save this recipe.");
@@ -709,7 +790,7 @@ function RecipeComposer({ onCreated, onCancel }: { onCreated: (food: FoodOption)
   }
 
   return <form className="custom-food-form recipe-composer" onSubmit={(event) => void submit(event)}>
-    <div><span className="eyebrow">PERSONAL RECIPE</span><h3>Build nutrition from ingredients</h3></div>
+    <div><span className="eyebrow">PERSONAL RECIPE</span><h3>{initialRecipe ? `Edit ${initialRecipe.name}` : "Build nutrition from ingredients"}</h3></div>
     <label className="field"><span>Recipe name</span><input value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></label>
     <label className="field"><span>Also called (comma-separated)</span><input value={aliases} onChange={(event) => setAliases(event.target.value)} maxLength={800} placeholder="home-style, family name" /></label>
     <div className="recipe-ingredient-search">
@@ -734,12 +815,13 @@ function RecipeComposer({ onCreated, onCancel }: { onCreated: (food: FoodOption)
         <button type="button" className="quiet-button entry-delete" aria-label={`Remove ${ingredient.food.name}`} onClick={() => setIngredients((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
       </div>)}
     </div> : null}
+    <label className="field"><span>Cooking steps (one per line, optional)</span><textarea rows={4} maxLength={9000} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Add the cooking steps you want to remember…" /></label>
     <label className="field"><span>Finished recipe weight (grams)</span><input type="number" min="1" max="50000" step="1" value={yieldGrams} onChange={(event) => setYieldGrams(event.target.value)} required /></label>
     <p className="source-note">Include added water and oil as ingredients. The finished weight cannot exceed the combined ingredient weight.</p>
     {preview ? <div className="nutrition-preview"><strong>{formatNumber(preview.caloriesKcal)} kcal / 100 g</strong><span>Protein {formatNumber(preview.proteinG, 1)} g</span><span>Carbs {formatNumber(preview.carbohydrateG, 1)} g</span><span>Fat {formatNumber(preview.fatG, 1)} g</span></div> : null}
     <p className="source-note">Nutrition is calculated from the selected foods and the finished recipe weight. Cooking and water loss can change actual values.</p>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
-    <div className="button-row"><button className="button button-primary" disabled={busy || ingredients.length < 2 || !preview}>{busy ? "Saving…" : "Save recipe"}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
+    <div className="button-row"><button className="button button-primary" disabled={busy || ingredients.length < 2 || !preview}>{busy ? "Saving…" : initialRecipe ? "Save new version" : "Save recipe"}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
   </form>;
 }
 

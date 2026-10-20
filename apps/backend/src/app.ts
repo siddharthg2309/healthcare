@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, foodFavorites, foodPortions, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, foodFavorites, foodPortions, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoodRecipeVersions, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
   approveMealPlanRequestSchema,
   approveWorkoutPlanRequestSchema,
@@ -40,6 +40,7 @@ import {
   updateWorkoutPlanRequestSchema,
   updateActivityLogRequestSchema,
   updateFoodLogRequestSchema,
+  updateFoodRecipeRequestSchema,
   workoutPlanDataSchema,
   type WorkoutPlanData,
 } from "@healthcare/contracts";
@@ -144,6 +145,34 @@ function nutritionValue(value: string | number): number {
 
 function roundNutrition(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+type RecipeComposition = {
+  yieldGrams: number;
+  instructions?: string[];
+  ingredients: Array<{
+    foodId: string;
+    foodSource: "shared_catalog" | "personal";
+    foodName: string;
+    quantityGrams: number;
+    nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
+  }>;
+};
+
+function sameRecipeComposition(left: RecipeComposition | null | undefined, right: RecipeComposition): boolean {
+  if (!left || left.yieldGrams !== right.yieldGrams) return false;
+  const ingredientKey = (ingredient: RecipeComposition["ingredients"][number]) => [
+    ingredient.foodId,
+    ingredient.foodSource,
+    ingredient.foodName,
+    ingredient.quantityGrams,
+    ingredient.nutritionPer100g.caloriesKcal,
+    ingredient.nutritionPer100g.proteinG,
+    ingredient.nutritionPer100g.carbohydrateG,
+    ingredient.nutritionPer100g.fatG,
+  ];
+  return JSON.stringify(left.instructions ?? []) === JSON.stringify(right.instructions ?? [])
+    && JSON.stringify(left.ingredients.map(ingredientKey)) === JSON.stringify(right.ingredients.map(ingredientKey));
 }
 
 function localDateInZone(value: string, timezone: string): string {
@@ -651,6 +680,7 @@ app.get("/v1/foods", async (c) => {
       sourceNote: food.sourceNote,
       reviewed: false,
       recipe: food.recipe,
+      recipeVersion: food.recipeVersion,
       caloriesKcalPer100g: nutritionValue(food.caloriesKcalPer100g),
       proteinGPer100g: nutritionValue(food.proteinGPer100g),
       carbohydrateGPer100g: nutritionValue(food.carbohydrateGPer100g),
@@ -857,6 +887,7 @@ app.post("/v1/foods/custom", async (c) => {
       sourceNote: result.food.sourceNote,
       reviewed: false,
       recipe: result.food.recipe,
+      recipeVersion: result.food.recipeVersion,
       caloriesKcalPer100g: nutritionValue(result.food.caloriesKcalPer100g),
       proteinGPer100g: nutritionValue(result.food.proteinGPer100g),
       carbohydrateGPer100g: nutritionValue(result.food.carbohydrateGPer100g),
@@ -933,6 +964,7 @@ app.post("/v1/foods/recipes", async (c) => {
     if (ingredients.some((ingredient) => ingredient === null)) return { status: "ingredient_missing" as const };
     const recipeSnapshot = {
       yieldGrams: recipeRequest.yieldGrams,
+      instructions: recipeRequest.instructions,
       ingredients: ingredients.filter((ingredient): ingredient is NonNullable<typeof ingredient> => ingredient !== null),
     };
     if (recipeSnapshot.yieldGrams > recipeSnapshot.ingredients.reduce((sum, ingredient) => sum + ingredient.quantityGrams, 0)) {
@@ -962,7 +994,7 @@ app.post("/v1/foods/recipes", async (c) => {
       const same = existing.name === recipeRequest.name
         && JSON.stringify(existing.aliases) === JSON.stringify(recipeRequest.aliases)
         && existing.category === "prepared_meal"
-        && JSON.stringify(existing.recipe) === JSON.stringify(recipeSnapshot)
+        && sameRecipeComposition(existing.recipe, recipeSnapshot)
         && nutritionValue(existing.caloriesKcalPer100g) === nutritionPer100g.caloriesKcal
         && nutritionValue(existing.proteinGPer100g) === nutritionPer100g.proteinG
         && nutritionValue(existing.carbohydrateGPer100g) === nutritionPer100g.carbohydrateG
@@ -981,9 +1013,26 @@ app.post("/v1/foods/recipes", async (c) => {
       fatGPer100g: String(nutritionPer100g.fatG),
       sourceNote,
       recipe: recipeSnapshot,
+      recipeVersion: 1,
       updatedAt: new Date(),
     }).returning();
     if (!saved) throw new Error("food_recipe_save_failed");
+    await tx.insert(userFoodRecipeVersions).values({
+      userId,
+      foodId: saved.id,
+      version: 1,
+      snapshot: {
+        name: saved.name,
+        aliases: saved.aliases,
+        category: saved.category,
+        caloriesKcalPer100g: nutritionPer100g.caloriesKcal,
+        proteinGPer100g: nutritionPer100g.proteinG,
+        carbohydrateGPer100g: nutritionPer100g.carbohydrateG,
+        fatGPer100g: nutritionPer100g.fatG,
+        sourceNote: saved.sourceNote,
+        recipe: recipeSnapshot,
+      },
+    });
     return { status: "saved" as const, food: saved, idempotent: false };
   });
   if (result.status === "ingredient_missing") return c.json({ error: "food_recipe_ingredient_not_found" }, 404);
@@ -1001,6 +1050,7 @@ app.post("/v1/foods/recipes", async (c) => {
       sourceNote: result.food.sourceNote,
       reviewed: false,
       recipe: result.food.recipe,
+      recipeVersion: result.food.recipeVersion,
       caloriesKcalPer100g: nutritionValue(result.food.caloriesKcalPer100g),
       proteinGPer100g: nutritionValue(result.food.proteinGPer100g),
       carbohydrateGPer100g: nutritionValue(result.food.carbohydrateGPer100g),
@@ -1008,6 +1058,219 @@ app.post("/v1/foods/recipes", async (c) => {
     },
     idempotent: result.idempotent,
   }, result.idempotent ? 200 : 201);
+});
+
+app.put("/v1/foods/recipes/:id", async (c) => {
+  const foodId = c.req.param("id");
+  if (!isUuid(foodId)) return c.json({ error: "invalid_food_recipe_id" }, 400);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = updateFoodRecipeRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_recipe" }, 400);
+  const userId = c.get("session").user.id;
+  const request = parsed.data;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select().from(userFoods).where(and(
+      eq(userFoods.userId, userId),
+      eq(userFoods.id, foodId),
+    )).limit(1);
+    if (!existing?.recipe || existing.recipeVersion === null) return { status: "missing" as const };
+    const sameRequest = existing.name === request.name
+      && JSON.stringify(existing.aliases) === JSON.stringify(request.aliases)
+      && existing.recipe.yieldGrams === request.yieldGrams
+      && JSON.stringify(existing.recipe.instructions ?? []) === JSON.stringify(request.instructions)
+      && existing.recipe.ingredients.length === request.ingredients.length
+      && existing.recipe.ingredients.every((ingredient, index) => {
+        const requestedIngredient = request.ingredients[index];
+        return requestedIngredient !== undefined
+          && ingredient.foodId === requestedIngredient.foodId
+          && ingredient.foodSource === requestedIngredient.foodSource
+          && ingredient.quantityGrams === requestedIngredient.quantityGrams;
+      });
+    if (existing.recipeVersion !== request.baseVersion) {
+      return sameRequest
+        ? { status: "saved" as const, food: existing, idempotent: true }
+        : { status: "conflict" as const, currentVersion: existing.recipeVersion };
+    }
+    if (request.ingredients.some((item) => item.foodSource === "personal" && item.foodId === foodId)) {
+      return { status: "self_reference" as const };
+    }
+
+    const sharedIds = [...new Set(request.ingredients.filter((item) => item.foodSource === "shared_catalog").map((item) => item.foodId))];
+    const personalIds = [...new Set(request.ingredients.filter((item) => item.foodSource === "personal").map((item) => item.foodId))];
+    const [sharedFoods, personalFoods] = await Promise.all([
+      sharedIds.length ? tx.select().from(catalogFoods).where(and(inArray(catalogFoods.id, sharedIds), eq(catalogFoods.active, true))) : Promise.resolve([]),
+      personalIds.length ? tx.select().from(userFoods).where(and(inArray(userFoods.id, personalIds), eq(userFoods.userId, userId))) : Promise.resolve([]),
+    ]);
+    const availableFoods = new Map<string, {
+      id: string;
+      name: string;
+      category: string;
+      foodSource: "shared_catalog" | "personal";
+      nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
+    }>();
+    for (const food of sharedFoods) availableFoods.set(`shared_catalog:${food.id}`, {
+      id: food.id,
+      name: food.name,
+      category: food.category,
+      foodSource: "shared_catalog",
+      nutritionPer100g: {
+        caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
+        proteinG: nutritionValue(food.proteinGPer100g),
+        carbohydrateG: nutritionValue(food.carbohydrateGPer100g),
+        fatG: nutritionValue(food.fatGPer100g),
+      },
+    });
+    for (const food of personalFoods) availableFoods.set(`personal:${food.id}`, {
+      id: food.id,
+      name: food.name,
+      category: food.category,
+      foodSource: "personal",
+      nutritionPer100g: {
+        caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
+        proteinG: nutritionValue(food.proteinGPer100g),
+        carbohydrateG: nutritionValue(food.carbohydrateGPer100g),
+        fatG: nutritionValue(food.fatGPer100g),
+      },
+    });
+    const ingredients = request.ingredients.map((item) => {
+      const food = availableFoods.get(`${item.foodSource}:${item.foodId}`);
+      return food ? {
+        foodId: food.id,
+        foodSource: food.foodSource,
+        foodName: food.name,
+        quantityGrams: item.quantityGrams,
+        nutritionPer100g: food.nutritionPer100g,
+      } : null;
+    });
+    if (ingredients.some((ingredient) => ingredient === null)) return { status: "ingredient_missing" as const };
+    const recipeSnapshot = {
+      yieldGrams: request.yieldGrams,
+      instructions: request.instructions,
+      ingredients: ingredients.filter((ingredient): ingredient is NonNullable<typeof ingredient> => ingredient !== null),
+    };
+    if (recipeSnapshot.yieldGrams > recipeSnapshot.ingredients.reduce((sum, ingredient) => sum + ingredient.quantityGrams, 0)) {
+      return { status: "yield_exceeds_ingredients" as const };
+    }
+    const totals = recipeSnapshot.ingredients.reduce((sum, ingredient) => ({
+      caloriesKcal: sum.caloriesKcal + ingredient.nutritionPer100g.caloriesKcal * ingredient.quantityGrams / 100,
+      proteinG: sum.proteinG + ingredient.nutritionPer100g.proteinG * ingredient.quantityGrams / 100,
+      carbohydrateG: sum.carbohydrateG + ingredient.nutritionPer100g.carbohydrateG * ingredient.quantityGrams / 100,
+      fatG: sum.fatG + ingredient.nutritionPer100g.fatG * ingredient.quantityGrams / 100,
+    }), { caloriesKcal: 0, proteinG: 0, carbohydrateG: 0, fatG: 0 });
+    const nutritionPer100g = {
+      caloriesKcal: roundNutrition(totals.caloriesKcal * 100 / recipeSnapshot.yieldGrams),
+      proteinG: roundNutrition(totals.proteinG * 100 / recipeSnapshot.yieldGrams),
+      carbohydrateG: roundNutrition(totals.carbohydrateG * 100 / recipeSnapshot.yieldGrams),
+      fatG: roundNutrition(totals.fatG * 100 / recipeSnapshot.yieldGrams),
+    };
+    if (nutritionPer100g.caloriesKcal > 1000 || [nutritionPer100g.proteinG, nutritionPer100g.carbohydrateG, nutritionPer100g.fatG].some((value) => value > 100)) {
+      return { status: "nutrition_out_of_bounds" as const };
+    }
+    const sourceNote = `Recipe calculated from ${recipeSnapshot.ingredients.length} ingredient entries; finished yield ${recipeSnapshot.yieldGrams} g.`;
+    const same = existing.name === request.name
+      && JSON.stringify(existing.aliases) === JSON.stringify(request.aliases)
+      && sameRecipeComposition(existing.recipe, recipeSnapshot)
+      && nutritionValue(existing.caloriesKcalPer100g) === nutritionPer100g.caloriesKcal
+      && nutritionValue(existing.proteinGPer100g) === nutritionPer100g.proteinG
+      && nutritionValue(existing.carbohydrateGPer100g) === nutritionPer100g.carbohydrateG
+      && nutritionValue(existing.fatGPer100g) === nutritionPer100g.fatG;
+    if (same) return { status: "saved" as const, food: existing, idempotent: true };
+
+    const nextVersion = existing.recipeVersion + 1;
+    const [saved] = await tx.update(userFoods).set({
+      name: request.name,
+      aliases: request.aliases,
+      caloriesKcalPer100g: String(nutritionPer100g.caloriesKcal),
+      proteinGPer100g: String(nutritionPer100g.proteinG),
+      carbohydrateGPer100g: String(nutritionPer100g.carbohydrateG),
+      fatGPer100g: String(nutritionPer100g.fatG),
+      sourceNote,
+      recipe: recipeSnapshot,
+      recipeVersion: nextVersion,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(userFoods.userId, userId),
+      eq(userFoods.id, foodId),
+      eq(userFoods.recipeVersion, request.baseVersion),
+    )).returning();
+    if (!saved) return { status: "conflict" as const, currentVersion: existing.recipeVersion };
+    await tx.insert(userFoodRecipeVersions).values({
+      userId,
+      foodId,
+      version: nextVersion,
+      snapshot: {
+        name: saved.name,
+        aliases: saved.aliases,
+        category: saved.category,
+        caloriesKcalPer100g: nutritionPer100g.caloriesKcal,
+        proteinGPer100g: nutritionPer100g.proteinG,
+        carbohydrateGPer100g: nutritionPer100g.carbohydrateG,
+        fatGPer100g: nutritionPer100g.fatG,
+        sourceNote: saved.sourceNote,
+        recipe: recipeSnapshot,
+      },
+    });
+    return { status: "saved" as const, food: saved, idempotent: false };
+  });
+  if (result.status === "missing") return c.json({ error: "food_recipe_not_found" }, 404);
+  if (result.status === "conflict") return c.json({ error: "food_recipe_version_conflict", currentVersion: result.currentVersion }, 409);
+  if (result.status === "self_reference") return c.json({ error: "food_recipe_cannot_include_itself" }, 400);
+  if (result.status === "ingredient_missing") return c.json({ error: "food_recipe_ingredient_not_found" }, 404);
+  if (result.status === "yield_exceeds_ingredients") return c.json({ error: "food_recipe_yield_exceeds_ingredients" }, 400);
+  if (result.status === "nutrition_out_of_bounds") return c.json({ error: "food_recipe_nutrition_out_of_bounds" }, 400);
+  return c.json({
+    food: {
+      id: result.food.id,
+      name: result.food.name,
+      aliases: result.food.aliases,
+      category: result.food.category,
+      source: "personal",
+      isFavorite: false,
+      sourceNote: result.food.sourceNote,
+      reviewed: false,
+      recipe: result.food.recipe,
+      recipeVersion: result.food.recipeVersion,
+      caloriesKcalPer100g: nutritionValue(result.food.caloriesKcalPer100g),
+      proteinGPer100g: nutritionValue(result.food.proteinGPer100g),
+      carbohydrateGPer100g: nutritionValue(result.food.carbohydrateGPer100g),
+      fatGPer100g: nutritionValue(result.food.fatGPer100g),
+    },
+    idempotent: result.idempotent,
+  }, 200);
+});
+
+app.get("/v1/foods/recipes/:id/versions", async (c) => {
+  const foodId = c.req.param("id");
+  if (!isUuid(foodId)) return c.json({ error: "invalid_food_recipe_id" }, 400);
+  const userId = c.get("session").user.id;
+  const versions = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [food] = await tx.select({ id: userFoods.id }).from(userFoods).where(and(
+      eq(userFoods.id, foodId),
+      eq(userFoods.userId, userId),
+      sql`${userFoods.recipe} IS NOT NULL`,
+    )).limit(1);
+    if (!food) return null;
+    return tx.select({
+      version: userFoodRecipeVersions.version,
+      snapshot: userFoodRecipeVersions.snapshot,
+      createdAt: userFoodRecipeVersions.createdAt,
+    }).from(userFoodRecipeVersions).where(and(
+      eq(userFoodRecipeVersions.userId, userId),
+      eq(userFoodRecipeVersions.foodId, foodId),
+    )).orderBy(desc(userFoodRecipeVersions.version));
+  });
+  if (versions === null) return c.json({ error: "food_recipe_not_found" }, 404);
+  return c.json({ versions: versions.map((version) => ({
+    ...version,
+    createdAt: version.createdAt.toISOString(),
+  })) });
 });
 
 app.post("/v1/food-logs", async (c) => {
