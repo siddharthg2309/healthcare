@@ -986,6 +986,8 @@ The order below delivers the core tracking and graph experience before AI and ex
 
 ### Phase 2 — Backend, identity, database, and synchronization foundation
 
+**Current status:** Local code foundations are in place, but this phase is still open. Neon migrations, two-account isolation checks against a live database, a development API deployment, and an Android SQLCipher/SecureStore build require provider access and an Android device. See [the Phase 2 decision log](decisions/0003-phase-2.md).
+
 **Build**
 
 - Provision the selected development Neon resources and migration pipeline.

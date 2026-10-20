@@ -24,6 +24,13 @@
     "plugins": [
       "expo-router",
       [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true
+        }
+      ],
+      "expo-secure-store",
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#F5F7F2",

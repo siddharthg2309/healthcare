@@ -1,0 +1,31 @@
+{
+  "name": "@healthcare/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/dev.ts",
+    "start": "tsx src/dev.ts",
+    "migrate:auth": "auth migrate --config src/auth/config.ts --yes",
+    "invite:create": "tsx scripts/create-invitation.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src scripts --config eslint.config.cjs"
+  },
+  "dependencies": {
+    "@healthcare/contracts": "*",
+    "@healthcare/database": "*",
+    "@hono/node-server": "^1.19.5",
+    "better-auth": "^1.7.0",
+    "@better-auth/expo": "^1.7.0",
+    "hono": "^4.10.6",
+    "dotenv": "^16.6.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "auth": "^1.7.12",
+    "@types/node": "^22.19.3",
+    "eslint": "^9.39.5",
+    "tsx": "^4.20.6",
+    "typescript": "^6.0.3"
+  }
+}
