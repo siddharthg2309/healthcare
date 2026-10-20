@@ -66,9 +66,15 @@ npm run invite:create -- --email friend@example.com
 
 Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_SECRET`, or the OpenRouter key.
 
-## Private Android APK
+## Install the PWA on Android (no APK required)
 
-The APK is an Expo WebView shell around the Vercel app. Deploy and verify Vercel first. The APK requires the HTTPS origin because it loads the hosted UI and API; cloud logging cannot work while Vercel or Neon is unavailable.
+After the Vercel and Neon setup above, open the deployed HTTPS app URL in Chrome on the Android phone. In Chrome's menu, choose **Add to Home screen** or **Install app** (wording can vary by Chrome version), then launch Goal Health from the new home-screen icon. Share the app URL and each person's invitation privately.
+
+This install path uses the Next.js PWA directly. It does not need an Expo account, EAS, a native build, or a Play Store listing. After the first deployment, pushing a web change to the Vercel-connected branch redeploys the app automatically. The one-time Vercel configuration and Neon migration are still required; your laptop does not host the live app.
+
+## Optional private Android APK
+
+Choose this only if you want a separate Android package. The APK is an Expo WebView shell around the same hosted PWA, not a separate backend or a requirement for phone use. Deploy and verify Vercel first. The APK requires the HTTPS origin because it loads the hosted UI and API; cloud logging cannot work while Vercel or Neon is unavailable.
 
 ### One-time EAS setup
 

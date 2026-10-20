@@ -9,7 +9,7 @@ The app is under implementation. The current build includes account setup, goal 
 ## Stack
 
 - Next.js App Router, React, and TypeScript, deployed as a PWA on Vercel
-- Expo Android WebView shell, built as an internal APK with EAS and configured with the public Vercel app URL
+- Optional Expo Android WebView shell, built as an internal APK with EAS and configured with the public Vercel app URL
 - Minimal black, white, gray, and lime-green visual system with Manrope
 - Same-origin Next.js Route Handlers dispatching to the modular Hono API
 - Neon Postgres with Drizzle migrations; Better Auth for invite-gated accounts
@@ -47,22 +47,29 @@ npm run dev -- --hostname 0.0.0.0
 
 Open the computer's LAN address on the Android phone. Local use requires the computer and phone to share a network; deployed use does not.
 
-## Deploy to Vercel and install the Android app
+## Deploy and install the PWA (no APK required)
 
-1. Push reviewed source to your GitHub repository. Never commit `.env` or credentials.
+1. Push the reviewed source to your GitHub repository. Never commit `.env` or credentials.
 2. In Vercel, import the repository and select `apps/web` as the project root. Keep the detected Next.js framework and npm workspace installation/build settings.
 3. Add the server environment variables from [the environment guide](docs/ENVIRONMENT.md) in Vercel **before the production build**. Set `AUTH_BASE_URL` and `AUTH_TRUSTED_ORIGINS` to the exact HTTPS domain you plan to use, such as `https://your-project.vercel.app`.
 4. Run the database migrations once against the Neon database before using the app. See the environment guide for the command and safe options.
 5. Deploy and verify the production HTTPS URL. Vercel handles later web deployments from the connected Git branch.
-6. Create/sign in to an Expo account. From `apps/mobile`, run `npx eas-cli init` once if this app is not linked to an EAS project yet.
-7. In the EAS project's **production** environment, set `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_API_BASE_URL` to the public Vercel origin. These URLs are public configuration, not secrets. Do not put Neon or OpenRouter credentials in the mobile app.
-8. From `apps/mobile`, run `npm run build:apk`. Download the resulting APK from the private EAS build page and share it privately. Friends install it directly on Android; no Play Store account is involved.
+6. Open that HTTPS URL in Chrome on Android and choose **Add to Home screen** or **Install app**. Sign in and share the URL and invite codes privately with friends.
 
-For a browser-only install, friends can open the same HTTPS URL in Chrome and choose **Add to Home screen** or **Install app**. The APK shell and browser PWA use the same hosted UI, accounts, API, and database.
+The PWA is the simplest phone installation path: there is no Expo account, APK build, Play Store, or separate API host. The initial setup still needs Vercel environment variables and a one-time Neon migration. After setup, pushing a web change to the connected branch triggers a Vercel deployment; it does not require rebuilding an APK.
 
 Vercel hosts both the pages and `/api/*` and `/v1/*` server routes, so no separate API host or laptop server is needed. Neon remains a separate hosted database. Keep `DATABASE_URL`, `AUTH_SECRET`, and `OPENROUTER_API_KEY` in Vercel's server environment only. Do not use a Neon Data API URL in place of the Postgres connection URL for this app.
 
-The APK opens the hosted PWA inside an Android WebView, so Vercel must stay deployed and reachable. Web changes appear in the APK after Vercel redeploys; changes to the native shell require a new APK. Browser notifications are optional and checked while the app is open; they are not scheduled background alarms. The WebView shell does not provide direct Health Connect integration or reliable background step collection. Steps can be entered manually. After Google OAuth is configured, Settings can sync approved workouts to a separate app-created calendar.
+## Optional: build a private Android APK
+
+Use this only if you prefer a separately installed Android package. The APK is a thin Expo WebView shell that opens the same hosted PWA; it does not run the backend on your phone or laptop.
+
+1. Deploy and verify the PWA using the steps above.
+2. Create or sign in to an Expo account. From `apps/mobile`, run `npx eas-cli init` once if this app is not linked to an EAS project yet.
+3. In the EAS project's **production** environment, set `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_API_BASE_URL` to the public Vercel origin. These URLs are public configuration, not secrets. Do not put Neon or OpenRouter credentials in the mobile app.
+4. From `apps/mobile`, run `npm run build:apk`. Download the resulting APK from the private EAS build page and share it privately. Friends install it directly on Android; no Play Store account is involved.
+
+Vercel web deployments update the content inside an installed APK. Changes to the native shell require a new APK. Browser notifications are optional and checked while the PWA is open; they are not scheduled background alarms. The WebView shell does not provide direct Health Connect integration or reliable background step collection. Steps can be entered manually. After Google OAuth is configured, Settings can sync approved workouts to a separate app-created calendar.
 
 ## Friend invitations
 
@@ -102,4 +109,4 @@ The hooks check staged changes for ignored files and secrets and enforce Convent
 
 ## Current implementation status
 
-The repository contains the Next.js PWA and same-origin Hono API, plus an Expo WebView shell configured for an internal Android APK. The web app includes invitation-based authentication, onboarding and versioned goals, body-weight and exercise-specific progress graphs, personal food search/creation with aliases, private household portions, per-account favorites and recents, versioned food-log edits and deletion, manual activity tracking, editable strength-session logs with date-selectable history and timed holds, a 47-exercise starter catalog, three starter workout templates, persistent reviewed weekly workout plans, timezone-aware daily summaries, food-day completion markers, a local USDA import and review CLI, and user-confirmed food-name suggestions from photos. Photo files are compressed in the browser, sent to the authenticated server-side OpenRouter call, and not saved to the food log. Reminder preferences are stored per account; browser notifications are opt-in and checked while the PWA is open. Settings supports a private JSON export and password-confirmed account deletion, including planning checkpoint cleanup. Optional Calendar OAuth and approved-workout sync still need live provider verification. Broader food-catalog review, production Neon migrations, two-account isolation checks, backup/restore, Vercel deployment, EAS project linking, and a signed APK build remain phased work. See [the environment guide](docs/ENVIRONMENT.md): Vercel serves the app and API, Neon stores its data, and EAS builds the Android wrapper; a laptop is not required to keep the deployed app available.
+The repository contains the Next.js PWA and same-origin Hono API, plus an optional Expo WebView shell configured for an internal Android APK. The web app includes invitation-based authentication, onboarding and versioned goals, body-weight and exercise-specific progress graphs, personal food search/creation with aliases, private household portions, per-account favorites and recents, versioned food-log edits and deletion, manual activity tracking, editable strength-session logs with date-selectable history and timed holds, a 47-exercise starter catalog, three starter workout templates, persistent reviewed weekly workout plans, timezone-aware daily summaries, food-day completion markers, a local USDA import and review CLI, and user-confirmed food-name suggestions from photos. Photo files are compressed in the browser, sent to the authenticated server-side OpenRouter call, and not saved to the food log. Reminder preferences are stored per account; browser notifications are opt-in and checked while the PWA is open. Settings supports a private JSON export and password-confirmed account deletion, including planning checkpoint cleanup. Optional Calendar OAuth and approved-workout sync still need live provider verification. Broader food-catalog review, production Neon migrations, two-account isolation checks, backup/restore, Vercel deployment, EAS project linking, and a signed APK build remain phased work. See [the environment guide](docs/ENVIRONMENT.md): Vercel serves the app and API, Neon stores its data, and EAS builds the Android wrapper; a laptop is not required to keep the deployed app available.

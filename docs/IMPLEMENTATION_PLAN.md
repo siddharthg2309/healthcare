@@ -6,11 +6,11 @@
 
 **Audience:** The owner and developers implementing the app.
 
-**Distribution:** A private HTTPS app hosted on Vercel, with an installable Android APK wrapper for the owner and invited friends. The web app remains available directly in a browser.
+**Distribution:** The primary Android experience is the installable HTTPS PWA hosted on Vercel. A thin private APK wrapper remains an optional install path for the owner and invited friends.
 
-**Status:** Active implementation plan. The Next.js PWA is the shared product UI; the selected Android release is a thin Expo WebView APK built with EAS internal distribution. See Decision 0005.
+**Status:** Active implementation plan. The Next.js PWA is the shared product UI and the simplest Android install path. A thin Expo WebView APK can be built with EAS as an optional package. See Decisions 0005 and 0006.
 
-This plan consolidates the agreed features and current web-plus-APK direction. Decision 0005 is the source of truth for Android packaging and distribution. Details that were not explicitly chosen are proposed defaults. Feature support and provider limits must be confirmed before enabling each integration. The APK is a WebView shell around the deployed app; it does not automatically add native Android capabilities.
+This plan consolidates the agreed features and current PWA-first direction. Decision 0005 describes the optional Android APK wrapper; Decision 0006 establishes the PWA as the default install path. Details that were not explicitly chosen are proposed defaults. Feature support and provider limits must be confirmed before enabling each integration. The APK is a WebView shell around the deployed app; it does not automatically add native Android capabilities.
 
 ## Contents
 
@@ -47,7 +47,7 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 | --- | --- |
 | Main platform | Android phones |
 | Audience | Owner and invited friends, with separate private accounts |
-| Distribution | Deploy the app to Vercel, then share a private EAS-built APK or the HTTPS browser URL; no Play Store listing |
+| Distribution | Deploy the PWA to Vercel and install it from Android Chrome; optional private EAS-built APK; no Play Store listing |
 | Cloud database | Neon Postgres |
 | AI model | MiniMax M3; the selected `minimax/minimax-m3` identifier is an OpenRouter route |
 | AI orchestration | Two bounded LangGraph workflows: meal planning and workout planning |
@@ -60,7 +60,7 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 ### 1.2 Current implementation defaults
 
 - Next.js App Router, React, TypeScript, and a responsive PWA provide the product UI.
-- `apps/mobile` is a thin Expo Android WebView wrapper that loads the stable HTTPS Vercel origin; EAS builds the private APK.
+- Android Chrome installs the Next.js PWA from its stable HTTPS Vercel origin; `apps/mobile` is an optional Expo WebView wrapper that EAS can build as a private APK.
 - One Vercel project hosts both Next.js pages and same-origin API routes. Next Route Handlers forward `/api/*` and `/v1/*` to the modular Hono API.
 - Neon Postgres is the cloud source of truth. Better Auth handles invite-gated accounts and sessions.
 - Keep OpenRouter credentials and all trusted provider calls in server routes/workers, never in browser code.
@@ -89,7 +89,7 @@ The small audience does not mean the backend runs on a laptop. Vercel serves the
 | Activity logs | Sets, reps, weights, walking/cardio duration, optional steps, completion notes |
 | Progress | Actual measurements, trend, original plan, goal/date marker, history, contextual annotations |
 | Daily dashboard | Food totals, workout status, steps when available, reminder status, and logging completeness |
-| Android integration | APK wrapper for the hosted app, browser-PWA fallback, photo picker, and only capabilities supported by the WebView |
+| Android integration | PWA installation from Chrome as the default; optional APK wrapper for the hosted app, photo picker, and only capabilities supported by the WebView |
 | Reminders | Meal logging, workout, weigh-in, optional hydration, weekly review |
 | Calendar | Opt-in synchronization of approved schedule items to an app-created Google calendar |
 | Offline | Read cached static shell; core logging requires connection in the first release unless an explicit offline queue is implemented |
@@ -369,16 +369,16 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 
 The current project already uses a modular Hono API and mounts it behind Next Route Handlers. Keep one deployable application for now. Do not split every domain into a service.
 
-The Expo APK shell loads the same Next.js pages from Vercel in a WebView; it does not duplicate domain logic or UI. The browser PWA remains a direct-access fallback. A WebView does not provide the same Android privileges as a native feature implementation: direct Health Connect access, reliable background step collection, and native scheduled notifications require explicit bridges and device verification. Treat offline mutation/sync as a later explicit feature, not an automatic consequence of installing an APK.
+Android Chrome installs the PWA directly from Vercel as the default phone experience. The optional Expo APK shell loads the same Next.js pages in a WebView; it does not duplicate domain logic or UI. A WebView does not provide the same Android privileges as a native feature implementation: direct Health Connect access, reliable background step collection, and native scheduled notifications require explicit bridges and device verification. Treat offline mutation/sync as a later explicit feature, not an automatic consequence of installing an APK.
 
 ### 8.2 Architecture diagram
 
 ```mermaid
 flowchart TB
   subgraph Android[Android phone]
-    APK[Expo Android APK]
+    Browser[Primary PWA installed from Chrome]
+    APK[Optional Expo Android APK]
     WebView[Android WebView]
-    Browser[Optional PWA in Chrome]
     SW[Service worker: static shell only]
     Browser <--> SW
     APK --> WebView
@@ -821,11 +821,11 @@ Store actual timestamps and the logging timezone. Proposed default: preserve the
 - If Vercel, Neon, or a model provider is unavailable, show a retryable status and keep already saved cloud data intact.
 - Do not assume a phone will run background work on a schedule.
 
-## 13. Android APK, browser access, and native limits
+## 13. Android PWA, optional APK, and native limits
 
 ### 13.1 Supported web-app path
 
-The Android install path is a signed APK built with EAS internal distribution. The APK launches an Expo WebView pointed at the production HTTPS origin. Vercel serves the web UI and API; Neon stores account data. Users may instead open the same URL in Chrome and choose Add to Home screen / Install app. Neither route needs a Play Store listing. The APK needs a one-time Expo account/EAS project setup and a new APK when its native shell configuration changes.
+The default Android install path is the PWA: open the production HTTPS URL in Chrome and choose Add to Home screen / Install app. Vercel serves the web UI and API; Neon stores account data. This path needs no EAS setup or APK. An optional signed APK built with EAS launches an Expo WebView at the same origin. Neither path needs a Play Store listing. The APK needs a one-time Expo account/EAS project setup and a new APK when its native shell configuration changes.
 
 Use the hosted app's file picker for meal photos. Keep account sessions in secure, same-origin cookies within the WebView. Respect safe areas, touch sizes, keyboard behavior, font scaling, Android back navigation, and external-link boundaries. Verify file selection and cookie persistence on real Android devices.
 
@@ -918,7 +918,7 @@ Reserve an estimated budget before starting a job and reconcile with actual usag
 
 ## 16. Implementation phases
 
-The sequence delivers tracking and the signature progress graph before AI features. The product UI remains a web PWA; private Android APK packaging is the release shell in Decision 0005. Native Health Connect and Play Store work remain outside the current scope. Work estimates should be set after the first end-to-end deployment.
+The sequence delivers tracking and the signature progress graph before AI features. The product UI remains a web PWA, installed directly from Chrome by default; private Android APK packaging is optional under Decisions 0005 and 0006. Native Health Connect and Play Store work remain outside the current scope. Work estimates should be set after the first end-to-end deployment.
 
 ### Phase 0 — Confirm the web deployment path
 
@@ -1052,9 +1052,9 @@ The sequence delivers tracking and the signature progress graph before AI featur
 - Check accessibility, privacy/cache behavior, upload retention, provider limits, and actual AI cost before enabling each model workflow.
 - Share the HTTPS link privately and invite a small friend group.
 
-**Deliverables:** Stable Vercel app, privately distributable Android APK, owner runbook, and friend onboarding instructions.
+**Deliverables:** Stable Vercel PWA, owner runbook, friend onboarding instructions, and an optional privately distributable Android APK.
 
-**Exit criteria:** A friend can install the APK, sign in, log data, and view their own progress while the developer's laptop is off. The same app remains usable through its browser URL.
+**Exit criteria:** A friend can install the PWA from Chrome (or the optional APK), sign in, log data, and view their own progress while the developer's laptop is off.
 
 ### Phase 12 — Real-use refinement
 
@@ -1081,13 +1081,13 @@ flowchart LR
   P6 --> P9[9: Workout planner]
   P8 --> P10[10: Reminders and Calendar]
   P9 --> P10
-  P10 --> P11[11: Vercel release and private Android APK]
+  P10 --> P11[11: Vercel PWA release and optional Android APK]
   P11 --> P12[12: Real-use refinement]
 ```
 
-## 17. Cloud deployment and private Android APK runbook
+## 17. Cloud deployment and Android installation runbook
 
-Vercel is the web host and server runtime. Neon is the database host. EAS builds and signs the thin Android shell. The source repository connects to Vercel for web deployments; Vercel and Neon are cloud services, not laptop-hosted servers.
+Vercel is the web host and server runtime. Neon is the database host. The default Android install uses Chrome to install the PWA; EAS is needed only for the optional APK shell. The source repository connects to Vercel for web deployments; Vercel and Neon are cloud services, not laptop-hosted servers.
 
 ### 17.1 One-time setup
 
@@ -1101,7 +1101,7 @@ Vercel is the web host and server runtime. Neon is the database host. EAS builds
 
 Set AUTH_BASE_URL and the trusted origin to the exact production domain, such as https://your-project.vercel.app. If a custom domain is added, update both values and redeploy. Preview deployment URLs require separately scoped auth settings if authentication is tested there.
 
-The web app uses relative API routes at the same origin. The Android shell uses `EXPO_PUBLIC_APP_URL` to load that origin; `EXPO_PUBLIC_API_BASE_URL` is a public URL used only by any native screens that call the API directly. Neither variable may contain credentials.
+The web app uses relative API routes at the same origin. The optional Android shell uses `EXPO_PUBLIC_APP_URL` to load that origin; `EXPO_PUBLIC_API_BASE_URL` is a public URL used only by any native screens that call the API directly. Neither variable may contain credentials.
 
 ### 17.2 Environment variables
 
@@ -1129,7 +1129,7 @@ npm run build
 
 Run them before inviting users. Keep migrations explicit and reviewed rather than running them in each build. A successful web build does not prove live Neon credentials, account isolation, OAuth, or model behavior; verify those against the deployed project.
 
-After Vercel is live, configure the Expo app:
+Only if you want the optional APK, configure the Expo app after Vercel is live:
 
 1. Install/sign in to EAS and link `apps/mobile` to an Expo project once: `npx eas-cli login`, then `npx eas-cli init` from `apps/mobile`.
 2. In that EAS project's `production` environment, set the public `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_API_BASE_URL` values to the production origin.
@@ -1140,9 +1140,9 @@ The repo ignores APK files and EAS signing material. Share the APK/build link pr
 
 ### 17.4 Share and update
 
-1. Share the APK from the private EAS build with invited friends, or send the HTTPS URL for browser access.
-2. Friends install the APK directly on Android and create an account using their private email-bound invitation. Android may ask them to allow installs from the app they used to download the APK.
-3. For browser-only use, open the URL in Chrome and choose Add to Home screen or Install app.
+1. Share the HTTPS URL with invited friends; on Android, they open it in Chrome and choose Add to Home screen or Install app.
+2. If you created the optional APK, share it from the private EAS build. Friends may need to allow installs from the app they used to download it.
+3. Friends create an account using their private email-bound invitation.
 4. Push reviewed source changes to the connected deployment branch; Vercel builds and deploys the updated web app. Existing APK shells load it on the next launch.
 5. Build a new APK only for native shell/configuration changes, then share the new build privately. Keep Neon data and backups independent of either deployment.
 
@@ -1158,9 +1158,9 @@ The first manual-tracking release needs only the deployed Next.js project and Ne
 
 ### 18.1 First use
 
-Install and open the APK shared by the owner, or open the deployed HTTPS app URL in Android Chrome. Sign up using the invitation tied to the account email, choose units, enter the profile and goal, and review the calculated targets. The Progress view shows the accepted plan; measured history starts with the first confirmed weigh-in.
+Open the deployed HTTPS app URL in Android Chrome and choose Add to Home screen, or install the optional APK shared by the owner. Sign up using the invitation tied to the account email, choose units, enter the profile and goal, and review the calculated targets. The Progress view shows the accepted plan; measured history starts with the first confirmed weigh-in.
 
-If you prefer browser access, choose Add to Home screen from Chrome's menu. Both browser and APK versions use the same deployed app and account.
+The PWA and optional APK use the same deployed app and account.
 
 ### 18.2 A normal day
 
@@ -1201,7 +1201,7 @@ This is the planned validation strategy; it is not evidence that these checks ha
 | Nutrition | Known food/portion and recipe/yield fixtures, unit conversion, unknown nutrients, historical snapshots |
 | Goals/graphs | Gain/loss/maintenance, invalid timeline rejection, sparse data, multiple daily measurements, revision history, forecast eligibility |
 | Access | Two-user isolation for reads/writes/files/AI runs/Calendar links; private/shared catalog boundaries |
-| Web/PWA and APK | Production HTTPS origin, manifest, browser add-to-home-screen flow, responsive WebView layout, offline fallback, no private API response in service-worker cache, APK opens the exact production origin |
+| Web/PWA and optional APK | Production HTTPS origin, manifest, browser add-to-home-screen flow, offline fallback, no private API response in service-worker cache; if built, APK opens the exact production origin |
 | AI | Representative Indian meals/mixed plates, ambiguous photos, malformed output, invented IDs, restriction conflicts, one-repair ceiling |
 | Workflow recovery | Process restart, expired lease, checkpoint replay, long review pause, stale-input approval, idempotent activation |
 | Activity | Repeated records, overlapping manual activities, source changes, multi-device edits, manual step entry |
