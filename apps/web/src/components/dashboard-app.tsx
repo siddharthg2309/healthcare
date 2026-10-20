@@ -10,6 +10,7 @@ import { authClient } from "@/lib/auth-client";
 
 type Tab = "home" | "food" | "activity" | "progress";
 type StoredGoal = GoalRecord & { id: string };
+type GoalRevision = { id: string; date: string; goalVersion: number; previousTargetKg: number | null; targetWeightKg: number; targetDate: string };
 type Measurement = { id: string; data: { measuredAt: string; weightKg: number } };
 type ProfileResponse = { profile: unknown | null };
 type GoalsResponse = { current: (Record<string, unknown> & { id: string }) | null; versions: unknown[]; measurements: Measurement[] };
@@ -31,6 +32,7 @@ export function DashboardApp() {
   const [tab, setTab] = useState<Tab>("home");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [goal, setGoal] = useState<StoredGoal | null>(null);
+  const [goalVersions, setGoalVersions] = useState<StoredGoal[]>([]);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
   const [loadingData, setLoadingData] = useState(false);
@@ -49,6 +51,12 @@ export function DashboardApp() {
       const parsedGoal = goalData.current ? goalSchema.safeParse(goalData.current) : null;
       setProfile(parsedProfile?.success ? parsedProfile.data : null);
       setGoal(parsedGoal?.success && goalData.current ? { ...parsedGoal.data, id: String(goalData.current.id) } : null);
+      const parsedGoalVersions = goalData.versions.flatMap((candidate) => {
+        if (!candidate || typeof candidate !== "object" || !("id" in candidate)) return [];
+        const parsed = goalSchema.safeParse(candidate);
+        return parsed.success ? [{ ...parsed.data, id: String(candidate.id) }] : [];
+      }).sort((left, right) => left.goalVersion - right.goalVersion);
+      setGoalVersions(parsedGoalVersions);
       setMeasurements(goalData.measurements.filter((item) => Number.isFinite(item.data?.weightKg) && typeof item.data?.measuredAt === "string"));
       if (parsedProfile.success) {
         const date = dateInTimezone(parsedProfile.data.timezone);
@@ -115,7 +123,7 @@ export function DashboardApp() {
           {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} /> : null}
           {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} onSaved={reloadData} /> : null}
           {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} onSaved={reloadData} /> : null}
-          {tab === "progress" ? <ProgressView goal={goal} measurements={measurements} timezone={profile.timezone} onMeasurementAdded={reloadData} /> : null}
+          {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} onMeasurementAdded={reloadData} /> : null}
         </div>
       </main>
 
@@ -231,19 +239,19 @@ function HomeView({ profile, goal, measurements, day, onProgress }: { profile: P
         <article className="panel progress-panel">
           <div className="panel-heading"><div><span className="eyebrow">THE MAIN THING</span><h2>Your progress</h2></div><button className="inline-link" onClick={onProgress}>View graph <span aria-hidden="true">↗</span></button></div>
           <GoalChart goal={goal} measurements={measurements} timezone={profile.timezone} compact />
-          <div className="chart-legend"><span><i className="legend-plan" /> Goal path</span><span><i className="legend-actual" /> Your weigh-ins</span></div>
+          <div className="chart-legend"><span><i className="legend-plan" /> Goal path</span><span><i className="legend-trend" /> 3-weigh-in trend</span><span><i className="legend-actual" /> Your weigh-ins</span></div>
         </article>
         <article className="panel intake-panel">
           <div className="panel-heading"><div><span className="eyebrow">DAILY TARGET</span><h2>Food</h2></div><span className="panel-symbol">◉</span></div>
           <div className="metric-main">{day?.foodTotals.caloriesKcal.toLocaleString("en-IN") ?? "—"}<small> / {kcal?.toLocaleString("en-IN") ?? "—"} kcal</small></div>
-          <p className="muted-copy">{day ? "Logged today · calorie target is an estimate" : "Today’s food log is unavailable"}</p>
+          <p className="muted-copy">{day ? day.foodDayComplete ? day.foodLogs.length ? "Food log marked complete" : "Complete day · no food logged" : day.foodLogs.length ? "Food log may be partial · total may be incomplete" : "No food logged · total may be incomplete" : "Today’s food log is unavailable"}</p>
           {kcal ? <div className="intake-progress" role="progressbar" aria-label="Calories logged toward daily target" aria-valuenow={Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))}%` }} /></div> : null}
           {goal.macrosGrams ? <div className="macro-mini"><Macro label="Protein" value={goal.macrosGrams.protein} color="green" /><Macro label="Carbs" value={goal.macrosGrams.carbohydrate} color="gold" /><Macro label="Fat" value={goal.macrosGrams.fat} color="blue" /></div> : <p className="note-box">No macros estimated for this manual target.</p>}
         </article>
         <article className="panel movement-panel">
-          <div className="panel-heading"><div><span className="eyebrow">YOUR WEEK</span><h2>Movement</h2></div><span className="panel-symbol">↗</span></div>
+          <div className="panel-heading"><div><span className="eyebrow">TODAY’S MOVEMENT</span><h2>Activity</h2></div><span className="panel-symbol">↗</span></div>
           <div className="metric-main">{day?.steps.toLocaleString("en-IN") ?? "—"}<small> steps today</small></div>
-          <p className="muted-copy">{day ? `${day.workoutsCompleted} workout or walk entries logged` : "Today’s activity is unavailable"}</p>
+          <p className="muted-copy">{day ? day.activityLogs.length ? `Manual logging · ${day.activityLogs.length} activity entries` : "No activity logged · manual entry" : "Today’s activity is unavailable"}</p>
         </article>
         <article className="panel checkin-panel">
           <div className="panel-heading"><div><span className="eyebrow">LATEST MEASUREMENT</span><h2>Weight</h2></div><span className="panel-symbol">↕</span></div>
@@ -257,7 +265,7 @@ function HomeView({ profile, goal, measurements, day, onProgress }: { profile: P
   );
 }
 
-function ProgressView({ goal, measurements, timezone, onMeasurementAdded }: { goal: StoredGoal; measurements: Measurement[]; timezone: string; onMeasurementAdded: () => Promise<void> }) {
+function ProgressView({ goal, goalVersions, measurements, timezone, onMeasurementAdded }: { goal: StoredGoal; goalVersions: StoredGoal[]; measurements: Measurement[]; timezone: string; onMeasurementAdded: () => Promise<void> }) {
   const [weight, setWeight] = useState("");
   const [measuredAt, setMeasuredAt] = useState(localDateTimeNow);
   const [range, setRange] = useState<"30d" | "90d" | "all">("all");
@@ -266,13 +274,14 @@ function ProgressView({ goal, measurements, timezone, onMeasurementAdded }: { go
   const today = dateInTimezone(timezone);
   const rangeEnd = range === "all" ? goal.targetDate : today < goal.startDate ? goal.startDate : today > goal.targetDate ? goal.targetDate : today;
   const rangeStart = range === "all" ? goal.startDate : maxDate(goal.startDate, addDays(rangeEnd, range === "30d" ? -29 : -89));
+  const revisions = goalRevisionAnnotations(goalVersions, timezone, rangeStart, rangeEnd);
   const rangeMeasurements = measurements.filter((item) => {
     const date = dateAtTimezone(item.data.measuredAt, timezone);
     return date >= rangeStart && date <= rangeEnd;
   }).sort((a, b) => a.data.measuredAt.localeCompare(b.data.measuredAt));
   const latest = rangeMeasurements.at(-1);
   const graphSummary = latest
-    ? progressSummary(goal, latest, timezone)
+    ? `${progressSummary(goal, latest, timezone)}${smoothedTrend(rangeMeasurements, timezone).length ? "" : " Add weigh-ins on three different days to see the smoothed trend."}`
     : `No weigh-ins recorded from ${formatDate(rangeStart)} to ${formatDate(rangeEnd)}. The dashed line is your target schedule, not a prediction.`;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -310,8 +319,9 @@ function ProgressView({ goal, measurements, timezone, onMeasurementAdded }: { go
             {[{ value: "30d", label: "30 days" }, { value: "90d", label: "90 days" }, { value: "all", label: "Full goal" }].map((item) => <button key={item.value} type="button" className={range === item.value ? "range-button range-button-active" : "range-button"} aria-pressed={range === item.value} onClick={() => setRange(item.value as typeof range)}>{item.label}</button>)}
           </div>
         </div>
-        <GoalChart goal={goal} measurements={measurements} timezone={timezone} rangeStart={rangeStart} rangeEnd={rangeEnd} />
-        <div className="chart-legend"><span><i className="legend-plan" /> Target path</span><span><i className="legend-actual" /> Recorded weigh-ins</span><span><i className="legend-point" /> Measurement</span></div>
+        <GoalChart goal={goal} goalRevisions={revisions} measurements={measurements} timezone={timezone} rangeStart={rangeStart} rangeEnd={rangeEnd} />
+        <div className="chart-legend"><span><i className="legend-plan" /> Target path</span><span><i className="legend-trend" /> 3-weigh-in trend</span><span><i className="legend-actual" /> Recorded weigh-ins</span><span><i className="legend-point" /> Measurement</span><span><i className="legend-revision" /> Plan update</span></div>
+        {revisions.length ? <div className="chart-revisions" role="list" aria-label="Goal plan updates">{revisions.map((revision) => <p key={revision.id} role="listitem"><strong>Plan v{revision.goalVersion}</strong> updated {formatDate(revision.date)} · target {revision.previousTargetKg === null ? "set to " : `${revision.previousTargetKg.toFixed(1)} → `}{revision.targetWeightKg.toFixed(1)} kg by {formatDate(revision.targetDate)}</p>)}</div> : null}
         <p className="chart-summary" aria-live="polite">{graphSummary}</p>
         <p className="chart-caption">The target line is a schedule, not a prediction. Day-to-day body weight can vary.</p>
       </section>
@@ -330,7 +340,7 @@ function ProgressView({ goal, measurements, timezone, onMeasurementAdded }: { go
   );
 }
 
-function GoalChart({ goal, measurements, timezone, compact = false, rangeStart = goal.startDate, rangeEnd = goal.targetDate }: { goal: StoredGoal; measurements: Measurement[]; timezone: string; compact?: boolean; rangeStart?: string; rangeEnd?: string }) {
+function GoalChart({ goal, goalRevisions = [], measurements, timezone, compact = false, rangeStart = goal.startDate, rangeEnd = goal.targetDate }: { goal: StoredGoal; goalRevisions?: GoalRevision[]; measurements: Measurement[]; timezone: string; compact?: boolean; rangeStart?: string; rangeEnd?: string }) {
   const width = 720;
   const height = compact ? 218 : 340;
   const left = 48;
@@ -341,6 +351,7 @@ function GoalChart({ goal, measurements, timezone, compact = false, rangeStart =
     const measuredDate = dateAtTimezone(item.data.measuredAt, timezone);
     return measuredDate >= rangeStart && measuredDate <= rangeEnd;
   }).sort((a, b) => a.data.measuredAt.localeCompare(b.data.measuredAt));
+  const trendPoints = smoothedTrend(validMeasurements, timezone);
   const interiorPlanPoints = goal.trajectory.filter((point) => point.date > rangeStart && point.date < rangeEnd);
   const planPoints = [
     { date: rangeStart, targetWeightKg: targetWeightAt(goal, rangeStart) },
@@ -358,6 +369,7 @@ function GoalChart({ goal, measurements, timezone, compact = false, rangeStart =
   const xAt = (date: string) => left + Math.max(0, Math.min(1, (Date.parse(`${date.slice(0, 10)}T00:00:00Z`) - startMs) / totalMs)) * (width - left - right);
   const yAt = (value: number) => top + ((max - value) / (max - min)) * (bottom - top);
   const planPath = planPoints.map((point, index) => `${index ? "L" : "M"} ${xAt(point.date)} ${yAt(point.targetWeightKg)}`).join(" ");
+  const trendPath = trendPoints.map((point, index) => `${index ? "L" : "M"} ${xAt(point.date)} ${yAt(point.weightKg)}`).join(" ");
   const actualPath = validMeasurements.map((item, index) => `${index ? "L" : "M"} ${xAt(dateAtTimezone(item.data.measuredAt, timezone))} ${yAt(item.data.weightKg)}`).join(" ");
   const ticks = Array.from({ length: 4 }, (_, index) => min + ((max - min) * index) / 3);
   const midDate = addDays(rangeStart, Math.round((Date.parse(`${rangeEnd}T00:00:00Z`) - startMs) / 2 / 86_400_000));
@@ -365,17 +377,55 @@ function GoalChart({ goal, measurements, timezone, compact = false, rangeStart =
   const showTargetMarker = goal.targetDate >= rangeStart && goal.targetDate <= rangeEnd;
   return (
     <div className={compact ? "goal-chart goal-chart-compact" : "goal-chart"}>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Weight graph from ${formatDate(rangeStart)} to ${formatDate(rangeEnd)}. The target path runs from ${goal.startWeightKg} to ${goal.targetWeightKg} kilograms. ${validMeasurements.length} weigh-ins are recorded in this range.`} preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Weight graph from ${formatDate(rangeStart)} to ${formatDate(rangeEnd)}. The target path runs from ${goal.startWeightKg} to ${goal.targetWeightKg} kilograms. ${validMeasurements.length} weigh-ins and ${goalRevisions.length} plan updates are recorded in this range. The smoothed trend is a rolling average of up to the last three weigh-in days.`} preserveAspectRatio="none">
         {ticks.map((tick) => <g key={tick}><line x1={left} y1={yAt(tick)} x2={width - right} y2={yAt(tick)} className="chart-gridline" /><text x={left - 8} y={yAt(tick) + 4} textAnchor="end" className="chart-axis-label">{tick.toFixed(1)}</text></g>)}
+        {goalRevisions.map((revision) => <line key={revision.id} x1={xAt(revision.date)} y1={top} x2={xAt(revision.date)} y2={bottom} className="chart-revision-marker"><title>{`Goal plan updated to version ${revision.goalVersion} on ${formatDate(revision.date)}`}</title></line>)}
         {showTargetMarker ? <line x1={xAt(goal.targetDate)} y1={top} x2={xAt(goal.targetDate)} y2={bottom} className="chart-goal-marker" /> : null}
         <path d={planPath} className="chart-plan-path" />
+        {trendPath ? <path d={trendPath} className="chart-trend-path" /> : null}
         {actualPath ? <path d={actualPath} className="chart-actual-path" /> : null}
         {validMeasurements.map((item) => <circle key={item.id} cx={xAt(dateAtTimezone(item.data.measuredAt, timezone))} cy={yAt(item.data.weightKg)} r={compact ? 4.5 : 6} className="chart-actual-dot"><title>{`${item.data.weightKg.toFixed(1)} kg on ${formatDate(dateAtTimezone(item.data.measuredAt, timezone))}`}</title></circle>)}
+        {trendPoints.map((point) => <circle key={`trend-${point.date}`} cx={xAt(point.date)} cy={yAt(point.weightKg)} r="3" className="chart-trend-dot"><title>{`Average across up to three weigh-in days: ${point.weightKg.toFixed(1)} kg on ${formatDate(point.date)}`}</title></circle>)}
         {showTargetMarker ? <circle cx={xAt(goal.targetDate)} cy={yAt(goal.targetWeightKg)} r="5" className="chart-target-dot"><title>{`Target weight ${goal.targetWeightKg.toFixed(1)} kg by ${formatDate(goal.targetDate)}`}</title></circle> : null}
         {labelDates.map((date, index) => <text key={`${date}-${index}`} x={xAt(date)} y={height - 7} textAnchor={index === 0 ? "start" : index === 2 ? "end" : "middle"} className="chart-axis-label">{compact ? formatShortDate(date) : formatDate(date)}</text>)}
       </svg>
     </div>
   );
+}
+
+function smoothedTrend(measurements: Measurement[], timezone: string): Array<{ date: string; weightKg: number }> {
+  const daily = new Map<string, { total: number; count: number }>();
+  for (const item of measurements) {
+    const date = dateAtTimezone(item.data.measuredAt, timezone);
+    const aggregate = daily.get(date) ?? { total: 0, count: 0 };
+    aggregate.total += item.data.weightKg;
+    aggregate.count += 1;
+    daily.set(date, aggregate);
+  }
+
+  const days = [...daily.entries()].sort(([left], [right]) => left.localeCompare(right));
+  if (days.length < 3) return [];
+  return days.map(([date], index) => {
+    const window = days.slice(Math.max(0, index - 2), index + 1);
+    const mean = window.reduce((total, [, values]) => total + values.total / values.count, 0) / window.length;
+    return { date, weightKg: mean };
+  });
+}
+
+function goalRevisionAnnotations(versions: StoredGoal[], timezone: string, rangeStart: string, rangeEnd: string): GoalRevision[] {
+  const byVersion = new Map(versions.map((version) => [version.goalVersion, version]));
+  return versions
+    .filter((version) => version.goalVersion > 1)
+    .map((version) => ({
+      id: version.id,
+      date: dateAtTimezone(version.acceptedAt, timezone),
+      goalVersion: version.goalVersion,
+      previousTargetKg: byVersion.get(version.goalVersion - 1)?.targetWeightKg ?? null,
+      targetWeightKg: version.targetWeightKg,
+      targetDate: version.targetDate,
+    }))
+    .filter((revision) => revision.date >= rangeStart && revision.date <= rangeEnd)
+    .sort((left, right) => left.date.localeCompare(right.date) || left.goalVersion - right.goalVersion);
 }
 
 function targetWeightAt(goal: StoredGoal, date: string): number {
