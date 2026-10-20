@@ -14,6 +14,7 @@ import {
   createMeasurementRequestSchema,
   deleteActivityLogRequestSchema,
   deleteFoodLogRequestSchema,
+  exerciseProgressQuerySchema,
   foodDayStatusRequestSchema,
   foodLogRecordSchema,
   goalProposalRequestSchema,
@@ -120,6 +121,10 @@ function isLocalDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function shiftLocalDate(value: string, days: number): string {
+  return new Date(Date.parse(`${value}T00:00:00.000Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 function isUuid(value: string): boolean {
@@ -703,6 +708,83 @@ app.put("/v1/days/:date/food-status", async (c) => {
     }).returning({ localDate: foodDayStatuses.localDate, complete: foodDayStatuses.complete, updatedAt: foodDayStatuses.updatedAt });
   });
   return c.json(saved);
+});
+
+app.get("/v1/exercises/:exerciseId/progress", async (c) => {
+  const exerciseId = c.req.param("exerciseId");
+  const exercise = findExerciseById(exerciseId);
+  if (!exercise) return c.json({ error: "exercise_not_found" }, 404);
+  const parsedQuery = exerciseProgressQuerySchema.safeParse(c.req.query());
+  if (!parsedQuery.success) return c.json({ error: "invalid_exercise_progress_range" }, 400);
+  const rangeDays = parsedQuery.data.range === "30d" ? 30 : parsedQuery.data.range === "90d" ? 90 : 365;
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [profile] = await tx.select({ data: userProfiles.data }).from(userProfiles)
+      .where(eq(userProfiles.userId, userId)).limit(1);
+    const savedProfile = profileSchema.safeParse(profile?.data);
+    const records = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.deleted, false),
+    ));
+    return { timezone: savedProfile.success ? savedProfile.data.timezone : "UTC", records };
+  });
+  let timezone = result.timezone;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+  } catch {
+    timezone = "UTC";
+  }
+  const rangeEnd = localDateInZone(new Date().toISOString(), timezone);
+  const rangeStart = shiftLocalDate(rangeEnd, 1 - rangeDays);
+  const pointsByDate = new Map<string, {
+    date: string;
+    sessions: number;
+    setCount: number;
+    bestSetReps: number | null;
+    bestLoadKg: number | null;
+    longestHoldSeconds: number | null;
+  }>();
+  for (const record of result.records) {
+    const parsed = activityLogRecordSchema.safeParse(record.data);
+    if (!parsed.success || parsed.data.activityType !== "strength" || !parsed.data.exercises?.length) continue;
+    const matchingExercises = parsed.data.exercises.filter((item) => item.exerciseId === exerciseId);
+    if (!matchingExercises.length) continue;
+    const date = localDateInZone(parsed.data.occurredAt, timezone);
+    if (date < rangeStart || date > rangeEnd) continue;
+    const point = pointsByDate.get(date) ?? {
+      date,
+      sessions: 0,
+      setCount: 0,
+      bestSetReps: null,
+      bestLoadKg: null,
+      longestHoldSeconds: null,
+    };
+    point.sessions += 1;
+    for (const matchingExercise of matchingExercises) {
+      point.setCount += matchingExercise.sets.length;
+      for (const set of matchingExercise.sets) {
+        if (set.reps !== null && set.reps !== undefined) {
+          point.bestSetReps = Math.max(point.bestSetReps ?? 0, set.reps);
+        }
+        if (set.loadKg !== null) {
+          point.bestLoadKg = Math.max(point.bestLoadKg ?? 0, set.loadKg);
+        }
+        if (set.durationSeconds !== null && set.durationSeconds !== undefined) {
+          point.longestHoldSeconds = Math.max(point.longestHoldSeconds ?? 0, set.durationSeconds);
+        }
+      }
+    }
+    pointsByDate.set(date, point);
+  }
+  return c.json({
+    exercise: { id: exercise.id, name: exercise.name, trackingMode: exercise.trackingMode },
+    timezone,
+    rangeStart,
+    rangeEnd,
+    points: [...pointsByDate.values()].sort((left, right) => left.date.localeCompare(right.date)),
+  });
 });
 
 app.post("/v1/goals/proposal", async (c) => {

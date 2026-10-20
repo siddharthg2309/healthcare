@@ -103,6 +103,15 @@ a { color: inherit; text-decoration: none; }
 .chart-goal-marker { stroke: var(--green); stroke-width: 1.5; stroke-dasharray: 3 5; opacity: .65; }
 .chart-revision-marker { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 2 5; opacity: .8; }
 .chart-target-dot { fill: var(--green); stroke: var(--surface); stroke-width: 2; }
+.exercise-progress-panel { display: grid; gap: 12px; margin-top: 14px; }
+.exercise-progress-panel .panel-heading { margin-bottom: 0; }
+.exercise-progress-panel > .muted-copy { margin: -5px 0 0; }
+.exercise-progress-controls { align-items: end; }
+.exercise-metric-switch { flex-wrap: wrap; }
+.exercise-progress-chart { width: 100%; margin: 2px 0 0; }
+.exercise-progress-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.exercise-progress-line { fill: none; stroke: var(--green); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.exercise-progress-dot { fill: var(--lime); stroke: var(--green); stroke-width: 2; }
 .chart-revisions { display: grid; gap: 6px; margin-top: 10px; }
 .chart-revisions p { margin: 0; padding: 9px 11px; border-left: 2px dotted var(--muted); border-radius: 0 11px 11px 0; background: var(--surface-soft); color: var(--muted); font-size: 9px; line-height: 1.5; }
 .chart-revisions strong { color: var(--ink); }

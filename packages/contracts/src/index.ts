@@ -248,6 +248,31 @@ export const activityLogRecordSchema = z.object({
   if (setCount > 100) context.addIssue({ code: "custom", path: ["exercises"], message: "A workout can contain at most 100 sets." });
 });
 
+export const exerciseProgressQuerySchema = z.object({
+  range: z.enum(["30d", "90d", "365d"]).default("90d"),
+}).strict();
+
+const exerciseProgressPointSchema = z.object({
+  date: z.string().date(),
+  sessions: z.number().int().positive(),
+  setCount: z.number().int().positive(),
+  bestSetReps: z.number().int().min(1).max(200).nullable(),
+  bestLoadKg: z.number().finite().min(0).max(1000).nullable(),
+  longestHoldSeconds: z.number().int().min(1).max(7200).nullable(),
+}).strict();
+
+export const exerciseProgressResponseSchema = z.object({
+  exercise: z.object({
+    id: z.string().trim().min(1).max(80),
+    name: z.string().trim().min(1).max(100),
+    trackingMode: z.enum(["reps", "time"]),
+  }).strict(),
+  timezone: z.string().min(1).max(80),
+  rangeStart: z.string().date(),
+  rangeEnd: z.string().date(),
+  points: z.array(exerciseProgressPointSchema).max(366),
+}).strict();
+
 const bodyMeasurementSchema = z.object({
   measuredAt: isoDateTime,
   weightKg: z.number().finite().min(25).max(400),
@@ -303,6 +328,8 @@ export type DeleteActivityLogRequest = z.infer<typeof deleteActivityLogRequestSc
 export type ActivityLogRecord = z.infer<typeof activityLogRecordSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
+export type ExerciseProgressQuery = z.infer<typeof exerciseProgressQuerySchema>;
+export type ExerciseProgressResponse = z.infer<typeof exerciseProgressResponseSchema>;
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 export type SyncPushRequest = z.infer<typeof syncPushSchema>;
 export type SyncPullQuery = z.infer<typeof syncPullQuerySchema>;

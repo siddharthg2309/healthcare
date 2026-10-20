@@ -758,6 +758,7 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | PATCH/DELETE /v1/food-logs/:id | Version-checked changes and soft deletion |
 | POST /v1/activity-logs | Save manually entered steps or activity duration |
 | GET /v1/days/:date | Timezone-aware food/activity records and calorie/macro/step totals |
+| GET /v1/exercises/:exerciseId/progress?range=30d\|90d\|365d | Daily reps, load, and timed-hold performance from that account's logged sets |
 | PUT /v1/days/:date/food-status | Mark the food log complete or incomplete for a local date |
 | POST /v1/custom-foods | Create a private food/version |
 | POST /v1/recipes | Create/validate a private recipe version |
@@ -971,11 +972,11 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 6 — Exercise, user plans, and manual activity
 
-**Current status:** Manual steps/walks/cardio and structured strength sessions are implemented. Strength logs support version-checked edits, soft deletion, date-selectable cross-day history, rep-based sets with optional load, and timed holds. The `starter-v2` catalog contains 47 curated exercises with stable IDs, movement patterns, equipment, primary muscles, technique cues, easier alternatives where available, tracking mode, and typical rest guidance. Three starter templates (two-day bodyweight, three-day dumbbell, and three-day gym) can prefill a session form; targets stay separate from completed logs. Persistent user plans, schedule editing, exercise-specific progress, provenance labels, and further catalog review remain outstanding.
+**Current status:** Manual steps/walks/cardio and structured strength sessions are implemented. Strength logs support version-checked edits, soft deletion, date-selectable cross-day history, rep-based sets with optional load, and timed holds. The `starter-v2` catalog contains 47 curated exercises with stable IDs, movement patterns, equipment, primary muscles, technique cues, easier alternatives where available, tracking mode, and typical rest guidance. Three starter templates (two-day bodyweight, three-day dumbbell, and three-day gym) can prefill a session form; targets stay separate from completed logs. Progress now has an exercise-specific graph for daily best reps, best load, or longest timed hold, separate from the body-weight graph. Persistent user plans, schedule editing, activity provenance labels, and broader catalog coverage remain outstanding.
 
 - Continue reviewing and expanding the exercise catalog and starter workout templates.
 - Add suggested and user-authored workout plans with weekly scheduling and approved plan versions.
-- Show exercise-specific progress.
+- Continue reviewing and improving exercise-specific progress metrics.
 - Add source/provenance labels to activity and calorie estimates.
 - Keep exercise progress separate from the body-weight graph; do not invent calorie-burn values.
 

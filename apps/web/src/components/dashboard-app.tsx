@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { goalSchema, profileSchema, type GoalRecord, type Profile } from "@healthcare/contracts";
+import { exerciseProgressResponseSchema, goalSchema, profileSchema, type ExerciseProgressResponse, type GoalRecord, type Profile } from "@healthcare/contracts";
+import { exerciseCatalog } from "@healthcare/domain";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { ActivityTrackingView, FoodTrackingView, type DaySummary } from "@/components/tracking-views";
 import { ApiError, postJson, requestJson } from "@/lib/api";
@@ -123,7 +124,7 @@ export function DashboardApp() {
           {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} /> : null}
           {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} onSaved={reloadData} /> : null}
           {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} unitSystem={profile.unitSystem} onSaved={reloadData} /> : null}
-          {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} onMeasurementAdded={reloadData} /> : null}
+          {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} unitSystem={profile.unitSystem} onMeasurementAdded={reloadData} /> : null}
         </div>
       </main>
 
@@ -265,7 +266,7 @@ function HomeView({ profile, goal, measurements, day, onProgress }: { profile: P
   );
 }
 
-function ProgressView({ goal, goalVersions, measurements, timezone, onMeasurementAdded }: { goal: StoredGoal; goalVersions: StoredGoal[]; measurements: Measurement[]; timezone: string; onMeasurementAdded: () => Promise<void> }) {
+function ProgressView({ goal, goalVersions, measurements, timezone, unitSystem, onMeasurementAdded }: { goal: StoredGoal; goalVersions: StoredGoal[]; measurements: Measurement[]; timezone: string; unitSystem: "metric" | "imperial"; onMeasurementAdded: () => Promise<void> }) {
   const [weight, setWeight] = useState("");
   const [measuredAt, setMeasuredAt] = useState(localDateTimeNow);
   const [range, setRange] = useState<"30d" | "90d" | "all">("all");
@@ -325,6 +326,7 @@ function ProgressView({ goal, goalVersions, measurements, timezone, onMeasuremen
         <p className="chart-summary" aria-live="polite">{graphSummary}</p>
         <p className="chart-caption">The target line is a schedule, not a prediction. Day-to-day body weight can vary.</p>
       </section>
+      <ExerciseProgressPanel unitSystem={unitSystem} />
       <section className="progress-lower-grid">
         <form className="panel weigh-in-form" onSubmit={(event) => void submit(event)}>
           <div className="panel-heading"><div><span className="eyebrow">KEEP THE GRAPH CURRENT</span><h2>Add a weigh-in</h2></div></div>
@@ -338,6 +340,137 @@ function ProgressView({ goal, goalVersions, measurements, timezone, onMeasuremen
       </section>
     </>
   );
+}
+
+type ExerciseRange = "30d" | "90d" | "365d";
+type ExerciseMetric = "reps" | "load" | "hold";
+type LoadedExerciseProgress = { key: string; data?: ExerciseProgressResponse; error?: string };
+const poundsPerKilogram = 2.20462262185;
+
+function ExerciseProgressPanel({ unitSystem }: { unitSystem: "metric" | "imperial" }) {
+  const firstExercise = exerciseCatalog[0];
+  const [exerciseId, setExerciseId] = useState(firstExercise?.id ?? "");
+  const [range, setRange] = useState<ExerciseRange>("90d");
+  const [metric, setMetric] = useState<ExerciseMetric>(firstExercise?.trackingMode === "time" ? "hold" : "reps");
+  const [loaded, setLoaded] = useState<LoadedExerciseProgress | null>(null);
+  const requestKey = `${exerciseId}:${range}`;
+  const selectedExercise = exerciseCatalog.find((exercise) => exercise.id === exerciseId);
+
+  useEffect(() => {
+    if (!exerciseId) return;
+    let active = true;
+    void requestJson<unknown>(`/v1/exercises/${exerciseId}/progress?range=${range}`, { cache: "no-store" }).then((body) => {
+      const parsed = exerciseProgressResponseSchema.safeParse(body);
+      if (!parsed.success) throw new Error("The exercise progress response was invalid.");
+      if (active) setLoaded({ key: requestKey, data: parsed.data });
+    }).catch((caught: unknown) => {
+      if (active) setLoaded({ key: requestKey, error: caught instanceof Error ? caught.message : "Could not load exercise progress." });
+    });
+    return () => { active = false; };
+  }, [exerciseId, range, requestKey]);
+
+  const response = loaded?.key === requestKey ? loaded.data : undefined;
+  const loading = Boolean(exerciseId) && loaded?.key !== requestKey;
+  const error = loaded?.key === requestKey ? loaded.error : undefined;
+  const hasRepHistory = response?.points.some((point) => point.bestSetReps !== null) ?? false;
+  const metricOptions: Array<{ value: ExerciseMetric; label: string }> = selectedExercise?.trackingMode === "time"
+    ? [{ value: "hold", label: "Longest hold" }, ...(hasRepHistory ? [{ value: "reps" as const, label: "Best set reps" }] : [])]
+    : [{ value: "reps", label: "Best set reps" }, { value: "load", label: "Best logged load" }];
+  const activeMetric = metricOptions.some((option) => option.value === metric) ? metric : metricOptions[0]?.value ?? "reps";
+  const metricData = response?.points.flatMap((point) => {
+    const value = exerciseProgressValue(point, activeMetric, unitSystem);
+    return value === null ? [] : [{ point, value }];
+  }) ?? [];
+  const latest = metricData.at(-1);
+  const metricLabel = metricOptions.find((option) => option.value === activeMetric)?.label ?? "Performance";
+
+  return <section className="panel exercise-progress-panel">
+    <div className="panel-heading"><div><span className="eyebrow">EXERCISE PERFORMANCE</span><h2>Progress by exercise</h2></div><span className="panel-symbol">↗</span></div>
+    <p className="muted-copy">Review your logged sets over time. This graph has its own scale and stays separate from body weight.</p>
+    <div className="form-grid exercise-progress-controls">
+      <label className="field"><span>Exercise</span><select value={exerciseId} onChange={(event) => {
+        const nextExercise = exerciseCatalog.find((candidate) => candidate.id === event.target.value);
+        setExerciseId(event.target.value);
+        setMetric(nextExercise?.trackingMode === "time" ? "hold" : "reps");
+      }}>
+        {exerciseCatalog.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}
+      </select></label>
+      <div className="field"><span>Date range</span><div className="range-switch" role="group" aria-label="Exercise progress date range">
+        {[{ value: "30d", label: "30d" }, { value: "90d", label: "90d" }, { value: "365d", label: "1y" }].map((option) => <button key={option.value} type="button" className={range === option.value ? "range-button range-button-active" : "range-button"} aria-pressed={range === option.value} onClick={() => setRange(option.value as ExerciseRange)}>{option.label}</button>)}
+      </div></div>
+    </div>
+    {response && !error ? <>
+      <div className="range-switch exercise-metric-switch" role="group" aria-label="Exercise metric">
+        {metricOptions.map((option) => <button key={option.value} type="button" className={activeMetric === option.value ? "range-button range-button-active" : "range-button"} aria-pressed={activeMetric === option.value} onClick={() => setMetric(option.value)}>{option.label}</button>)}
+      </div>
+      {metricData.length ? <>
+        <ExerciseProgressChart response={response} metric={activeMetric} unitSystem={unitSystem} />
+        <p className="chart-summary" aria-live="polite">{latest ? `${metricLabel}: ${formatExerciseMetric(latest.value, activeMetric, unitSystem)} on ${formatDate(latest.point.date)}. ${latest.point.sessions} session${latest.point.sessions === 1 ? "" : "s"} across ${latest.point.setCount} set${latest.point.setCount === 1 ? "" : "s"} recorded that day.` : "No values for this metric are recorded in this range."}</p>
+      </> : <div className="empty-inline"><strong>No {metricLabel.toLowerCase()} recorded in this range</strong><span>Log this catalog exercise with that value to create a graph.</span></div>}
+      <p className="chart-caption">Each point shows the best recorded value for that exercise on a day. It summarizes logged sessions; it does not estimate calories burned.</p>
+    </> : loading ? <p className="muted-copy" role="status">Loading exercise progress…</p>
+      : error ? <p className="form-error" role="alert">{error}</p>
+        : <div className="empty-inline"><strong>Select an exercise</strong><span>Log catalog-linked sets to build its progress line.</span></div>}
+  </section>;
+}
+
+function exerciseProgressValue(
+  point: ExerciseProgressResponse["points"][number],
+  metric: ExerciseMetric,
+  unitSystem: "metric" | "imperial",
+): number | null {
+  if (metric === "reps") return point.bestSetReps;
+  if (metric === "hold") return point.longestHoldSeconds;
+  if (point.bestLoadKg === null) return null;
+  return unitSystem === "imperial" ? point.bestLoadKg * poundsPerKilogram : point.bestLoadKg;
+}
+
+function formatExerciseMetric(value: number, metric: ExerciseMetric, unitSystem: "metric" | "imperial"): string {
+  if (metric === "reps") return `${Math.round(value)} reps`;
+  if (metric === "hold") return formatDuration(value);
+  return `${value.toFixed(1)} ${unitSystem === "imperial" ? "lb" : "kg"}`;
+}
+
+function formatDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return minutes ? `${minutes}m ${remainder}s` : `${remainder}s`;
+}
+
+function ExerciseProgressChart({ response, metric, unitSystem }: { response: ExerciseProgressResponse; metric: ExerciseMetric; unitSystem: "metric" | "imperial" }) {
+  const values = response.points.flatMap((point) => {
+    const value = exerciseProgressValue(point, metric, unitSystem);
+    return value === null ? [] : [{ point, value }];
+  });
+  if (!values.length) return null;
+  const width = 720;
+  const height = 260;
+  const left = 58;
+  const right = 20;
+  const top = 24;
+  const bottom = height - 38;
+  const rawLow = Math.min(...values.map((item) => item.value));
+  const rawHigh = Math.max(...values.map((item) => item.value));
+  const padding = Math.max((rawHigh - rawLow) * 0.2, metric === "load" ? 0.5 : metric === "hold" ? 5 : 1);
+  const min = Math.max(0, rawLow - padding);
+  const max = Math.max(min + padding * 2, rawHigh + padding);
+  const startMs = Date.parse(`${response.rangeStart}T00:00:00Z`);
+  const totalMs = Math.max(1, Date.parse(`${response.rangeEnd}T00:00:00Z`) - startMs);
+  const xAt = (date: string) => left + Math.max(0, Math.min(1, (Date.parse(`${date}T00:00:00Z`) - startMs) / totalMs)) * (width - left - right);
+  const yAt = (value: number) => top + ((max - value) / (max - min)) * (bottom - top);
+  const line = values.map((item, index) => `${index ? "L" : "M"} ${xAt(item.point.date)} ${yAt(item.value)}`).join(" ");
+  const ticks = Array.from({ length: 4 }, (_, index) => min + ((max - min) * index) / 3);
+  const middle = addDays(response.rangeStart, Math.floor((Date.parse(`${response.rangeEnd}T00:00:00Z`) - startMs) / 2 / 86_400_000));
+  const labels = [response.rangeStart, middle, response.rangeEnd];
+  const unitLabel = metric === "load" ? unitSystem === "imperial" ? "lb" : "kg" : metric === "reps" ? "reps" : "seconds";
+
+  return <div className="exercise-progress-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${response.exercise.name} ${metric === "load" ? "best logged load" : metric === "reps" ? "best set reps" : "longest hold"} over the selected date range, based on ${values.length} days with records.`} preserveAspectRatio="none">
+    <text x={left} y="13" className="chart-axis-label">{unitLabel}</text>
+    {ticks.map((tick) => <g key={tick}><line x1={left} y1={yAt(tick)} x2={width - right} y2={yAt(tick)} className="chart-gridline" /><text x={left - 8} y={yAt(tick) + 4} textAnchor="end" className="chart-axis-label">{metric === "load" ? tick.toFixed(1) : Math.round(tick)}</text></g>)}
+    <path d={line} className="exercise-progress-line" />
+    {values.map(({ point, value }) => <circle key={point.date} cx={xAt(point.date)} cy={yAt(value)} r="5" className="exercise-progress-dot"><title>{`${formatDate(point.date)} · ${formatExerciseMetric(value, metric, unitSystem)} · ${point.sessions} sessions · ${point.setCount} sets`}</title></circle>)}
+    {labels.map((date, index) => <text key={`${date}-${index}`} x={xAt(date)} y={height - 8} textAnchor={index === 0 ? "start" : index === 2 ? "end" : "middle"} className="chart-axis-label">{formatShortDate(date)}</text>)}
+  </svg></div>;
 }
 
 function GoalChart({ goal, goalRevisions = [], measurements, timezone, compact = false, rangeStart = goal.startDate, rangeEnd = goal.targetDate }: { goal: StoredGoal; goalRevisions?: GoalRevision[]; measurements: Measurement[]; timezone: string; compact?: boolean; rangeStart?: string; rangeEnd?: string }) {
