@@ -753,6 +753,10 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | POST /v1/goals/proposal | Deterministic goal and target proposal |
 | POST /v1/goals/accept | Accept a versioned goal |
 | GET /v1/foods?query=... | Search accessible catalog entries |
+| POST /v1/foods/custom | Create a private food with per-100-g nutrition values and source note |
+| POST /v1/food-logs | Save an idempotent food entry with a nutrition snapshot |
+| POST /v1/activity-logs | Save manually entered steps or activity duration |
+| GET /v1/days/:date | Timezone-aware food/activity records and calorie/macro/step totals |
 | POST /v1/custom-foods | Create a private food/version |
 | POST /v1/recipes | Create/validate a private recipe version |
 | POST /v1/meal-logs | Idempotent meal creation |
@@ -943,6 +947,8 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 4 — Food catalog and manual food tracking
 
+**Current status:** Search and manual logging are implemented for existing shared catalog rows and per-account custom foods. The shared catalog import, reviewed Indian-food coverage, aliases/portions, recipes, edits/deletes, favorites, and complete-day marker remain outstanding.
+
 - Create import/curation tools and the initial reviewed catalog of common group foods.
 - Add aliases, preparation states, portions, provenance, and catalog quality labels.
 - Implement food search, recents/favorites, custom foods, and recipe creation.
@@ -952,6 +958,8 @@ The sequence delivers tracking and the signature progress graph before AI featur
 **Deliverables:** Usable daily manual nutrition tracker.
 
 ### Phase 5 — Signature progress graph and daily dashboard
+
+**Current status:** The dashboard and Progress page render the accepted target trajectory beside recorded weigh-ins, with a weight-entry form. This first graph does not yet include range controls, trend smoothing, goal-revision annotations, or the full weekly review/context panel.
 
 - Connect actual measurements and the accepted goal trajectory to the main graph.
 - Add measured points, a trend line, target/date marker, range controls, and goal-revision annotations.
@@ -963,6 +971,8 @@ The sequence delivers tracking and the signature progress graph before AI featur
 **Exit criteria:** Actual measurements are visually distinct from the planned path; missing data is never drawn as zero.
 
 ### Phase 6 — Exercise, user plans, and manual activity
+
+**Current status:** Manual step counts and activity type/duration logging are implemented. The reviewed exercise library, user-authored workout plans, sets/reps/load, weekly scheduling, and richer activity progress remain outstanding.
 
 - Create the reviewed exercise library and starter workout templates.
 - Support user-authored workout plans, weekly scheduling, sessions, sets/reps/load, walking/cardio, manual steps, and weight logging.

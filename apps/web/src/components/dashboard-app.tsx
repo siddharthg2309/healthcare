@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { goalSchema, profileSchema, type GoalRecord, type Profile } from "@healthcare/contracts";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
+import { ActivityTrackingView, FoodTrackingView, type DaySummary } from "@/components/tracking-views";
 import { ApiError, postJson, requestJson } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 
@@ -31,6 +32,7 @@ export function DashboardApp() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [goal, setGoal] = useState<StoredGoal | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [loadError, setLoadError] = useState("");
 
@@ -48,6 +50,13 @@ export function DashboardApp() {
       setProfile(parsedProfile?.success ? parsedProfile.data : null);
       setGoal(parsedGoal?.success && goalData.current ? { ...parsedGoal.data, id: String(goalData.current.id) } : null);
       setMeasurements(goalData.measurements.filter((item) => Number.isFinite(item.data?.weightKg) && typeof item.data?.measuredAt === "string"));
+      if (parsedProfile.success) {
+        const date = dateInTimezone(parsedProfile.data.timezone);
+        const summary = await requestJson<DaySummary>(`/v1/days/${date}`);
+        setDaySummary(summary);
+      } else {
+        setDaySummary(null);
+      }
     } catch (error) {
       setLoadError(friendlyError(error));
     } finally {
@@ -103,9 +112,9 @@ export function DashboardApp() {
         </header>
 
         <div className="content-wrap">
-          {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} onProgress={() => setTab("progress")} /> : null}
-          {tab === "food" ? <ComingSoonView eyebrow="FOOD TRACKING" title="Build your food log" description="Search foods, confirm portions, and see calories and macros for each meal." icon="◉" /> : null}
-          {tab === "activity" ? <ComingSoonView eyebrow="ACTIVITY" title="Movement that fits your day" description="Log workouts and steps manually. Direct Health Connect sync is not available in this web version." icon="↗" /> : null}
+          {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} /> : null}
+          {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} onSaved={reloadData} /> : null}
+          {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} onSaved={reloadData} /> : null}
           {tab === "progress" ? <ProgressView goal={goal} measurements={measurements} onMeasurementAdded={reloadData} /> : null}
         </div>
       </main>
@@ -207,10 +216,9 @@ function LoadingPage({ label }: { label: string }) {
   return <main className="center-page"><div className="loading-mark"><span className="brand-mark">GH</span><p>{label}…</p></div></main>;
 }
 
-function HomeView({ profile, goal, measurements, onProgress }: { profile: Profile; goal: StoredGoal; measurements: Measurement[]; onProgress: () => void }) {
+function HomeView({ profile, goal, measurements, day, onProgress }: { profile: Profile; goal: StoredGoal; measurements: Measurement[]; day: DaySummary | null; onProgress: () => void }) {
   const kcal = goal.dailyCaloriesKcal;
   const latest = [...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt))[0];
-  const movementDays = Math.min(7, Math.max(0, profile.availableWorkoutDays));
   return (
     <>
       <div className="page-heading"><div><span className="eyebrow">TODAY’S OVERVIEW</span><h1>Good {dayGreeting()}, {profile.displayName.split(" ")[0]}.</h1><p>One day at a time. Your plan is here when you need it.</p></div><button className="install-hint" onClick={() => alert("In Chrome, open the menu and choose ‘Add to Home screen’ or ‘Install app’.")}>＋ Add to home screen</button></div>
@@ -227,15 +235,15 @@ function HomeView({ profile, goal, measurements, onProgress }: { profile: Profil
         </article>
         <article className="panel intake-panel">
           <div className="panel-heading"><div><span className="eyebrow">DAILY TARGET</span><h2>Food</h2></div><span className="panel-symbol">◉</span></div>
-          <div className="metric-main">{kcal?.toLocaleString("en-IN") ?? "—"}<small> kcal</small></div>
-          <p className="muted-copy">{kcal ? "Calorie target · estimated" : "Manual target not set"}</p>
+          <div className="metric-main">{day?.foodTotals.caloriesKcal.toLocaleString("en-IN") ?? "—"}<small> / {kcal?.toLocaleString("en-IN") ?? "—"} kcal</small></div>
+          <p className="muted-copy">{day ? "Logged today · calorie target is an estimate" : "Today’s food log is unavailable"}</p>
+          {kcal ? <div className="intake-progress" role="progressbar" aria-label="Calories logged toward daily target" aria-valuenow={Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))}%` }} /></div> : null}
           {goal.macrosGrams ? <div className="macro-mini"><Macro label="Protein" value={goal.macrosGrams.protein} color="green" /><Macro label="Carbs" value={goal.macrosGrams.carbohydrate} color="gold" /><Macro label="Fat" value={goal.macrosGrams.fat} color="blue" /></div> : <p className="note-box">No macros estimated for this manual target.</p>}
         </article>
         <article className="panel movement-panel">
           <div className="panel-heading"><div><span className="eyebrow">YOUR WEEK</span><h2>Movement</h2></div><span className="panel-symbol">↗</span></div>
-          <div className="metric-main">{movementDays}<small> days available</small></div>
-          <p className="muted-copy">We’ll shape activity around the schedule you selected.</p>
-          <div className="week-dots">{Array.from({ length: 7 }, (_, index) => <span key={index} className={index < movementDays ? "week-dot week-dot-active" : "week-dot"}>{["M", "T", "W", "T", "F", "S", "S"][index]}</span>)}</div>
+          <div className="metric-main">{day?.steps.toLocaleString("en-IN") ?? "—"}<small> steps today</small></div>
+          <p className="muted-copy">{day ? `${day.workoutsCompleted} workout or walk entries logged` : "Today’s activity is unavailable"}</p>
         </article>
         <article className="panel checkin-panel">
           <div className="panel-heading"><div><span className="eyebrow">LATEST MEASUREMENT</span><h2>Weight</h2></div><span className="panel-symbol">↕</span></div>
@@ -346,10 +354,6 @@ function Macro({ label, value, color }: { label: string; value: number; color: s
   return <div className="macro-row"><span><i className={`macro-dot macro-${color}`} />{label}</span><strong>{value} g</strong></div>;
 }
 
-function ComingSoonView({ eyebrow, title, description, icon }: { eyebrow: string; title: string; description: string; icon: string }) {
-  return <section className="feature-empty"><span className="eyebrow">{eyebrow}</span><div className="feature-icon">{icon}</div><h1>{title}</h1><p>{description}</p><span className="phase-chip">In the next implementation phase</span></section>;
-}
-
 function dayGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 12) return "morning";
@@ -365,4 +369,10 @@ function formatDate(value: string): string {
 function formatShortDate(value: string): string {
   const date = new Date(`${value.slice(0, 10)}T12:00:00`);
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(date);
+}
+
+function dateInTimezone(timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }

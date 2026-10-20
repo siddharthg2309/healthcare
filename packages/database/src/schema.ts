@@ -69,6 +69,32 @@ export const catalogFoods = pgTable("catalog_foods", {
   `),
 ]);
 
+export const userFoods = pgTable("user_foods", {
+  id: uuid("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  caloriesKcalPer100g: numeric("calories_kcal_per_100g", { precision: 9, scale: 2 }).notNull(),
+  proteinGPer100g: numeric("protein_g_per_100g", { precision: 8, scale: 2 }).notNull(),
+  carbohydrateGPer100g: numeric("carbohydrate_g_per_100g", { precision: 8, scale: 2 }).notNull(),
+  fatGPer100g: numeric("fat_g_per_100g", { precision: 8, scale: 2 }).notNull(),
+  sourceNote: text("source_note").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("user_foods_owner_name_idx").on(table.userId, table.name),
+  check("user_foods_nutrition_nonnegative", sql`
+    ${table.caloriesKcalPer100g} >= 0 AND ${table.proteinGPer100g} >= 0
+    AND ${table.carbohydrateGPer100g} >= 0 AND ${table.fatGPer100g} >= 0
+  `),
+  pgPolicy("user_foods_owner_policy", {
+    for: "all",
+    to: "public",
+    using: sql`user_id = current_setting('app.user_id', true)`,
+    withCheck: sql`user_id = current_setting('app.user_id', true)`,
+  }),
+]).enableRLS();
+
 export const userRecords = pgTable("user_records", {
   userId: text("user_id").notNull(),
   entity: recordEntity("entity").notNull(),

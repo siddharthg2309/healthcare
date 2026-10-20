@@ -4,7 +4,7 @@ A private, Android-first health and fitness app for food logging, activity track
 
 The app and API are served by one Next.js project. Vercel hosts the web UI and server-side API routes; Neon provides the cloud Postgres database. Your laptop is needed for development and the one-time database migration, not for friends to use the deployed app.
 
-The app is still under implementation. The current web shell includes the dashboard, progress view, onboarding/goal setup, authentication UI, and placeholders for features not yet connected to the database. The phased work and product details are in [the implementation plan](docs/IMPLEMENTATION_PLAN.md). Current deployment steps are in [environment setup](docs/ENVIRONMENT.md).
+The app is under implementation. The current build includes account setup, goal onboarding, the target-versus-weigh-in graph, personal food creation and logging, manual activity logging, and daily summaries. Curated shared foods, plan generation, photo recognition, reminders, live deployment, and device integrations are still planned. See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the phased scope and [environment setup](docs/ENVIRONMENT.md) for deployment steps.
 
 ## Stack
 
@@ -93,4 +93,4 @@ The hooks check staged changes for ignored files and secrets and enforce Convent
 
 ## Current implementation status
 
-The repository contains the initial Next.js PWA, a same-origin API bridge to the Hono backend, invitation-based auth foundations, versioned goal proposal/acceptance routes, and the first dashboard/onboarding flow. Food catalog search/logging, real daily summaries, meal and workout records, AI workflows, photo storage, and production Vercel setup remain phased work. The app must not be described as feature-complete until those paths are connected and verified.
+The repository contains the Next.js PWA and same-origin Hono API, invitation-based authentication foundations, onboarding and versioned goals, the progress graph, personal food search/creation, manual food and activity logs, and timezone-aware daily summaries. A reviewed shared-food catalog, editing/deletion and recipes, AI workflows, photo storage, reminders, live Neon migration, and Vercel deployment remain phased work. The app is not feature-complete until those paths are implemented and verified.

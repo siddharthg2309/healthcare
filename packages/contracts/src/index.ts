@@ -80,12 +80,74 @@ const foodLogSchema = z.object({
   quantityGrams: z.number().finite().positive().max(5000),
 }).strict();
 
+export const createFoodLogRequestSchema = z.object({
+  logId: uuidSchema,
+  foodId: uuidSchema,
+  occurredAt: isoDateTime,
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+  quantityGrams: z.number().finite().positive().max(5000),
+}).strict();
+
+export const createCustomFoodRequestSchema = z.object({
+  foodId: uuidSchema,
+  name: z.string().trim().min(1).max(120),
+  category: z.enum(["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"]),
+  caloriesKcalPer100g: z.number().finite().min(0).max(1000),
+  proteinGPer100g: z.number().finite().min(0).max(100),
+  carbohydrateGPer100g: z.number().finite().min(0).max(100),
+  fatGPer100g: z.number().finite().min(0).max(100),
+  sourceNote: z.string().trim().min(1).max(160),
+}).strict();
+
+export const nutritionSnapshotSchema = z.object({
+  caloriesKcal: z.number().finite().min(0),
+  proteinG: z.number().finite().min(0),
+  carbohydrateG: z.number().finite().min(0),
+  fatG: z.number().finite().min(0),
+}).strict();
+
+export const foodLogRecordSchema = z.object({
+  foodId: uuidSchema,
+  foodSource: z.enum(["shared_catalog", "personal"]),
+  foodName: z.string().min(1).max(120),
+  category: z.string().min(1).max(48),
+  occurredAt: isoDateTime,
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+  quantityGrams: z.number().finite().positive().max(5000),
+  nutritionPer100g: nutritionSnapshotSchema,
+  nutritionTotal: nutritionSnapshotSchema,
+}).strict();
+
 const activityLogSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
   durationMinutes: z.number().int().min(0).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
+}).strict();
+
+export const createActivityLogRequestSchema = z.object({
+  activityId: uuidSchema,
+  activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
+  occurredAt: isoDateTime,
+  durationMinutes: z.number().int().min(1).max(1440).nullable(),
+  steps: z.number().int().min(0).max(200000).nullable(),
+  notes: z.string().trim().max(500).nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.durationMinutes === null && value.steps === null) {
+    context.addIssue({ code: "custom", path: ["durationMinutes"], message: "Enter a duration or step count." });
+  }
+  if (value.activityType === "steps" && value.steps === null) {
+    context.addIssue({ code: "custom", path: ["steps"], message: "Enter a step count for a steps entry." });
+  }
+});
+
+export const activityLogRecordSchema = z.object({
+  activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
+  occurredAt: isoDateTime,
+  durationMinutes: z.number().int().min(1).max(1440).nullable(),
+  steps: z.number().int().min(0).max(200000).nullable(),
+  notes: z.string().max(500).nullable(),
 }).strict();
 
 const bodyMeasurementSchema = z.object({
@@ -132,6 +194,11 @@ export const syncPullQuerySchema = z.object({
 export type Profile = z.infer<typeof profileSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
+export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;
+export type CreateCustomFoodRequest = z.infer<typeof createCustomFoodRequestSchema>;
+export type FoodLogRecord = z.infer<typeof foodLogRecordSchema>;
+export type CreateActivityLogRequest = z.infer<typeof createActivityLogRequestSchema>;
+export type ActivityLogRecord = z.infer<typeof activityLogRecordSchema>;
 export type SyncOperation = z.infer<typeof syncOperationSchema>;
 export type SyncPushRequest = z.infer<typeof syncPushSchema>;
 export type SyncPullQuery = z.infer<typeof syncPullQuerySchema>;

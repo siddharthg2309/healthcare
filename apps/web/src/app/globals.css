@@ -109,6 +109,46 @@ a { color: inherit; text-decoration: none; }
 .measurement-row { display: flex; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .measurement-row:last-child { border: 0; }
 .measurement-row strong { color: var(--ink); font-size: 11px; }
+.tracking-grid { display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start; }
+.food-entry-panel, .activity-entry-panel, .daily-log-panel { display: grid; align-content: start; gap: 13px; }
+.food-entry-panel .panel-heading, .activity-entry-panel .panel-heading, .daily-log-panel .panel-heading { margin-bottom: 0; }
+.food-results { display: grid; gap: 7px; max-height: 290px; overflow: auto; }
+.food-result { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); text-align: left; cursor: pointer; }
+.food-result-selected { border-color: var(--green); background: var(--green-soft); }
+.food-result-main, .daily-entry-main { min-width: 0; display: grid; gap: 4px; }
+.food-result-main strong, .daily-entry-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.food-result-main small, .food-result-kcal small, .daily-entry-main small, .daily-entry > strong small { color: var(--muted); font-size: 9px; font-weight: 500; }
+.food-result-kcal { flex: 0 0 auto; text-align: right; font-size: 11px; font-weight: 700; }
+.food-result-kcal small { display: block; margin-top: 3px; }
+.empty-inline { display: grid; gap: 5px; padding: 15px; border: 1px dashed var(--line); border-radius: 15px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.empty-inline strong { color: var(--ink); font-size: 11px; }
+.add-custom-trigger { justify-self: start; margin: 0; }
+.selected-food-form, .custom-food-form { display: grid; gap: 12px; padding: 14px; border-radius: 18px; background: var(--surface-soft); }
+.selected-food-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.selected-food-heading > div { display: grid; gap: 4px; }
+.selected-food-heading strong { font-size: 12px; }
+.selected-food-form .field input, .selected-food-form .field select, .custom-food-form .field input, .custom-food-form .field select, .activity-entry-panel .field input, .activity-entry-panel .field select { background: var(--surface); }
+.source-note { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.nutrition-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; border: 1px solid rgba(54, 91, 54, .12); border-radius: 15px; background: var(--surface); color: var(--muted); font-size: 10px; }
+.nutrition-preview strong { grid-column: span 2; color: var(--ink); font-size: 18px; letter-spacing: -.04em; }
+.custom-food-form { border: 1px solid var(--line); background: #fbfcfa; }
+.custom-food-form h3 { margin: 4px 0 0; font-size: 13px; }
+.form-grid-four { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.daily-calorie-total { display: flex; align-items: baseline; gap: 8px; }
+.daily-calorie-total strong { font-size: 34px; letter-spacing: -.06em; }
+.daily-calorie-total > span { color: var(--muted); font-size: 10px; }
+.daily-macro-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.daily-macro-grid > span { display: grid; gap: 5px; padding: 10px; border-radius: 13px; background: var(--surface-soft); color: var(--muted); font-size: 9px; }
+.daily-macro-grid strong { color: var(--ink); font-size: 12px; }
+.daily-entry-list { display: grid; }
+.daily-entry { min-width: 0; display: flex; align-items: center; gap: 9px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.daily-entry:last-child { border: 0; }
+.daily-entry-main { flex: 1 1 auto; }
+.daily-entry > strong { flex: 0 0 auto; text-align: right; font-size: 11px; }
+.daily-entry > strong small { display: block; }
+.meal-badge { width: 29px; height: 29px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 10px; background: var(--lime-pale); color: var(--green); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.intake-progress { height: 7px; overflow: hidden; margin: 14px 0 2px; border-radius: 99px; background: var(--surface-soft); }
+.intake-progress span { height: 100%; display: block; border-radius: inherit; background: var(--lime-strong); transition: width .25s ease; }
 .form-message { margin: 0; color: var(--green); font-size: 11px; }
 .feature-empty { min-height: 52vh; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; max-width: 520px; margin: 0 auto; padding: 40px 22px; }
 .feature-icon { width: 64px; height: 64px; display: grid; place-items: center; margin: 23px 0 12px; border-radius: 22px; background: var(--lime-pale); color: var(--green); font-size: 30px; font-weight: 600; }
@@ -193,7 +233,9 @@ a { color: inherit; text-decoration: none; }
   .topbar { padding: 10px 28px; }
   .topbar-date { display: block; }
   .progress-lower-grid { grid-template-columns: 1.1fr .9fr; gap: 16px; }
+  .tracking-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form-grid-four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .form-card { padding: 23px; }
   .auth-page { grid-template-columns: minmax(0, 1.1fr) minmax(330px, .9fr); max-width: 1100px; margin: auto; padding: 36px; }
   .auth-marketing { min-height: min(72vh, 650px); padding: 24px; }

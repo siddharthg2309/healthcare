@@ -22,6 +22,13 @@
       "when": 1792508773377,
       "tag": "0002_long_scrambler",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792511076579,
+      "tag": "0003_exotic_cerise",
+      "breakpoints": true
     }
   ]
 }

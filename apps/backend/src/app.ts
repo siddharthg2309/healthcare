@@ -1,13 +1,18 @@
 import { timingSafeEqual } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { privateUploads, syncChanges, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { catalogFoods, privateUploads, syncChanges, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
+  activityLogRecordSchema,
   acceptGoalRequestSchema,
+  createActivityLogRequestSchema,
+  createCustomFoodRequestSchema,
+  createFoodLogRequestSchema,
   createMeasurementRequestSchema,
+  foodLogRecordSchema,
   goalProposalRequestSchema,
   goalSchema,
   profileSchema,
@@ -87,6 +92,48 @@ const requireSession = createMiddleware<BackendEnv>(async (c, next) => {
 
 app.use("/v1/*", requireSession);
 
+function nutritionValue(value: string | number): number {
+  return Number(value);
+}
+
+function roundNutrition(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function localDateInZone(value: string, timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "00";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+async function appendSyncChange(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  userId: string,
+  entity: "food_log" | "activity_log",
+  recordId: string,
+  data: Record<string, unknown>,
+) {
+  await tx.insert(userSyncCounters).values({ userId, cursor: 0 }).onConflictDoNothing();
+  const [counter] = await tx.update(userSyncCounters).set({
+    cursor: sql`${userSyncCounters.cursor} + 1`,
+  }).where(eq(userSyncCounters.userId, userId)).returning({ cursor: userSyncCounters.cursor });
+  if (!counter) throw new Error("sync_cursor_update_failed");
+  await tx.insert(syncChanges).values({
+    userId,
+    cursor: counter.cursor,
+    entity,
+    recordId,
+    version: 1,
+    data,
+    deleted: false,
+  });
+}
+
 app.get("/v1/me", async (c) => {
   const userId = c.get("session").user.id;
   const result = await db.transaction(async (tx) => {
@@ -119,6 +166,294 @@ app.put("/v1/me", async (c) => {
   });
   if (!result) return c.json({ error: "profile_save_failed" }, 500);
   return c.json({ profile: result.data, updatedAt: result.updatedAt });
+});
+
+app.get("/v1/foods", async (c) => {
+  const query = new URL(c.req.url).searchParams.get("query")?.trim() ?? "";
+  if (query.length > 80) return c.json({ error: "search_query_too_long" }, 400);
+  const userId = c.get("session").user.id;
+  const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const shared = await tx.select().from(catalogFoods).where(and(
+      eq(catalogFoods.active, true),
+      ilike(catalogFoods.name, pattern),
+    )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(30);
+    const personal = await tx.select().from(userFoods).where(ilike(userFoods.name, pattern))
+      .orderBy(asc(userFoods.name)).limit(20);
+    return { shared, personal };
+  });
+  const foods = [
+    ...result.shared.map((food) => ({
+      id: food.id,
+      name: food.name,
+      category: food.category,
+      source: "shared_catalog" as const,
+      sourceNote: food.source,
+      reviewed: food.reviewed,
+      caloriesKcalPer100g: nutritionValue(food.caloriesKcalPer100g),
+      proteinGPer100g: nutritionValue(food.proteinGPer100g),
+      carbohydrateGPer100g: nutritionValue(food.carbohydrateGPer100g),
+      fatGPer100g: nutritionValue(food.fatGPer100g),
+    })),
+    ...result.personal.map((food) => ({
+      id: food.id,
+      name: food.name,
+      category: food.category,
+      source: "personal" as const,
+      sourceNote: food.sourceNote,
+      reviewed: false,
+      caloriesKcalPer100g: nutritionValue(food.caloriesKcalPer100g),
+      proteinGPer100g: nutritionValue(food.proteinGPer100g),
+      carbohydrateGPer100g: nutritionValue(food.carbohydrateGPer100g),
+      fatGPer100g: nutritionValue(food.fatGPer100g),
+    })),
+  ];
+  return c.json({ foods });
+});
+
+app.post("/v1/foods/custom", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = createCustomFoodRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_custom_food" }, 400);
+  const userId = c.get("session").user.id;
+  const food = parsed.data;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select().from(userFoods).where(and(
+      eq(userFoods.userId, userId),
+      eq(userFoods.id, food.foodId),
+    )).limit(1);
+    if (existing) {
+      const same = existing.name === food.name
+        && existing.category === food.category
+        && nutritionValue(existing.caloriesKcalPer100g) === food.caloriesKcalPer100g
+        && nutritionValue(existing.proteinGPer100g) === food.proteinGPer100g
+        && nutritionValue(existing.carbohydrateGPer100g) === food.carbohydrateGPer100g
+        && nutritionValue(existing.fatGPer100g) === food.fatGPer100g;
+      return { status: same ? "saved" as const : "conflict" as const, food: existing, idempotent: same };
+    }
+    const [saved] = await tx.insert(userFoods).values({
+      id: food.foodId,
+      userId,
+      name: food.name,
+      category: food.category,
+      caloriesKcalPer100g: String(food.caloriesKcalPer100g),
+      proteinGPer100g: String(food.proteinGPer100g),
+      carbohydrateGPer100g: String(food.carbohydrateGPer100g),
+      fatGPer100g: String(food.fatGPer100g),
+      sourceNote: food.sourceNote,
+      updatedAt: new Date(),
+    }).returning();
+    if (!saved) throw new Error("custom_food_save_failed");
+    return { status: "saved" as const, food: saved, idempotent: false };
+  });
+  if (result.status === "conflict") return c.json({ error: "food_id_conflict" }, 409);
+  return c.json({
+    food: {
+      id: result.food.id,
+      name: result.food.name,
+      category: result.food.category,
+      source: "personal",
+      sourceNote: result.food.sourceNote,
+      reviewed: false,
+      caloriesKcalPer100g: nutritionValue(result.food.caloriesKcalPer100g),
+      proteinGPer100g: nutritionValue(result.food.proteinGPer100g),
+      carbohydrateGPer100g: nutritionValue(result.food.carbohydrateGPer100g),
+      fatGPer100g: nutritionValue(result.food.fatGPer100g),
+    },
+    idempotent: result.idempotent,
+  }, result.idempotent ? 200 : 201);
+});
+
+app.post("/v1/food-logs", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = createFoodLogRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_log" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      eq(userRecords.recordId, parsed.data.logId),
+      eq(userRecords.deleted, false),
+    )).limit(1);
+    if (existing) {
+      const prior = foodLogRecordSchema.safeParse(existing.data);
+      const same = prior.success
+        && prior.data.foodId === parsed.data.foodId
+        && prior.data.occurredAt === parsed.data.occurredAt
+        && prior.data.mealType === parsed.data.mealType
+        && prior.data.quantityGrams === parsed.data.quantityGrams;
+      return { status: same ? "saved" as const : "conflict" as const, data: existing.data, idempotent: same };
+    }
+
+    const [shared] = await tx.select().from(catalogFoods).where(and(
+      eq(catalogFoods.id, parsed.data.foodId),
+      eq(catalogFoods.active, true),
+    )).limit(1);
+    const [personal] = shared ? [] : await tx.select().from(userFoods).where(and(
+      eq(userFoods.userId, userId),
+      eq(userFoods.id, parsed.data.foodId),
+    )).limit(1);
+    const food = shared ?? personal;
+    if (!food) return { status: "food_not_found" as const };
+    const nutritionPer100g = {
+      caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
+      proteinG: nutritionValue(food.proteinGPer100g),
+      carbohydrateG: nutritionValue(food.carbohydrateGPer100g),
+      fatG: nutritionValue(food.fatGPer100g),
+    };
+    const multiplier = parsed.data.quantityGrams / 100;
+    const data = foodLogRecordSchema.parse({
+      foodId: food.id,
+      foodSource: shared ? "shared_catalog" : "personal",
+      foodName: food.name,
+      category: food.category,
+      occurredAt: parsed.data.occurredAt,
+      mealType: parsed.data.mealType,
+      quantityGrams: parsed.data.quantityGrams,
+      nutritionPer100g,
+      nutritionTotal: {
+        caloriesKcal: roundNutrition(nutritionPer100g.caloriesKcal * multiplier),
+        proteinG: roundNutrition(nutritionPer100g.proteinG * multiplier),
+        carbohydrateG: roundNutrition(nutritionPer100g.carbohydrateG * multiplier),
+        fatG: roundNutrition(nutritionPer100g.fatG * multiplier),
+      },
+    });
+    await tx.insert(userRecords).values({
+      userId,
+      entity: "food_log",
+      recordId: parsed.data.logId,
+      version: 1,
+      data,
+      deleted: false,
+      serverUpdatedAt: new Date(),
+    });
+    await appendSyncChange(tx, userId, "food_log", parsed.data.logId, data);
+    return { status: "saved" as const, data, idempotent: false };
+  });
+  if (result.status === "food_not_found") return c.json({ error: "food_not_found" }, 404);
+  if (result.status === "conflict") return c.json({ error: "food_log_id_conflict" }, 409);
+  return c.json({ id: parsed.data.logId, data: result.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+});
+
+app.post("/v1/activity-logs", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid_request" }, 400);
+  }
+  const parsed = createActivityLogRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_activity_log" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [existing] = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.recordId, parsed.data.activityId),
+      eq(userRecords.deleted, false),
+    )).limit(1);
+    if (existing) {
+      const prior = activityLogRecordSchema.safeParse(existing.data);
+      const same = prior.success && JSON.stringify(prior.data) === JSON.stringify({
+        activityType: parsed.data.activityType,
+        occurredAt: parsed.data.occurredAt,
+        durationMinutes: parsed.data.durationMinutes,
+        steps: parsed.data.steps,
+        notes: parsed.data.notes,
+      });
+      return { status: same ? "saved" as const : "conflict" as const, data: existing.data, idempotent: same };
+    }
+    const data = activityLogRecordSchema.parse({
+      activityType: parsed.data.activityType,
+      occurredAt: parsed.data.occurredAt,
+      durationMinutes: parsed.data.durationMinutes,
+      steps: parsed.data.steps,
+      notes: parsed.data.notes,
+    });
+    await tx.insert(userRecords).values({
+      userId,
+      entity: "activity_log",
+      recordId: parsed.data.activityId,
+      version: 1,
+      data,
+      deleted: false,
+      serverUpdatedAt: new Date(),
+    });
+    await appendSyncChange(tx, userId, "activity_log", parsed.data.activityId, data);
+    return { status: "saved" as const, data, idempotent: false };
+  });
+  if (result.status === "conflict") return c.json({ error: "activity_log_id_conflict" }, 409);
+  return c.json({ id: parsed.data.activityId, data: result.data, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
+});
+
+app.get("/v1/days/:date", async (c) => {
+  const date = c.req.param("date");
+  const parsedDate = new Date(`${date}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
+    return c.json({ error: "invalid_local_date" }, 400);
+  }
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [profile] = await tx.select({ data: userProfiles.data }).from(userProfiles)
+      .where(eq(userProfiles.userId, userId)).limit(1);
+    const savedProfile = profileSchema.safeParse(profile?.data);
+    const timezone = savedProfile.success ? savedProfile.data.timezone : "UTC";
+    const foodRecords = await tx.select({ id: userRecords.recordId, data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      eq(userRecords.deleted, false),
+    ));
+    const activityRecords = await tx.select({ id: userRecords.recordId, data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.deleted, false),
+    ));
+    return { timezone, foodRecords, activityRecords };
+  });
+  let timezone = result.timezone;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+  } catch {
+    timezone = "UTC";
+  }
+  const foodLogs = result.foodRecords.flatMap((record) => {
+    const parsed = foodLogRecordSchema.safeParse(record.data);
+    return parsed.success && localDateInZone(parsed.data.occurredAt, timezone) === date
+      ? [{ id: record.id, data: parsed.data }]
+      : [];
+  }).sort((a, b) => a.data.occurredAt.localeCompare(b.data.occurredAt));
+  const activityLogs = result.activityRecords.flatMap((record) => {
+    const parsed = activityLogRecordSchema.safeParse(record.data);
+    return parsed.success && localDateInZone(parsed.data.occurredAt, timezone) === date
+      ? [{ id: record.id, data: parsed.data }]
+      : [];
+  }).sort((a, b) => a.data.occurredAt.localeCompare(b.data.occurredAt));
+  const foodTotals = foodLogs.reduce((totals, item) => ({
+    caloriesKcal: roundNutrition(totals.caloriesKcal + item.data.nutritionTotal.caloriesKcal),
+    proteinG: roundNutrition(totals.proteinG + item.data.nutritionTotal.proteinG),
+    carbohydrateG: roundNutrition(totals.carbohydrateG + item.data.nutritionTotal.carbohydrateG),
+    fatG: roundNutrition(totals.fatG + item.data.nutritionTotal.fatG),
+  }), { caloriesKcal: 0, proteinG: 0, carbohydrateG: 0, fatG: 0 });
+  const steps = activityLogs.filter((item) => item.data.activityType === "steps")
+    .reduce((total, item) => total + (item.data.steps ?? 0), 0);
+  const workoutsCompleted = activityLogs.filter((item) => ["strength", "cardio", "walk"].includes(item.data.activityType)).length;
+  return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted });
 });
 
 app.post("/v1/goals/proposal", async (c) => {
