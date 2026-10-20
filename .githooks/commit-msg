@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Require short, descriptive Conventional Commit subjects."""
+
+import re
+import sys
+from pathlib import Path
+
+message = Path(sys.argv[1]).read_text(encoding="utf-8")
+lines = message.splitlines()
+subject = lines[0] if lines else ""
+pattern = r"(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-zA-Z0-9._/-]+\))?!?: \S.*"
+
+if len(subject) > 72 or not re.fullmatch(pattern, subject):
+    print(
+        "Use a Conventional Commit subject of at most 72 characters, "
+        "for example: feat(food): add manual meal logging",
+        file=sys.stderr,
+    )
+    sys.exit(1)
