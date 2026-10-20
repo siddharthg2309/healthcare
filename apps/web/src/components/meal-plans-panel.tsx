@@ -15,6 +15,22 @@ const mealLabels: Record<string, string> = {
   snack: "Snack",
 };
 
+type SwapFoodOption = {
+  id: string;
+  name: string;
+  category: string;
+  source: "shared_catalog" | "personal";
+  reviewed: boolean;
+  caloriesKcalPer100g: number;
+  proteinGPer100g: number;
+  carbohydrateGPer100g: number;
+  fatGPer100g: number;
+};
+
+type SwapTarget = { dayIndex: number; mealIndex: number; itemIndex: number };
+type MealPlanDay = MealPlanVersion["data"]["days"][number];
+type MealPlanMeal = MealPlanDay["meals"][number];
+
 function mealPlanError(error: unknown): string {
   if (error instanceof ApiError) {
     const messages: Record<string, string> = {
@@ -23,6 +39,9 @@ function mealPlanError(error: unknown): string {
       meal_planning_not_available_for_this_profile: "Meal planning is not available for this profile. Food logging remains available.",
       meal_plan_food_metadata_required: "Add reviewed food and allergen tags to the catalog before asking for a plan with dietary preferences or restrictions.",
       meal_plan_catalog_coverage_insufficient: "The reviewed catalog needs more foods before it can build a useful week. Add more reviewed entries and try again.",
+      meal_plan_edit_invalid: "This change puts a day outside the plan's nutrition range. Try a different food or adjust its portion.",
+      meal_plan_food_not_available: "That food is no longer available in your catalog. Choose another food and save again.",
+      meal_plan_version_conflict: "This draft changed elsewhere. Reload your meal plans before making more edits.",
       meal_planning_not_configured: "Meal planning is not enabled on the server yet. Add the OpenRouter key in Vercel environment settings.",
       ai_daily_limit_reached: "You have reached the shared AI limit for the last 24 hours. Manual food and activity logging still work; try again later.",
       meal_plan_provider_unavailable: "The meal planner could not reach the model. Try again in a little while.",
@@ -42,6 +61,44 @@ function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+function nutritionRound(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function recalculateDay(day: MealPlanDay, meals: MealPlanMeal[]): MealPlanDay {
+  const updatedMeals = meals.map((meal) => ({
+    ...meal,
+    items: meal.items.map((item) => {
+      const multiplier = item.quantityGrams / 100;
+      return {
+        ...item,
+        nutritionTotal: {
+          caloriesKcal: nutritionRound(item.nutritionPer100g.caloriesKcal * multiplier),
+          proteinG: nutritionRound(item.nutritionPer100g.proteinG * multiplier),
+          carbohydrateG: nutritionRound(item.nutritionPer100g.carbohydrateG * multiplier),
+          fatG: nutritionRound(item.nutritionPer100g.fatG * multiplier),
+        },
+      };
+    }),
+  }));
+  const totals = updatedMeals.flatMap((meal) => meal.items).reduce((sum, item) => ({
+    caloriesKcal: sum.caloriesKcal + item.nutritionTotal.caloriesKcal,
+    proteinG: sum.proteinG + item.nutritionTotal.proteinG,
+    carbohydrateG: sum.carbohydrateG + item.nutritionTotal.carbohydrateG,
+    fatG: sum.fatG + item.nutritionTotal.fatG,
+  }), { caloriesKcal: 0, proteinG: 0, carbohydrateG: 0, fatG: 0 });
+  return {
+    ...day,
+    meals: updatedMeals,
+    totals: {
+      caloriesKcal: nutritionRound(totals.caloriesKcal),
+      proteinG: nutritionRound(totals.proteinG),
+      carbohydrateG: nutritionRound(totals.carbohydrateG),
+      fatG: nutritionRound(totals.fatG),
+    },
+  };
+}
+
 export function MealPlansPanel({ startDate }: { startDate: string }) {
   const [plans, setPlans] = useState<MealPlanVersion[]>([]);
   const [draft, setDraft] = useState<MealPlanVersion | null>(null);
@@ -52,11 +109,43 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
   const [selectedDate, setSelectedDate] = useState(startDate);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [swapTarget, setSwapTarget] = useState<SwapTarget | null>(null);
+  const [swapQuery, setSwapQuery] = useState("");
+  const [swapResults, setSwapResults] = useState<SwapFoodOption[]>([]);
+  const [swapBusy, setSwapBusy] = useState(false);
+  const [swapError, setSwapError] = useState("");
 
   const activePlan = useMemo(() => plans.find((plan) => plan.status === "active") ?? null, [plans]);
   const visiblePlan = draft ?? activePlan;
   const selectedDay = visiblePlan?.data.days.find((day) => day.date === selectedDate) ?? visiblePlan?.data.days[0] ?? null;
   const history = plans.filter((plan) => plan.status === "superseded" || plan.status === "archived");
+  const availableSwapResults = swapResults.filter((food) => food.source === "personal" || food.reviewed);
+
+  useEffect(() => {
+    if (!swapTarget || swapQuery.trim().length < 2) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSwapBusy(true);
+      setSwapError("");
+      const query = new URLSearchParams({ query: swapQuery.trim() });
+      void requestJson<{ foods: SwapFoodOption[] }>(`/v1/foods?${query.toString()}`, { signal: controller.signal })
+        .then((response) => {
+          if (!controller.signal.aborted) setSwapResults(response.foods);
+        })
+        .catch((caught: unknown) => {
+          if (controller.signal.aborted || (caught instanceof DOMException && caught.name === "AbortError")) return;
+          setSwapResults([]);
+          setSwapError(caught instanceof Error ? caught.message : "Could not search foods.");
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSwapBusy(false);
+        });
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [swapQuery, swapTarget]);
 
   async function loadPlans() {
     const response = await requestJson<unknown>("/v1/meal-plans", { cache: "no-store" });
@@ -67,6 +156,11 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
     const pending = ordered.find((plan) => plan.status === "draft") ?? null;
     setDraft(pending);
     setDirty(false);
+    setSwapTarget(null);
+    setSwapQuery("");
+    setSwapResults([]);
+    setSwapBusy(false);
+    setSwapError("");
     if (pending) setSelectedDate(pending.data.days[0]?.date ?? startDate);
     else if (ordered[0]) setSelectedDate(ordered[0].data.days[0]?.date ?? startDate);
   }
@@ -94,16 +188,51 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
   function updateItem(dayIndex: number, mealIndex: number, itemIndex: number, grams: number) {
     setDraft((current) => {
       if (!current) return current;
-      const days = current.data.days.map((day, index) => index !== dayIndex ? day : {
-        ...day,
-        meals: day.meals.map((meal, currentMeal) => currentMeal !== mealIndex ? meal : {
+      const days = current.data.days.map((day, index) => {
+        if (index !== dayIndex) return day;
+        const meals = day.meals.map((meal, currentMeal) => currentMeal !== mealIndex ? meal : {
           ...meal,
           items: meal.items.map((item, currentItem) => currentItem !== itemIndex ? item : { ...item, quantityGrams: grams }),
-        }),
+        });
+        return recalculateDay(day, meals);
       });
       return { ...current, data: { ...current.data, days } };
     });
     setDirty(true);
+    setNotice("");
+  }
+
+  function swapItem(target: SwapTarget, food: SwapFoodOption) {
+    setDraft((current) => {
+      if (!current) return current;
+      const days = current.data.days.map((day, dayIndex) => {
+        if (dayIndex !== target.dayIndex) return day;
+        const meals = day.meals.map((meal, mealIndex) => mealIndex !== target.mealIndex ? meal : {
+          ...meal,
+          items: meal.items.map((item, itemIndex) => itemIndex !== target.itemIndex ? item : {
+            ...item,
+            foodId: food.id,
+            foodSource: food.source,
+            foodName: food.name,
+            category: food.category,
+            nutritionPer100g: {
+              caloriesKcal: food.caloriesKcalPer100g,
+              proteinG: food.proteinGPer100g,
+              carbohydrateG: food.carbohydrateGPer100g,
+              fatG: food.fatGPer100g,
+            },
+          }),
+        });
+        return recalculateDay(day, meals);
+      });
+      return { ...current, data: { ...current.data, days } };
+    });
+    setDirty(true);
+    setSwapTarget(null);
+    setSwapQuery("");
+    setSwapResults([]);
+    setSwapBusy(false);
+    setSwapError("");
     setNotice("");
   }
 
@@ -233,26 +362,56 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
             {selectedDay.meals.map((meal, mealIndex) => <article className="meal-plan-meal" key={`${selectedDay.date}:${meal.mealType}:${mealIndex}`}>
               <div className="meal-plan-meal-heading"><span className="meal-badge">{mealLabels[meal.mealType]?.[0]}</span><div><h4>{mealLabels[meal.mealType] ?? meal.mealType}</h4>{meal.note ? <p>{meal.note}</p> : null}</div></div>
               <ul>
-                {meal.items.map((item, itemIndex) => <li key={`${item.foodId}:${itemIndex}`}>
-                  <span><strong>{item.foodName}</strong><small>{Math.round(item.nutritionTotal.caloriesKcal)} kcal · P {round(item.nutritionTotal.proteinG)} · C {round(item.nutritionTotal.carbohydrateG)} · F {round(item.nutritionTotal.fatG)} g</small></span>
-                  {draft ? <label className="meal-plan-grams"><span className="sr-only">{item.foodName} quantity in grams</span><input type="number" min="1" max="1500" step="1" value={item.quantityGrams} onChange={(event) => {
-                    const quantity = event.target.value ? Number(event.target.value) : 0;
-                    const dayIndex = visiblePlan.data.days.findIndex((day) => day.date === selectedDay.date);
-                    updateItem(dayIndex, mealIndex, itemIndex, quantity);
-                  }} /><small>g</small></label> : <span className="meal-plan-amount">{Math.round(item.quantityGrams)} g</span>}
-                </li>)}
+                {meal.items.map((item, itemIndex) => {
+                  const dayIndex = visiblePlan.data.days.findIndex((day) => day.date === selectedDay.date);
+                  const target = { dayIndex, mealIndex, itemIndex };
+                  const isSwapOpen = swapTarget?.dayIndex === dayIndex && swapTarget.mealIndex === mealIndex && swapTarget.itemIndex === itemIndex;
+                  return <li key={`${item.foodId}:${itemIndex}`}>
+                    <div className="meal-plan-item-row">
+                      <span><strong>{item.foodName}</strong><small>{Math.round(item.nutritionTotal.caloriesKcal)} kcal · P {round(item.nutritionTotal.proteinG)} · C {round(item.nutritionTotal.carbohydrateG)} · F {round(item.nutritionTotal.fatG)} g</small></span>
+                      {draft ? <div className="meal-plan-item-controls">
+                        <label className="meal-plan-grams"><span className="sr-only">{item.foodName} quantity in grams</span><input type="number" min="1" max="1500" step="1" value={item.quantityGrams} onChange={(event) => {
+                          const quantity = event.target.value ? Number(event.target.value) : 0;
+                          updateItem(dayIndex, mealIndex, itemIndex, quantity);
+                        }} /><small>g</small></label>
+                        <button className="meal-plan-swap-button" type="button" aria-expanded={isSwapOpen} onClick={() => {
+                          setSwapTarget(isSwapOpen ? null : target);
+                          setSwapQuery("");
+                          setSwapResults([]);
+                          setSwapBusy(false);
+                          setSwapError("");
+                        }}>{isSwapOpen ? "Close" : "Swap"}</button>
+                      </div> : <span className="meal-plan-amount">{Math.round(item.quantityGrams)} g</span>}
+                    </div>
+                    {isSwapOpen ? <div className="meal-plan-swap-picker">
+                      <label><span>Search your food catalog</span><input autoFocus value={swapQuery} maxLength={80} onChange={(event) => {
+                        const query = event.target.value;
+                        setSwapQuery(query);
+                        setSwapResults([]);
+                        setSwapBusy(query.trim().length >= 2);
+                        setSwapError("");
+                      }} placeholder="Try rice, paneer, dosa…" /></label>
+                      {swapQuery.trim().length >= 2 && swapBusy ? <small role="status">Searching…</small> : null}
+                      {swapQuery.trim().length >= 2 && swapError ? <small className="form-error" role="alert">{swapError}</small> : null}
+                      {!swapBusy && swapQuery.trim().length >= 2 && !availableSwapResults.length && !swapError ? <small>No matching reviewed or personal foods. Add it to your catalog first.</small> : null}
+                      {availableSwapResults.length ? <ul aria-label="Matching foods">{availableSwapResults.map((food) => <li key={`${food.source}:${food.id}`}>
+                        <button type="button" onClick={() => swapItem(target, food)}><span><strong>{food.name}</strong><small>{food.source === "personal" ? "Your food" : "Shared catalog"} · {Math.round(food.caloriesKcalPer100g)} kcal per 100 g</small></span><span aria-hidden="true">↗</span></button>
+                      </li>)}</ul> : null}
+                    </div> : null}
+                  </li>;
+                })}
               </ul>
             </article>)}
           </div>
         </div> : null}
 
-        {draft ? <div className="meal-plan-review-note"><span aria-hidden="true">i</span><p>Check each dish and amount. Nutrition comes from saved catalog values. This plan will not be added to your food log.</p></div> : null}
+        {draft ? <div className="meal-plan-review-note"><span aria-hidden="true">i</span><p>Swap foods or adjust portions, then save. The server recalculates nutrition and checks the plan ranges. Approval never adds meals to your food log.</p></div> : null}
         {draft ? <div className="meal-plan-actions">
-          {dirty ? <button className="button button-secondary" type="button" disabled={busy} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save portion edits"}</button> : null}
+          {dirty ? <button className="button button-secondary" type="button" disabled={busy} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft edits"}</button> : null}
           <button className="button button-secondary" type="button" disabled={busy || dirty} onClick={() => void decide("reject")}>Reject draft</button>
           <button className="button button-primary" type="button" disabled={busy || dirty} onClick={() => void decide("approve")}>{busy ? "Saving…" : "Approve plan"}</button>
         </div> : null}
-        {dirty ? <p className="field-note">Save your changes to recalculate daily nutrition before approval.</p> : null}
+        {dirty ? <p className="field-note">Save to confirm the catalog foods and nutrition ranges on the server before approval.</p> : null}
       </div> : null}
 
       {activePlan && !draft ? <div className="panel meal-plan-create meal-plan-create-compact"><div><strong>Create a revision</strong><span>The approved plan stays active until you approve the new draft.</span></div><label className="field"><span>First day</span><input type="date" value={planStartDate} min={startDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label><button className="button button-primary" type="button" disabled={busy} onClick={() => void generatePlan()}>{busy ? "Building…" : "Create draft"}</button></div> : null}
