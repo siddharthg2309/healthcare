@@ -74,7 +74,7 @@ Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_
 | Durable background AI jobs | `JOB_DISPATCH_SECRET` | Configure only when a separate authenticated worker/dispatcher is deployed. Generate with `openssl rand -hex 32`. |
 | Private food-photo storage | `STORAGE_PROVIDER`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_FORCE_PATH_STYLE`, `UPLOAD_MAX_BYTES` | Configure after selecting a private S3-compatible storage provider. Keep credentials server-only; use short-lived upload permissions and retention cleanup. |
 | Google Calendar connection and workout sync | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Optional. The integration is implemented; configure these only if you want Calendar sync. Keep all four values server-side. |
-| Curated catalog imports | `USDA_API_KEY` | Optional; put it in the ignored local `.env` only when running the one-time catalog import. It is not needed by the deployed app and should not be added to Vercel. |
+| Curated catalog imports | `USDA_API_KEY` | Optional; needed only for individual USDA search/import commands. The bulk FNDDS seed reads a locally downloaded public dataset and does not need this key. Neither is needed by the deployed app; do not add the key to Vercel. |
 | Email verification/password recovery | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Add after choosing an email provider and implementing those email flows. |
 
 The LangGraph checkpoint store uses `DATABASE_URL`; it does not need a separate database URL. Leave unused integration values empty. Per-user AI quotas and daily cost limits are not implemented yet. The meal-plan screen currently supports review, portion edits, approval, rejection, and history; it does not support food swaps yet. Generation pauses when a profile has diet preferences or restrictions because the catalog does not yet store reviewed diet/allergen tags. Do not use generated plans for a restricted diet until that catalog support is completed.
@@ -110,6 +110,17 @@ npm run catalog:aliases -- --food-id <catalog-id> --aliases "dosai, thosai"
 ```
 
 Use only a matching generic Foundation, SR Legacy, or Survey food. Check the description and per-100-g calories/macros before publishing. Imports remain invisible to food search until published. Aliases are search labels only and do not change nutrition data. USDA FoodData Central data are CC0/public domain; keep attribution and the FDC ID in the catalog. The Indian Food Composition Tables have separate reuse restrictions: their official publication prohibits storing/reproducing the data electronically for a product without prior written permission. Do not bulk-import IFCT values without that permission. [USDA API and license](https://fdc.nal.usda.gov/api-guide/) · [ICMR-NIN IFCT 2017 terms](https://www.nin.res.in/ebooks/IFCT2017_16122024.pdf)
+
+To seed a larger generic food catalog without making one API call per food, download USDA's FNDDS 2021–2023 JSON archive and extract its `surveyDownload.json` outside the repository:
+
+```bash
+curl -fL -o /tmp/healthcare-fndds.zip https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_survey_food_json_2024-10-31.zip
+unzip -p /tmp/healthcare-fndds.zip surveyDownload.json > /tmp/surveyDownload.json
+npm run catalog:seed:fndds -- --file /tmp/surveyDownload.json --dry-run
+npm run catalog:seed:fndds -- --file /tmp/surveyDownload.json
+```
+
+The import validates the FNDDS data type, FDC IDs, and the four required macro values, skips records missing or outside the app's safety bounds, and is idempotent by source and FDC ID. It imports generic FNDDS foods for manual search/logging as **not reviewed**; AI meal-plan generation continues to use reviewed entries only. The importer adds search aliases for selected Indian dishes (such as idli, dosa, dal, roti, and biryani), but FNDDS is a US dietary-survey dataset, not a complete Indian food table. Use personal foods for household recipes or items whose values differ, and extend the shared catalog only with checked, sourced entries. The archive is about 3.7 MB compressed; the extracted file is temporary, contains no user data, and should not be committed. USDA data are CC0 and should remain attributed to FoodData Central. See [USDA's download page](https://fdc.nal.usda.gov/download-datasets/).
 
 ## Phone and PWA behavior
 

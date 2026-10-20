@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { and, eq } from "drizzle-orm";
 import { catalogFoods } from "@healthcare/database/schema";
 import { db, pool } from "@healthcare/database";
@@ -6,6 +7,44 @@ import { db, pool } from "@healthcare/database";
 const allowedDataTypes = ["Foundation", "SR Legacy", "Survey (FNDDS)"] as const;
 const allowedCategories = ["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"] as const;
 type AllowedDataType = (typeof allowedDataTypes)[number];
+const fnddsSource = "USDA FoodData Central (Survey (FNDDS))";
+
+type FnddsFood = {
+  dataType?: string;
+  description?: string;
+  fdcId?: number;
+  foodNutrients?: Array<{ nutrient?: { id?: number }; amount?: number }>;
+  wweiaFoodCategory?: { wweiaFoodCategoryDescription?: string };
+};
+
+const fnddsAliases: Record<number, string[]> = {
+  2705686: ["phirni", "firni"],
+  2705700: ["burfi", "barfi"],
+  2705740: ["paneer", "paneer cheese"],
+  2706437: ["chicken curry"],
+  2706438: ["chicken curry with rice"],
+  2706460: ["fish curry"],
+  2706461: ["fish curry with rice"],
+  2706490: ["meat biryani", "mutton biryani"],
+  2706538: ["chicken biryani", "chicken biriyani"],
+  2707427: ["dal", "daal", "dahl"],
+  2707430: ["sambar", "sambhar"],
+  2707431: ["lentil curry", "dal curry", "daal curry"],
+  2707432: ["lentil curry with rice", "dal rice", "daal rice"],
+  2707613: ["naan", "nan bread"],
+  2707713: ["roti", "chapati", "chapatti", "chappatti", "phulka"],
+  2707714: ["puri", "poori"],
+  2707715: ["paratha", "parantha"],
+  2708346: ["idli", "idly"],
+  2708347: ["dosa", "dosai", "thosai", "plain dosa"],
+  2708730: ["samosa"],
+  2708985: ["vegetable biryani", "veg biryani", "vegetable biriyani"],
+  2709129: ["dosa with filling", "dosai with filling"],
+  2709631: ["palak paneer"],
+  2710066: ["pakora", "pakoda", "bhajiya"],
+  2710067: ["vegetable curry", "mixed vegetable curry"],
+  2710068: ["vegetable curry with rice", "mixed vegetable curry with rice"],
+};
 
 type SearchFood = {
   fdcId: number;
@@ -93,6 +132,121 @@ function aliasValues(canonicalName: string): string[] {
     seen.add(key);
     return true;
   });
+}
+
+function categoryForFnddsFood(food: FnddsFood): (typeof allowedCategories)[number] {
+  const category = food.wweiaFoodCategory?.wweiaFoodCategoryDescription?.toLocaleLowerCase() ?? "";
+  const name = food.description?.toLocaleLowerCase() ?? "";
+  const label = `${category} ${name}`;
+  if (/\b(?:beverages?|drinks?|coffee|tea|water|juice|smoothies?|liquor|wine|beer|cocktails?|milk shakes?)\b/.test(label)) {
+    return "beverage";
+  }
+  if (/\b(?:snacks?|chips?|cookies?|brownies?|cand(?:y|ies)|desserts?|ice cream|puddings?|pastr(?:y|ies)|cakes?|pies?|doughnuts?|popcorn|crackers?|pretzels?|cereal bars?|nuts and seeds|jams?, syrups?|toppings?)\b/.test(label)) {
+    return "snack";
+  }
+  if (/\b(?:mixed dish(?:es)?|sandwich(?:es)?|pizzas?|burgers?|tacos?|burritos?|soups?|salads?|curries?|biryanis?|pastas?|noodles?|meals?|dumplings?|sushi|fried rice|pancakes?|waffles?|stir-fry|potato mixtures?|vegetable dishes?)\b/.test(label)) {
+    return "prepared_meal";
+  }
+  return "ingredient";
+}
+
+function fnddsNutrition(food: FnddsFood): { calories: number; protein: number; carbs: number; fat: number } | null {
+  const values = new Map<number, number>();
+  for (const nutrient of food.foodNutrients ?? []) {
+    const id = nutrient.nutrient?.id;
+    if (id !== undefined && nutrient.amount !== undefined && Number.isFinite(nutrient.amount)) {
+      values.set(id, nutrient.amount);
+    }
+  }
+  const nutrition = {
+    calories: values.get(1008),
+    protein: values.get(1003),
+    carbs: values.get(1005),
+    fat: values.get(1004),
+  };
+  if (Object.values(nutrition).some((value) => value === undefined)) return null;
+  const complete = nutrition as Record<keyof typeof nutrition, number>;
+  if (complete.calories < 0 || complete.calories > 1000 || [complete.protein, complete.carbs, complete.fat].some((value) => value < 0 || value > 100)) {
+    return null;
+  }
+  return complete;
+}
+
+async function seedFndds() {
+  const filePath = option("file");
+  if (!filePath) {
+    throw new Error('Usage: npm run catalog:seed:fndds -- --file /path/to/surveyDownload.json [--dry-run]. Download the USDA FNDDS JSON archive and extract surveyDownload.json first.');
+  }
+
+  let source: unknown;
+  try {
+    source = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+  } catch {
+    throw new Error("The supplied catalog file could not be read as JSON. No foods were imported.");
+  }
+  if (!source || typeof source !== "object" || !Array.isArray((source as { SurveyFoods?: unknown }).SurveyFoods)) {
+    throw new Error("Expected the USDA FNDDS surveyDownload.json file with a SurveyFoods array. No foods were imported.");
+  }
+
+  const surveyFoods = (source as { SurveyFoods: FnddsFood[] }).SurveyFoods;
+  if (surveyFoods.length < 1000 || surveyFoods.length > 100_000) {
+    throw new Error("The SurveyFoods array size is outside the expected USDA FNDDS bounds. No foods were imported.");
+  }
+
+  const rows: Array<typeof catalogFoods.$inferInsert> = [];
+  const seenIds = new Set<number>();
+  let skippedMissingOrInvalid = 0;
+  for (const food of surveyFoods) {
+    if (food.dataType !== "Survey (FNDDS)" || !Number.isSafeInteger(food.fdcId) || !food.fdcId || seenIds.has(food.fdcId)) {
+      throw new Error("The source file contains an unexpected data type, invalid FDC ID, or duplicate ID. No foods were imported.");
+    }
+    seenIds.add(food.fdcId);
+    const name = food.description?.trim();
+    const nutrition = fnddsNutrition(food);
+    if (!name || name.length > 240 || !nutrition) {
+      skippedMissingOrInvalid += 1;
+      continue;
+    }
+    const aliases = fnddsAliases[food.fdcId] ?? [];
+    const normalizedAliases = [...new Map(aliases.map((alias) => [alias.toLocaleLowerCase(), alias])).values()]
+      .filter((alias) => alias.toLocaleLowerCase() !== name.toLocaleLowerCase());
+    rows.push({
+      name,
+      aliases: normalizedAliases,
+      category: categoryForFnddsFood(food),
+      caloriesKcalPer100g: nutrition.calories.toFixed(2),
+      proteinGPer100g: nutrition.protein.toFixed(2),
+      carbohydrateGPer100g: nutrition.carbs.toFixed(2),
+      fatGPer100g: nutrition.fat.toFixed(2),
+      source: fnddsSource,
+      externalSourceId: String(food.fdcId),
+      reviewed: false,
+      active: true,
+    });
+  }
+
+  const dryRun = process.argv.includes("--dry-run");
+  if (dryRun) {
+    console.log(`USDA FNDDS rows: ${surveyFoods.length}; importable generic foods: ${rows.length}; skipped for missing or unsafe macros: ${skippedMissingOrInvalid}.`);
+    console.log("Dry run only. No database rows were written.");
+    return;
+  }
+
+  const inserted = await db.transaction(async (tx) => {
+    let count = 0;
+    const batchSize = 250;
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const saved = await tx.insert(catalogFoods).values(rows.slice(offset, offset + batchSize))
+        .onConflictDoNothing({ target: [catalogFoods.source, catalogFoods.externalSourceId] })
+        .returning({ id: catalogFoods.id });
+      count += saved.length;
+    }
+    return count;
+  });
+
+  console.log(`USDA FNDDS rows: ${surveyFoods.length}; valid foods: ${rows.length}; skipped for missing or unsafe macros: ${skippedMissingOrInvalid}.`);
+  console.log(`${inserted} foods added to the shared catalog; ${rows.length - inserted} already existed and were left unchanged.`);
+  console.log("Imported foods are available for manual logging and remain marked not reviewed; they are excluded from AI meal-plan candidates until reviewed and published.");
 }
 
 function nutrientValues(food: FoodDetail) {
@@ -200,6 +354,7 @@ async function publishFood() {
 
 async function main() {
   const action = process.argv[2];
+  if (action === "seed-fndds") return await seedFndds();
   if (action === "search") return await searchFoods();
   if (action === "import") return await importFood();
   if (action === "publish") return await publishFood();

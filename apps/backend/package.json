@@ -14,6 +14,7 @@
     "invite:create": "tsx scripts/create-invitation.ts",
     "catalog:search": "tsx scripts/catalog-foods.ts search",
     "catalog:import": "tsx scripts/catalog-foods.ts import",
+    "catalog:seed:fndds": "tsx scripts/catalog-foods.ts seed-fndds",
     "catalog:publish": "tsx scripts/catalog-foods.ts publish",
     "catalog:aliases": "tsx scripts/catalog-foods.ts aliases",
     "typecheck": "tsc --noEmit",

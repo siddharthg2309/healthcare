@@ -955,9 +955,9 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 4 — Food catalog and manual food tracking
 
-**Current status:** Search and manual logging work for shared catalog rows and per-account custom foods. The search includes account-scoped favorites and recently logged foods across both catalog sources, matches curated alternate names, and supports per-account household portion shortcuts for shared or personal foods. Portion labels are validated against saved user-owned portion records and kept with the food log; nutrition still uses confirmed grams. A local USDA import/review/publish CLI supports curated aliases. The initial reviewed catalog itself, Indian-food coverage, recipes, and multi-item/copy-meal helpers remain outstanding.
+**Current status:** Search and manual logging work for shared catalog rows and per-account custom foods. The search includes account-scoped favorites and recently logged foods across both catalog sources, matches curated alternate names, and supports per-account household portion shortcuts for shared or personal foods. Portion labels are validated against saved user-owned portion records and kept with the food log; nutrition still uses confirmed grams. The curator CLI supports individual USDA imports and an idempotent bulk import from the public-domain FNDDS JSON archive; bulk rows stay available for manual logging but are not marked reviewed or used by AI meal planning. The import maps common names for a selected set of Indian dishes. This US survey source is a broad starter, not comprehensive Indian coverage. Reviewed regional-food coverage, recipes, and multi-item/copy-meal helpers remain outstanding.
 
-- Create import/curation tools and the initial reviewed catalog of common group foods.
+- Create import/curation tools and grow the reviewed catalog of common group foods from the generic FNDDS starter and individually verified entries.
 - Add aliases, preparation states, portions, provenance, and catalog quality labels.
 - Implement food search, recents/favorites, custom foods, and recipe creation.
 - Implement meal logs, quantities, copied meals, edits/deletes, and nutrition snapshots.
