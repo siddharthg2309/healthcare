@@ -1,131 +1,129 @@
 # Healthcare
 
-An Android app for food and workout tracking, reviewed meal/workout plans, and a clear view of progress against a personal goal and timeline. The intended audience is the owner and invited friends using a signed APK.
+An Android-first health and fitness app for food logging, activity tracking, and measured progress toward a personal goal. The intended distribution is a private signed APK for the owner and invited friends.
 
-**Current status: planning and repository setup.** Application source, package manifests, cloud resources, and an APK have not been created yet. The commands below set up this repository and its Git safeguards; they do not launch an app.
+**Current implementation: Phase 1 UI preview and Android build profiles.** The app launches into four navigable screens: Home, Food, Activity, and Progress. The values are sample data. Food logging, local storage, sign-in, syncing, AI plans, Health Connect, reminders, and Calendar are not wired up yet.
 
-The complete product specification, design system, database design, diagrams, implementation phases, and APK runbook are in [the implementation plan](docs/IMPLEMENTATION_PLAN.md).
+The product specification, design direction, data model, AI workflows, release approach, and phase gates are in [the implementation plan](docs/IMPLEMENTATION_PLAN.md). Phase 0 integration decisions and remaining device/account checks are in [the Phase 0 decision log](docs/decisions/0001-phase-0.md).
 
-## Product and architecture
+## Stack
 
-- Food catalog focused on foods the group actually eats, including Indian dishes, household portions, snacks, and custom recipes.
-- Manual and photo-assisted food logging, with user-confirmed quantities and catalog-derived calories/macros.
-- Goal graphs that distinguish the accepted plan, recorded measurements, actual trend, and an optional forecast.
-- Manual activity/workout logging and reviewed meal/workout plans.
-- Optional Health Connect, local reminders, and Google Calendar synchronization.
-- Offline records with safe synchronization when connectivity returns.
-- Clean white, black, gray, and lime/green interface.
+- Expo SDK 57, React Native, TypeScript, and Expo Router
+- Minimal black, white, gray, and lime/green design with Inter
+- Custom SVG progress chart to keep the goal path, measured trend, weigh-in points, and missing days explicit
+- Planned: Neon Postgres and server API, on-device SQLite, and server-side MiniMax M3 through OpenRouter
+- Planned: two bounded LangGraph workflows for reviewed meal and workout plans
 
-The planned stack is Expo/React Native with TypeScript, SQLite on the phone, Neon Postgres and backend services, and MiniMax M3 through OpenRouter. Two bounded LangGraph workflows handle meal and workout planning. Numeric nutrition and graph calculations belong to application code.
+The Android package ID and app display name are working values. Confirm them before the first signed APK is shared.
 
-## Repository setup
+## Run the UI preview
 
-### 1. Prerequisites
+### Prerequisites
 
-Install Git, Python 3, and [Gitleaks](https://github.com/gitleaks/gitleaks). The repository hooks use Python 3 to check filenames and commit messages, and Gitleaks to scan for credentials. On macOS with Homebrew:
+- Node.js 22.13 or later and npm 10 or later
+- For a physical Android phone, install Expo Go while the project remains on the Expo Go-compatible SDK template
+- For a local emulator, install Android Studio with an Android emulator and SDK
+
+Install dependencies from the repository root:
 
 ```bash
-brew install gitleaks
-git --version
-python3 --version
-gitleaks version
+npm install
 ```
 
-When the app is scaffolded, install the selected compatible Node.js/Expo toolchain. Android Studio and its Android SDK will be needed for local native builds; EAS can also build APKs in the cloud. Concrete dependency-install, app-start, and build commands will be added when their package scripts exist.
-
-### 2. Clone and enable the safeguards
+Start the development server:
 
 ```bash
-git clone https://github.com/siddharthg2309/healthcare.git healthcareapp
-cd healthcareapp
+npm run start
+```
+
+For a phone preview, put the phone and computer on the same network, scan the QR code with Expo Go, and open the app. If local network discovery is blocked, start Expo with its tunnel option:
+
+```bash
+npm run start -- --tunnel
+```
+
+For an Android emulator, start the emulator first, then run:
+
+```bash
+npm run android
+```
+
+A browser preview is available with:
+
+```bash
+npm run web
+```
+
+The preview intentionally marks all sample values. The main call to action on Home opens the Progress screen; the other tracking controls remain visual placeholders until their implementation phases.
+
+## Checks
+
+From the repository root:
+
+```bash
+npm run typecheck
+npm run lint
+npm run doctor
+```
+
+Expo dependencies are pinned in the workspace lockfile. When adding Expo or native packages, use the local SDK's installer from `apps/mobile`:
+
+```bash
+cd apps/mobile
+npx expo install <package-name>
+```
+
+A real Android build, system font scaling review, Android Back behavior review, and Health Connect permission review still require an Android device or emulator. The current environment does not have `adb` or the Android SDK installed. `npm run doctor` currently reports the host Mac's Xcode version as its sole failed check; this app is configured for Android and web, and Android-relevant dependency/configuration checks pass. `npm audit` reports 29 upstream Expo/React Native toolchain advisories (11 moderate and 18 high). npm only offers incompatible major-version downgrades for the full set, so do not force that change; recheck for compatible upstream patches before a shared release.
+
+### Private Android APK profiles
+
+The Expo app has internal EAS profiles for development, preview, and production. All produce installable APKs; the development profile also includes the development client. An Expo account is required for the cloud build and signing setup.
+
+```bash
+cd apps/mobile
+npx eas-cli@latest login
+npx eas-cli@latest build --profile development --platform android
+npx eas-cli@latest build --profile production --platform android
+```
+
+The first EAS build may ask to configure Android signing. Let EAS manage signing for private distribution and keep credentials outside Git. Confirm the app identity in `apps/mobile/app.json` before creating a build that will be shared. These profiles are configured only; no APK has been built yet.
+
+## Repository setup and public-repository safeguards
+
+This GitHub repository is public. It must contain source and documentation only, never API keys, database credentials, OAuth secrets, session tokens, signing keys, personal health data, or private meal photos.
+
+New clones should enable the repository hooks:
+
+```bash
 sh scripts/setup-git-hooks.sh
 ```
 
-For an existing checkout, run the last command from its root. It configures `core.hooksPath` for this repository only. New clones must enable the hooks themselves; Git does not activate versioned hooks automatically.
+The hooks reject staged files that match ignore rules, scan staged changes and local history with Gitleaks, and enforce Conventional Commit subjects under 72 characters. Install Python 3 and Gitleaks first; see [SECURITY.md](SECURITY.md). Use explicit `git add` paths and review `git diff --cached` before committing.
 
-The setup script stops if an existing custom hooks path would be replaced. Integrate those hooks deliberately instead of discarding existing checks.
+No `.env` file is needed for the Phase 1 preview. When server configuration is added, document it in blank examples and keep private values on the backend. `EXPO_PUBLIC_*` values are included in the APK and must be safe for anyone to read.
 
-### 3. Prepare local configuration when needed
+## Roadmap
 
-```bash
-cp .env.example .env
-git check-ignore .env
-```
+Implementation follows [the phased plan](docs/IMPLEMENTATION_PLAN.md#16-implementation-phases). Phase 1 currently provides the navigable visual shell and internal Android APK profiles. Later phases add authentication and offline sync, goal calculations, curated food data, manual tracking, the measured progress graph, image recognition, planning workflows, Health Connect, reminders, and private APK operations.
 
-The example contains blank values and a public model identifier. It documents proposed configuration; no application currently loads it. Add real values only when implementing the corresponding service. Use scoped backend/mobile environment examples once those applications exist.
+The first APK will be built and signed only after the required app identity, Android version matrix, cloud resources, and release safeguards are confirmed. Do not commit signing material.
 
-Database URLs, API keys, OAuth client secrets, encryption keys, storage signing credentials, and job-dispatch secrets are server-only. `EXPO_PUBLIC_*` values are readable in an APK and must never contain secrets. Google Calendar credentials, Android signing keys, and health data must not be committed.
+## Git commit style
 
-### 4. Review the implementation order
-
-Read [the phased roadmap](docs/IMPLEMENTATION_PLAN.md#16-implementation-phases). Development starts with feasibility checks and an app foundation, then identity/sync, goals, food tracking, and the main progress graph. AI workflows and external integrations follow the manual tracking MVP.
-
-## Git safeguards and commit conventions
-
-The public repository includes these protections:
-
-| Protection | Behavior |
-| --- | --- |
-| `.gitignore` | Excludes local environment files, credential files, signing keys, build artifacts, private data, uploads, and database copies |
-| `pre-commit` hook | Rejects staged files covered by ignore rules and scans staged changes with Gitleaks |
-| `commit-msg` hook | Requires a clear Conventional Commit subject no longer than 72 characters |
-| `pre-push` hook | Checks tracked ignored files and scans local Git history before a normal push |
-| `AGENTS.md` | Records the project decisions and repository rules for coding agents |
-
-Hooks fail if their required tools are missing. Install the tools and rerun setup rather than bypassing checks. These checks reduce risk; they do not replace reviewing the exact staged changes. `.gitignore` also does not remove an already tracked credential from history.
-
-Use focused commits with imperative subjects, for example:
+Use focused Conventional Commits, for example:
 
 ```text
-docs: add the application implementation plan
-chore: configure repository safeguards
-feat(food): add manual meal logging
-fix(progress): preserve gaps between missing measurements
+feat(mobile): add the progress preview
+fix(progress): keep missing weigh-ins as gaps
+docs: update the local development guide
 ```
 
-Before committing, stage explicit paths and review them:
+Before committing, stage the intended files and inspect them:
 
 ```bash
 git status --short
-git add README.md docs/IMPLEMENTATION_PLAN.md
+git add README.md apps/mobile docs
 git diff --cached --stat
 git diff --cached
-git commit -m "docs: update the implementation plan"
+git commit -m "feat(mobile): add the navigable app preview"
 ```
-
-The filename check and history scan can also run explicitly:
-
-```bash
-python3 scripts/check-tracked-files.py
-gitleaks git --redact --no-banner
-```
-
-For local, uncommitted changes, the pre-commit hook scans the staged diff. The history scan becomes useful after the first commit exists. Keep scanners and their reports local; reports may contain sensitive locations even when values are redacted.
-
-Never force-add ignored credentials, turn a detection into a broad allowlist, or place secrets in commit messages. If a real credential is exposed, rotate/revoke it first and address history separately; deleting the latest file is insufficient. See [security guidance](SECURITY.md).
-
-## Repository contents
-
-```text
-.env.example                   Blank planned configuration reference
-.gitignore                     Secret, data, cache, and artifact exclusions
-.githooks/                     Commit, message, and push checks
-AGENTS.md                      Project instructions for coding agents
-README.md                      Current setup guide and project overview
-SECURITY.md                    Credential and private-data handling
-docs/IMPLEMENTATION_PLAN.md     Full plan with architecture and workflows
-scripts/setup-git-hooks.sh      Enable this checkout's safeguards
-scripts/check-tracked-files.py  Reject tracked files matching ignore rules
-```
-
-The planned application layout is `apps/mobile`, `apps/backend`, and shared `packages` for contracts, domain logic, database code, UI, and planning. Those directories will be introduced with working code in their implementation phases.
-
-## APK distribution
-
-The intended release is a signed standalone Android APK. Friends will install it directly, create invited accounts, and use the deployed backend for synchronization and AI. A production APK does not depend on the developer's laptop or Metro.
-
-The plan includes [build profiles, signing, installation, updates, and operations](docs/IMPLEMENTATION_PLAN.md#17-deployment-and-apk-runbook). No APK has been produced yet. Keep the production package ID and signing key stable across updates; keep signing material outside Git.
-
-## Maintaining the setup guide
-
-Update this README in the same change that introduces package scripts, environment variables, migrations, native dependencies, deployment requirements, or build commands. Instructions must describe commands that actually exist and distinguish public app configuration from server-only secrets.

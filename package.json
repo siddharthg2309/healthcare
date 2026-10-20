@@ -1,0 +1,19 @@
+{
+  "name": "healthcare",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/mobile"
+  ],
+  "scripts": {
+    "start": "npm --workspace @healthcare/mobile run start",
+    "android": "npm --workspace @healthcare/mobile run android",
+    "web": "npm --workspace @healthcare/mobile run web",
+    "typecheck": "npm --workspace @healthcare/mobile run typecheck",
+    "lint": "npm --workspace @healthcare/mobile run lint",
+    "doctor": "npm --workspace @healthcare/mobile run doctor"
+  },
+  "overrides": {
+    "react-native-svg": "15.15.4"
+  }
+}

@@ -352,7 +352,7 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 | Mobile | Expo + React Native + TypeScript | Android development with native integrations and APK builds |
 | Navigation | Expo Router | File-based routing and deep-link support |
 | UI | React Native styles + shared design tokens | Precise control of the chosen minimalist theme |
-| Graphs | `victory-native`, with compatible Skia/Reanimated/Gesture Handler | Interactive native line charts; confirm Expo compatibility in Phase 0 |
+| Graphs | App-owned line-chart component using `react-native-svg` for the first release | Separate plan/actual/trend encodings with missing-data gaps; keep the data contract renderer-independent and reassess a chart package only if interactions require it |
 | Server data client | TanStack Query | Fetching, invalidation, and background refresh coordination |
 | Local UI state | Small Zustand stores where needed | Temporary UI preferences and navigation state |
 | Offline data | `expo-sqlite` plus explicit outbox/sync layer | Durable local edits and catalog cache |
@@ -371,7 +371,7 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 | Build | EAS Build with APK profiles | Signed internal distribution |
 | Updates | New APKs initially; optional EAS Update | Runtime-compatible JS/assets updates later |
 
-Install Expo-compatible native package versions, record a lockfile, and avoid copying arbitrary dependency versions from old tutorials. The chosen chart library uses native peer dependencies. [Victory Native repository][victory]
+Install Expo-compatible native package versions and record a lockfile. Phase 0 selected a focused `react-native-svg` renderer for the first progress graph to keep the plan-versus-measured line, sample points, and missing-data gaps under direct control without adding Skia/Reanimated solely for one chart. Keep the chart data contract independent of its renderer and reassess a larger chart library if zooming or richer gestures become necessary.
 
 Neon currently documents Postgres, Auth, Functions, and Object Storage as backend primitives. Treat account/region access, limits, scheduling, and mobile SDK compatibility as Phase 0 checks. Keep adapters so the same TypeScript API/worker can run on a small Node host if a required runtime feature is unavailable. [Neon backend][neon-backend] [Neon Functions][neon-functions]
 
