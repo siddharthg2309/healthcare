@@ -20,6 +20,7 @@ import {
   type GoalRecord,
 } from "@healthcare/contracts";
 import { env } from "../env.js";
+import { openRouterCostToMicros } from "./ai-usage.js";
 
 const PROMPT_VERSION = "meal-plan-v1";
 const SCHEMA_VERSION = "meal-plan-data-v1";
@@ -51,7 +52,7 @@ type ModelPlan = ReturnType<typeof mealPlanModelOutputSchema.parse>;
 type PlanData = ReturnType<typeof mealPlanDataSchema.parse>;
 type MealPlanEditInput = ReturnType<typeof mealPlanEditRequestSchema.parse>;
 type ApprovalDecision = { decision: "approve" | "reject"; baseEditVersion: number };
-type ModelUsage = { inputTokens: number; outputTokens: number };
+type ModelUsage = { inputTokens: number; outputTokens: number; costUsdMicros: number; costReported: boolean };
 
 export function hashMealPlanningContext(context: MealPlanningContext): string {
   return createHash("sha256").update(JSON.stringify(context)).digest("hex");
@@ -212,13 +213,16 @@ async function callMealPlanner(state: MealPlanGraphState): Promise<{
   if (!response.ok) throw new Error(`openrouter_http_${response.status}`);
   const body = await response.json() as {
     choices?: Array<{ finish_reason?: string | null; message?: { content?: unknown } }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: unknown };
   };
   const choice = body.choices?.[0];
   const content = typeof choice?.message?.content === "string" ? choice.message.content : "";
+  const costUsdMicros = openRouterCostToMicros(body.usage?.cost);
   const usage = {
     inputTokens: Number.isInteger(body.usage?.prompt_tokens) ? body.usage!.prompt_tokens! : 0,
     outputTokens: Number.isInteger(body.usage?.completion_tokens) ? body.usage!.completion_tokens! : 0,
+    costUsdMicros: costUsdMicros ?? 0,
+    costReported: costUsdMicros !== null,
   };
   if (choice?.finish_reason !== "stop" || !content) {
     return { draft: null, errors: ["structured_output_incomplete"], usage };
@@ -304,6 +308,25 @@ function normalizeDraft(state: MealPlanGraphState): { plan: PlanData | null; err
   return { plan: parsed.data, errors: [] };
 }
 
+async function persistProviderUsage(
+  state: MealPlanGraphState,
+  current: ModelUsage,
+): Promise<void> {
+  const costReported = state.modelUsage.costReported && current.costReported;
+  await withUserTransaction(state.userId, async (tx) => {
+    await tx.update(aiRuns).set({
+      inputTokens: state.modelUsage.inputTokens + current.inputTokens,
+      outputTokens: state.modelUsage.outputTokens + current.outputTokens,
+      costUsdMicros: costReported ? state.modelUsage.costUsdMicros + current.costUsdMicros : null,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(aiRuns.userId, state.userId),
+      eq(aiRuns.id, state.runId),
+      eq(aiRuns.status, "running"),
+    ));
+  });
+}
+
 async function withUserTransaction<T>(userId: string, action: (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
@@ -342,6 +365,7 @@ async function createDraft(state: MealPlanGraphState): Promise<string> {
       resultPlanId: planId,
       inputTokens: state.modelUsage.inputTokens,
       outputTokens: state.modelUsage.outputTokens,
+      costUsdMicros: state.modelUsage.costReported ? state.modelUsage.costUsdMicros : null,
       updatedAt: new Date(),
     }).where(and(eq(aiRuns.userId, state.userId), eq(aiRuns.id, state.runId)));
     return planId;
@@ -437,6 +461,7 @@ async function markFailed(state: MealPlanGraphState): Promise<Partial<MealPlanGr
       errorCode: state.validationErrors[0] ?? "meal_plan_invalid",
       inputTokens: state.modelUsage.inputTokens,
       outputTokens: state.modelUsage.outputTokens,
+      costUsdMicros: state.modelUsage.costReported ? state.modelUsage.costUsdMicros : null,
       updatedAt: new Date(),
     }).where(and(eq(aiRuns.userId, state.userId), eq(aiRuns.id, state.runId), eq(aiRuns.status, "running")));
   });
@@ -453,12 +478,15 @@ const checkpointer = new PostgresSaver(pool, undefined, { schema: "langgraph" })
 const mealPlanGraph = new StateGraph(mealPlanState)
   .addNode("generate", async (state) => {
     const response = await callMealPlanner(state);
+    await persistProviderUsage(state, response.usage);
     return {
       modelDraft: response.draft,
       validationErrors: response.errors,
       modelUsage: {
         inputTokens: state.modelUsage.inputTokens + response.usage.inputTokens,
         outputTokens: state.modelUsage.outputTokens + response.usage.outputTokens,
+        costUsdMicros: state.modelUsage.costUsdMicros + response.usage.costUsdMicros,
+        costReported: state.modelUsage.costReported && response.usage.costReported,
       },
     };
   })
@@ -512,7 +540,7 @@ export async function runMealPlan(input: StartMealPlanInput): Promise<MealPlanGr
     normalizedPlan: null,
     validationErrors: [],
     repairCount: 0,
-    modelUsage: { inputTokens: 0, outputTokens: 0 },
+    modelUsage: { inputTokens: 0, outputTokens: 0, costUsdMicros: 0, costReported: true },
     planId: null,
     decision: null,
     terminalStatus: null,

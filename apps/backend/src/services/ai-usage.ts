@@ -25,3 +25,11 @@ export async function hasAiOperationCapacity(
   ));
   return (usage?.count ?? 0) < env.AI_USER_DAILY_OPERATION_LIMIT;
 }
+
+
+/** Converts OpenRouter's reported USD cost to micro-USD for integer database storage. */
+export function openRouterCostToMicros(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  const micros = Math.round(value * 1_000_000);
+  return Number.isSafeInteger(micros) && micros <= 2_147_483_647 ? micros : null;
+}

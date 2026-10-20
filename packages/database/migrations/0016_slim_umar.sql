@@ -1,0 +1,2 @@
+ALTER TABLE "ai_runs" ADD COLUMN "cost_usd_micros" integer;--> statement-breakpoint
+ALTER TABLE "ai_runs" ADD CONSTRAINT "ai_runs_cost_nonnegative" CHECK ("ai_runs"."cost_usd_micros" IS NULL OR "ai_runs"."cost_usd_micros" >= 0);

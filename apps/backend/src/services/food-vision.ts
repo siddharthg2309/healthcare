@@ -4,13 +4,21 @@ import {
   type FoodPhotoRecognitionResponse,
 } from "@healthcare/contracts";
 import { env } from "../env.js";
+import { openRouterCostToMicros } from "./ai-usage.js";
 
 export type FoodVisionStatus = 400 | 429 | 502 | 503 | 504;
+
+export interface FoodVisionUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsdMicros: number | null;
+}
 
 export class FoodVisionError extends Error {
   constructor(
     readonly code: string,
     readonly status: FoodVisionStatus,
+    readonly usage: FoodVisionUsage | null = null,
   ) {
     super(code);
     this.name = "FoodVisionError";
@@ -52,10 +60,8 @@ function parseRecognition(text: string): FoodPhotoRecognitionResponse {
   return parsed.data;
 }
 
-export interface FoodVisionResult {
+export interface FoodVisionResult extends FoodVisionUsage {
   response: FoodPhotoRecognitionResponse;
-  inputTokens: number;
-  outputTokens: number;
 }
 
 function safeTokenCount(value: unknown): number {
@@ -140,15 +146,21 @@ export async function recognizeFoodPhoto(
     if (!response.ok) throw new FoodVisionError("ai_provider_unavailable", 503);
     const body = await response.json().catch(() => null) as {
       choices?: unknown;
-      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
+      usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; cost?: unknown };
     } | null;
-    const text = responseText(body);
-    if (!text) throw new FoodVisionError("ai_invalid_response", 502);
-    return {
-      response: parseRecognition(text),
+    const usage: FoodVisionUsage = {
       inputTokens: safeTokenCount(body?.usage?.prompt_tokens),
       outputTokens: safeTokenCount(body?.usage?.completion_tokens),
+      costUsdMicros: openRouterCostToMicros(body?.usage?.cost),
     };
+    const text = responseText(body);
+    if (!text) throw new FoodVisionError("ai_invalid_response", 502, usage);
+    try {
+      return { response: parseRecognition(text), ...usage };
+    } catch (error) {
+      if (error instanceof FoodVisionError) throw new FoodVisionError(error.code, error.status, usage);
+      throw error;
+    }
   } catch (error) {
     if (error instanceof FoodVisionError) throw error;
     if (error instanceof Error && error.name === "AbortError") {

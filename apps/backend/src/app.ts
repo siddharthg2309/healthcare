@@ -855,6 +855,7 @@ app.post("/v1/foods/recognize-photo", async (c) => {
         status: "completed",
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
+        costUsdMicros: result.costUsdMicros,
         updatedAt: new Date(),
       }).where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId)));
     });
@@ -863,8 +864,14 @@ app.post("/v1/foods/recognize-photo", async (c) => {
     const code = error instanceof FoodVisionError ? error.code : "ai_provider_unavailable";
     await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-      await tx.update(aiRuns).set({ status: "failed", errorCode: code, updatedAt: new Date() })
-        .where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId), eq(aiRuns.status, "running")));
+      await tx.update(aiRuns).set({
+        status: "failed",
+        errorCode: code,
+        inputTokens: error instanceof FoodVisionError ? error.usage?.inputTokens ?? null : null,
+        outputTokens: error instanceof FoodVisionError ? error.usage?.outputTokens ?? null : null,
+        costUsdMicros: error instanceof FoodVisionError ? error.usage?.costUsdMicros ?? null : null,
+        updatedAt: new Date(),
+      }).where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId), eq(aiRuns.status, "running")));
     });
     if (error instanceof FoodVisionError) return c.json({ error: error.code }, error.status);
     return c.json({ error: "ai_provider_unavailable" }, 503);
@@ -2003,6 +2010,9 @@ app.get("/v1/ai-runs/:id", async (c) => {
       status: result.run.status,
       planId: result.run.resultPlanId,
       errorCode: result.run.errorCode,
+      inputTokens: result.run.inputTokens,
+      outputTokens: result.run.outputTokens,
+      costUsdMicros: result.run.costUsdMicros,
       createdAt: result.run.createdAt.toISOString(),
       updatedAt: result.run.updatedAt.toISOString(),
     },

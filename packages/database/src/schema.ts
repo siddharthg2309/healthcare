@@ -152,6 +152,7 @@ export const aiRuns = pgTable("ai_runs", {
   resultPlanId: uuid("result_plan_id"),
   inputTokens: integer("input_tokens"),
   outputTokens: integer("output_tokens"),
+  costUsdMicros: integer("cost_usd_micros"),
   errorCode: text("error_code"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -161,6 +162,7 @@ export const aiRuns = pgTable("ai_runs", {
   check("ai_runs_kind_valid", sql`${table.kind} IN ('meal_plan', 'workout_plan', 'food_vision')`),
   check("ai_runs_status_valid", sql`${table.status} IN ('running', 'pending_review', 'completed', 'failed', 'rejected', 'stale')`),
   check("ai_runs_usage_nonnegative", sql`(${table.inputTokens} IS NULL OR ${table.inputTokens} >= 0) AND (${table.outputTokens} IS NULL OR ${table.outputTokens} >= 0)`),
+  check("ai_runs_cost_nonnegative", sql`${table.costUsdMicros} IS NULL OR ${table.costUsdMicros} >= 0`),
   pgPolicy("ai_runs_owner_policy", {
     for: "all",
     to: "public",
