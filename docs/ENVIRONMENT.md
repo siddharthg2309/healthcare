@@ -1,6 +1,6 @@
 # Environment setup
 
-The app is a Next.js PWA on Vercel with a Neon Postgres database. The same Next.js deployment serves the UI and API. Your laptop runs the development server and database migrations; it is not the production backend.
+The app UI and API are a Next.js PWA on Vercel with a Neon Postgres database. A thin Expo Android shell can load that hosted app and be built as a private APK with EAS. Your laptop runs development and reviewed migrations; it is not the production backend.
 
 ## Local development
 
@@ -19,7 +19,7 @@ For local development, use:
 | `AUTH_BASE_URL` | `http://localhost:3000` | Local Next.js origin. For deployed production, use the exact HTTPS Vercel/custom domain. |
 | `AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` | The exact origin allowed to use auth. Separate multiple origins with commas. |
 
-The app does not need `EXPO_PUBLIC_API_BASE_URL` or any browser-visible secret. The browser calls relative same-origin routes such as `/api/auth/*` and `/v1/*`.
+The browser calls relative same-origin routes such as `/api/auth/*` and `/v1/*`. The APK uses public `EXPO_PUBLIC_APP_URL` and `EXPO_PUBLIC_API_BASE_URL` URLs at build time; these are not secret values. Never place credentials in `EXPO_PUBLIC_*` variables.
 
 Run the auth, application, and LangGraph checkpoint migrations once, then launch the app:
 
@@ -66,6 +66,34 @@ npm run invite:create -- --email friend@example.com
 
 Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_SECRET`, or the OpenRouter key.
 
+## Private Android APK
+
+The APK is an Expo WebView shell around the Vercel app. Deploy and verify Vercel first. The APK requires the HTTPS origin because it loads the hosted UI and API; cloud logging cannot work while Vercel or Neon is unavailable.
+
+### One-time EAS setup
+
+1. Create or sign in to an Expo account.
+2. From `apps/mobile`, run `npx eas-cli init` to link the app to your EAS project. This adds the public project ID to `apps/mobile/app.json`.
+3. In the Expo dashboard, open the project's **production** environment variables and add:
+
+   | Variable | Value | Visibility |
+   | --- | --- | --- |
+   | `EXPO_PUBLIC_APP_URL` | `https://your-project.vercel.app` | Plain text; this URL is packaged into the APK |
+   | `EXPO_PUBLIC_API_BASE_URL` | `https://your-project.vercel.app` | Plain text; same origin for native API/auth screens |
+
+   These URLs are public configuration. Do not add Neon, Better Auth, OpenRouter, Google OAuth, storage, or token-encryption secrets to Expo/EAS or the APK.
+4. Build an installable APK from `apps/mobile`:
+
+   ```bash
+   npm run build:apk
+   ```
+
+5. Let EAS manage Android signing credentials. Download the APK from the completed build and share it only with invited friends. Recipients may need to allow installation from the browser or file app that downloaded it.
+
+The repo ignores `.apk` files and signing material. The APK uses the deployed app URL at runtime. A Vercel web deployment updates the content for existing installs; changes to the wrapper, app identifier, or native permissions require another APK build. EAS internal-build URLs are bearer links, so do not post them publicly.
+
+For local Android development, copy `apps/mobile/.env.example` to `apps/mobile/.env` and set the two public URL variables to your development machine's LAN address. Do not use `localhost` from a physical phone. The production EAS variables are independent of the ignored local file.
+
 ## Feature-specific configuration
 
 | Feature | Variables | When to configure |
@@ -96,7 +124,7 @@ The app requests `https://www.googleapis.com/auth/calendar.app.created`, which G
 
 In Settings, each user can download an account-scoped JSON export or request deletion after entering their current password and typing `DELETE`. The export includes app profile, tracking history, saved plans, AI planning history, reminder settings, safe Calendar metadata, and temporary-upload metadata; it excludes authentication credentials and Google tokens. Deletion removes account-owned Neon rows and LangGraph planning checkpoints and attempts to revoke Google access. A Google calendar created by the app and its events can remain in the user's Google account, so the user may remove that calendar there. Neon backup snapshots follow the retention settings on the Neon project and are not immediately erased by app account deletion; choose and document a retention period before inviting users to production.
 
-PWA browser reminders need no additional environment variables. They require notification permission and are checked while Goal Health is open; they are not reliable alarms when Android closes the PWA.
+Browser reminders need no additional environment variables. In the web app they require notification permission and are checked while Goal Health is open; they are not reliable alarms when Android closes the PWA or WebView shell.
 
 ### Curating shared catalog foods
 
@@ -122,8 +150,8 @@ npm run catalog:seed:fndds -- --file /tmp/surveyDownload.json
 
 The import validates the FNDDS data type, FDC IDs, and the four required macro values, skips records missing or outside the app's safety bounds, and is idempotent by source and FDC ID. It imports generic FNDDS foods for manual search/logging as **not reviewed**; AI meal-plan generation continues to use reviewed entries only. The importer adds search aliases for selected Indian dishes (such as idli, dosa, dal, roti, and biryani), but FNDDS is a US dietary-survey dataset, not a complete Indian food table. Use personal foods for household recipes or items whose values differ, and extend the shared catalog only with checked, sourced entries. The archive is about 3.7 MB compressed; the extracted file is temporary, contains no user data, and should not be committed. USDA data are CC0 and should remain attributed to FoodData Central. See [USDA's download page](https://fdc.nal.usda.gov/download-datasets/).
 
-## Phone and PWA behavior
+## Phone, PWA, and APK behavior
 
-During local development, use the computer's LAN address from the phone and set local auth origins accordingly. For everyday use by friends on other networks, use the deployed HTTPS Vercel URL. Opening that URL works in Android Chrome; users can choose **Add to Home screen** to launch it like an app.
+During local development, use the computer's LAN address from the phone and set local auth origins accordingly. For everyday use by friends on other networks, deploy the app to Vercel over HTTPS. Friends can open the URL in Chrome or install the private Expo APK, which opens the same hosted app in a WebView.
 
-This PWA has one public origin, so no `EXPO_PUBLIC_API_BASE_URL`, separate backend URL, native app identifier, or APK build is needed. Browser/PWA access does not provide direct Health Connect integration or dependable background step collection. Keep steps manually editable unless a separate native Android companion is built later.
+The app has one public origin and no separately deployed API host. APKs include the public app URL, but no API credential. The WebView shell does not provide direct Health Connect integration or dependable background step collection. Keep steps manually editable unless a native bridge is built and verified later.

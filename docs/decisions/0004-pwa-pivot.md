@@ -1,6 +1,6 @@
 # Decision 0004: Next.js PWA and Vercel deployment
 
-**Status:** Accepted. This is the current platform and deployment decision.
+**Status:** Superseded by [Decision 0005](0005-private-android-apk.md). This decision records the web-first PWA choice; the PWA remains the hosted product UI and browser fallback.
 
 ## Context
 

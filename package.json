@@ -5,6 +5,7 @@
   "workspaces": [
     "apps/backend",
     "apps/web",
+    "apps/mobile",
     "packages/*"
   ],
   "scripts": {
@@ -12,8 +13,8 @@
     "dev": "npm --workspace @healthcare/web run dev",
     "build": "npm --workspace @healthcare/web run build",
     "web": "npm --workspace @healthcare/web run dev",
-    "typecheck": "npm run typecheck --workspace @healthcare/contracts && npm run typecheck --workspace @healthcare/domain && npm run typecheck --workspace @healthcare/database && npm run typecheck --workspace @healthcare/backend && npm run typecheck --workspace @healthcare/web",
-    "lint": "npm run lint --workspace @healthcare/backend && npm run lint --workspace @healthcare/web",
+    "typecheck": "npm run typecheck --workspace @healthcare/contracts && npm run typecheck --workspace @healthcare/domain && npm run typecheck --workspace @healthcare/database && npm run typecheck --workspace @healthcare/backend && npm run typecheck --workspace @healthcare/web && npm run typecheck --workspace @healthcare/mobile",
+    "lint": "npm run lint --workspace @healthcare/backend && npm run lint --workspace @healthcare/web && npm run lint --workspace @healthcare/mobile",
     "api:dev": "npm --workspace @healthcare/backend run dev",
     "db:auth:migrate": "npm --workspace @healthcare/backend run migrate:auth",
     "db:generate": "npm --workspace @healthcare/database run generate",

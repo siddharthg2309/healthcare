@@ -2,14 +2,15 @@
 
 ## Scope and agreed direction
 
-- This is an Android-first health and fitness PWA for the owner and invited friends.
+- This is an Android-first health and fitness app for the owner and invited friends. The Next.js PWA is the product UI and the private Android APK is a thin Expo WebView shell around it.
 - The source of the product and phased implementation scope is `docs/IMPLEMENTATION_PLAN.md`.
 - Use Next.js App Router, React, and TypeScript; deploy the UI and same-origin API on Vercel, with Neon Postgres for cloud storage.
-- The PWA is the selected release target. Do not build or document an APK unless the user changes the platform direction.
+- Deploy the Next.js app and API to Vercel with Neon Postgres. Build the Android shell as an internally distributed APK with EAS; do not publish to an app store.
+- Keep the APK shell thin: it loads the deployed PWA from a configured HTTPS URL. Do not duplicate feature screens in React Native unless the user asks for native functionality.
 - Keep two bounded LangGraph workflows for meal/workout planning. Food photo recognition is a separate operation.
 - Derive calories, macros, summaries, and graph values from validated records and application code.
 - Follow the minimal black/white/gray/lime design. Actual progress versus the accepted goal path is a core feature.
-- Direct Health Connect access and reliable background step collection are not available in the PWA; support manual activity logging unless a future native app is approved.
+- The WebView APK does not by itself provide Health Connect access or reliable background step collection; support manual activity logging unless a native bridge is implemented and approved.
 - Use this repository's checkout for implementation and preserve unrelated user work.
 
 ## Public repository and credentials
