@@ -289,7 +289,7 @@ function HomeView({ profile, goal, measurements, day, onProgress }: { profile: P
   const latest = [...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt))[0];
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">TODAY’S OVERVIEW</span><h1>Good {dayGreeting()}, {profile.displayName.split(" ")[0]}.</h1><p>One day at a time. Your plan is here when you need it.</p></div><button className="install-hint" onClick={() => alert("In Chrome, open the menu and choose ‘Add to Home screen’ or ‘Install app’.")}>＋ Add to home screen</button></div>
+      <div className="page-heading"><div><span className="eyebrow">TODAY’S OVERVIEW</span><h1>Good {dayGreeting()}, {profile.displayName.split(" ")[0]}.</h1><p>One day at a time. Your plan is here when you need it.</p></div></div>
       <button className="goal-hero" onClick={onProgress}>
         <div className="goal-hero-copy"><span className="eyebrow">YOUR GOAL PATH · VERSION {goal.goalVersion}</span><strong>{goal.startWeightKg.toFixed(1)} <span>→</span> {goal.targetWeightKg.toFixed(1)} <small>kg</small></strong><span>Target date · {formatDate(goal.targetDate)}</span></div>
         <div className="goal-ring"><span>{goal.direction === "lose" ? "−" : goal.direction === "gain" ? "+" : "="}</span><small>{goal.direction}</small></div>
