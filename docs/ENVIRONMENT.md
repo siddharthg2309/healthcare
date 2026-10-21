@@ -82,7 +82,7 @@ This install path uses the Next.js PWA directly. It does not need an Expo accoun
 
 ## Optional private Android APK
 
-Choose this only if you want a separate Android package. The APK is an Expo WebView shell around the same hosted PWA, not a separate backend or a requirement for phone use. Deploy and verify Vercel first. The APK requires the HTTPS origin because it loads the hosted UI and API; cloud logging cannot work while Vercel or Neon is unavailable.
+Choose this only if you want a separate Android package. The APK is an Expo WebView shell around the same hosted PWA, not a separate backend or a requirement for phone use. Deploy and verify Vercel first. The APK requires the HTTPS origin because it loads the hosted UI and API; cloud logging cannot work while Vercel or Neon is unavailable. EAS cloud builds run remotely, so local Android Studio and Xcode are not needed for this APK path. An Expo Doctor warning about the local Xcode version does not block an Android cloud build. See Expo’s [cloud workflow overview](https://docs.expo.dev/workflow/overview/) and [EAS build infrastructure](https://docs.expo.dev/build/introduction/).
 
 ### One-time EAS setup
 
