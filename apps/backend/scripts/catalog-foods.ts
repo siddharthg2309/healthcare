@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { readFile } from "node:fs/promises";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { catalogFoods, catalogFoodPortions, catalogFoodSafetyReviews } from "@healthcare/database/schema";
 import { db, pool } from "@healthcare/database";
 import { foodAllergenTags, foodDietaryTags, validateFoodSafetyTagList } from "@healthcare/domain";
@@ -21,6 +21,7 @@ type FnddsFood = {
 };
 
 const fnddsAliases: Record<number, string[]> = {
+  2707429: ["papad", "papadum", "pappad", "papar"],
   2705686: ["phirni", "firni"],
   2705700: ["burfi", "barfi"],
   2705740: ["paneer", "paneer cheese"],
@@ -43,13 +44,15 @@ const fnddsAliases: Record<number, string[]> = {
   2708730: ["samosa"],
   2708985: ["vegetable biryani", "veg biryani", "vegetable biriyani"],
   2709128: ["uppuma", "uppumavu", "uppittu"],
-  2709129: ["dosa with filling", "dosai with filling"],
+  2709129: ["dosa with filling", "dosai with filling", "masala dosa", "masala dosai"],
   2709130: ["vadai", "medu vada", "medhu vadai"],
   2709309: ["chutni", "chatni"],
   2709631: ["palak paneer"],
+  2709632: ["chana saag", "channa saag", "chana shaag", "channa shaag"],
   2710066: ["pakora", "pakoda", "bhajiya"],
   2710067: ["vegetable curry", "mixed vegetable curry"],
   2710068: ["vegetable curry with rice", "mixed vegetable curry with rice"],
+  2710351: ["ladoo", "laddu", "besan ladoo", "besan laddu"],
 };
 
 type SearchFood = {
@@ -372,11 +375,20 @@ async function updateAliases() {
 }
 
 async function publishFood() {
-  const id = option("food-id");
-  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-    throw new Error("Usage: npm run catalog:publish -- --food-id <catalog-uuid>");
+  const singleId = option("food-id");
+  const list = option("food-ids");
+  if ((singleId && list) || (!singleId && !list)) {
+    throw new Error('Usage: npm run catalog:publish -- --food-id <catalog-uuid> or --food-ids "<uuid>,<uuid>"');
   }
-  const [food] = await db.select({
+  const rawIds = (list ?? singleId ?? "").split(",").map((value) => value.trim());
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!rawIds.length || rawIds.length > 50 || rawIds.some((id) => !uuidPattern.test(id))) {
+    throw new Error("Provide 1–50 unique catalog UUIDs. Nothing was changed.");
+  }
+  const ids = rawIds.map((id) => id.toLowerCase());
+  if (new Set(ids).size !== ids.length) throw new Error("Provide 1–50 unique catalog UUIDs. Nothing was changed.");
+
+  const rows = await db.select({
     id: catalogFoods.id,
     name: catalogFoods.name,
     category: catalogFoods.category,
@@ -389,40 +401,52 @@ async function publishFood() {
     active: catalogFoods.active,
     reviewed: catalogFoods.reviewed,
     updatedAt: catalogFoods.updatedAt,
-  }).from(catalogFoods).where(eq(catalogFoods.id, id)).limit(1);
-  if (!food) throw new Error("Catalog food not found. Nothing was changed.");
-  if (food.reviewed) throw new Error("This food is already reviewed. Nothing was changed.");
+  }).from(catalogFoods).where(inArray(catalogFoods.id, ids));
+  const rowsById = new Map(rows.map((food) => [food.id, food]));
+  const foods = ids.map((id) => rowsById.get(id)).filter((food) => food !== undefined);
+  if (foods.length !== ids.length) throw new Error("One or more catalog foods were not found. Nothing was changed.");
+  if (foods.some((food) => food.reviewed)) throw new Error("One or more selected foods are already reviewed. Nothing was changed.");
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("Catalog nutrition review requires an interactive terminal. Nothing was changed.");
   }
 
-  console.log("Check this catalog record before approving it for shared use:");
-  console.log(`Name: ${food.name} (${food.category})`);
-  console.log(`Source: ${food.source}${food.externalSourceId ? `, source record ${food.externalSourceId}` : ""}`);
-  console.log(`Per 100 g: ${food.calories} kcal; protein ${food.protein} g; carbohydrate ${food.carbohydrates} g; fat ${food.fat} g.`);
-  console.log(`Current state: ${food.active ? "active and searchable" : "unpublished draft"}.`);
-  console.log("This marks the food as nutrition-reviewed and available for general meal planning. Dietary/allergen filters still require separate safety metadata.");
+  console.log(`Check all ${foods.length} catalog record(s) before approving them for shared use:`);
+  for (const food of foods) {
+    console.log(`\n${food.name} (${food.category})`);
+    console.log(`Source: ${food.source}${food.externalSourceId ? `, source record ${food.externalSourceId}` : ""}`);
+    console.log(`Per 100 g: ${food.calories} kcal; protein ${food.protein} g; carbohydrate ${food.carbohydrates} g; fat ${food.fat} g.`);
+    console.log(`Current state: ${food.active ? "active and searchable" : "unpublished draft"}.`);
+  }
+  console.log("Reviewed foods become available for general meal planning. Dietary/allergen filters still require separate safety metadata.");
 
+  const expectedConfirmation = foods.length === 1 ? "REVIEW" : `REVIEW ${foods.length}`;
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   let confirmation: string;
   try {
-    confirmation = await terminal.question('Type REVIEW after checking the description, source, and macros: ');
+    confirmation = await terminal.question(`Type ${expectedConfirmation} after checking all displayed descriptions, source records, and macros: `);
   } finally {
     terminal.close();
   }
-  if (confirmation.trim() !== "REVIEW") {
+  if (confirmation.trim() !== expectedConfirmation) {
     console.log("No catalog changes were made.");
     return;
   }
 
-  const [reviewed] = await db.update(catalogFoods).set({ active: true, reviewed: true, updatedAt: new Date() }).where(and(
-    eq(catalogFoods.id, id),
-    eq(catalogFoods.reviewed, false),
-    eq(catalogFoods.active, food.active),
-    eq(catalogFoods.updatedAt, food.updatedAt),
-  )).returning({ id: catalogFoods.id, name: catalogFoods.name });
-  if (!reviewed) throw new Error("Catalog food changed during review. Reload it and try again.");
-  console.log(`Reviewed catalog entry is active and searchable: ${reviewed.name} (${reviewed.id}).`);
+  const reviewedFoods = await db.transaction(async (tx) => {
+    const reviewed: Array<{ id: string; name: string }> = [];
+    for (const food of foods) {
+      const [updated] = await tx.update(catalogFoods).set({ active: true, reviewed: true, updatedAt: new Date() }).where(and(
+        eq(catalogFoods.id, food.id),
+        eq(catalogFoods.reviewed, false),
+        eq(catalogFoods.active, food.active),
+        eq(catalogFoods.updatedAt, food.updatedAt),
+      )).returning({ id: catalogFoods.id, name: catalogFoods.name });
+      if (!updated) throw new Error(`Catalog food changed during review (${food.name}). The batch was rolled back.`);
+      reviewed.push(updated);
+    }
+    return reviewed;
+  });
+  console.log(`${reviewedFoods.length} reviewed catalog food(s) are active and searchable.`);
 }
 
 async function reviewFoodSafety() {
