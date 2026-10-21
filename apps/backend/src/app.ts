@@ -4,7 +4,7 @@ import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
 import { db } from "@healthcare/database";
-import { aiRuns, calendarEventLinks, catalogFoods, foodDayStatuses, foodFavorites, foodPortions, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoodRecipeVersions, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
+import { aiRuns, calendarEventLinks, catalogFoods, catalogFoodPortions, catalogFoodSafetyReviews, foodDayStatuses, foodFavorites, foodPortions, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoodRecipeVersions, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
   approveMealPlanRequestSchema,
   approveWorkoutPlanRequestSchema,
@@ -44,7 +44,14 @@ import {
   workoutPlanDataSchema,
   type WorkoutPlanData,
 } from "@healthcare/contracts";
-import { buildGoalProposal, findExerciseById } from "@healthcare/domain";
+import {
+  buildGoalProposal,
+  deriveFoodSafetyRequirements,
+  findExerciseById,
+  isFoodAllowedByReviewedMetadata,
+  type FoodSafetyMetadata,
+  type FoodSafetyRequirements,
+} from "@healthcare/domain";
 import { auth } from "./auth/config.js";
 import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
@@ -598,9 +605,12 @@ app.get("/v1/foods", async (c) => {
   const params = new URL(c.req.url).searchParams;
   const query = params.get("query")?.trim() ?? "";
   const view = params.get("view") ?? "all";
+  const purpose = params.get("purpose") ?? "logging";
   if (view !== "all" && view !== "favorites" && view !== "recent") {
     return c.json({ error: "invalid_food_search_view" }, 400);
   }
+  if (purpose !== "logging" && purpose !== "meal_plan") return c.json({ error: "invalid_food_search_purpose" }, 400);
+  const mealPlanPurpose = purpose === "meal_plan";
   const favoritesOnly = view === "favorites";
   const recentOnly = view === "recent";
   if (query.length > 80) return c.json({ error: "search_query_too_long" }, 400);
@@ -608,6 +618,13 @@ app.get("/v1/foods", async (c) => {
   const pattern = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    let safetyRequirements: FoodSafetyRequirements | null = null;
+    if (mealPlanPurpose) {
+      const [profileRow] = await tx.select({ data: userProfiles.data }).from(userProfiles)
+        .where(eq(userProfiles.userId, userId)).limit(1);
+      const profile = profileSchema.safeParse(profileRow?.data);
+      if (profile.success) safetyRequirements = deriveFoodSafetyRequirements(profile.data.dietaryPreferences, profile.data.restrictions);
+    }
     const favorites = await tx.select({ foodId: foodFavorites.foodId, foodSource: foodFavorites.foodSource })
       .from(foodFavorites).where(eq(foodFavorites.userId, userId));
     const favoriteSharedIds = favorites.filter((item) => item.foodSource === "shared_catalog").map((item) => item.foodId);
@@ -642,7 +659,7 @@ app.get("/v1/foods", async (c) => {
       : await tx.select().from(catalogFoods).where(and(
         eq(catalogFoods.active, true),
         or(ilike(catalogFoods.name, pattern), sql`array_to_string(${catalogFoods.aliases}, ' ') ILIKE ${pattern}`),
-      )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(30);
+      )).orderBy(desc(catalogFoods.reviewed), asc(catalogFoods.name)).limit(mealPlanPurpose ? 200 : 30);
     const personal = favoritesOnly || recentOnly
       ? personalIds.length ? await tx.select().from(userFoods).where(and(
         inArray(userFoods.id, personalIds),
@@ -653,11 +670,35 @@ app.get("/v1/foods", async (c) => {
         ilike(userFoods.name, pattern), sql`array_to_string(${userFoods.aliases}, ' ') ILIKE ${pattern}`,
       ))
         .orderBy(asc(userFoods.name)).limit(20);
-    return { shared, personal, favorites, recentKeys };
+    const safetyReviews = mealPlanPurpose && shared.length ? await tx.select({
+      foodId: catalogFoodSafetyReviews.foodId,
+      dietaryTags: catalogFoodSafetyReviews.dietaryTags,
+      containsAllergens: catalogFoodSafetyReviews.containsAllergens,
+      mayContainAllergens: catalogFoodSafetyReviews.mayContainAllergens,
+    }).from(catalogFoodSafetyReviews).where(inArray(catalogFoodSafetyReviews.foodId, shared.map((food) => food.id))) : [];
+    return { shared, personal, favorites, recentKeys, safetyRequirements, safetyReviews };
   });
   const favoriteKeys = new Set(result.favorites.map((item) => `${item.foodSource}:${item.foodId}`));
+  const safetyReviewByFoodId = new Map(result.safetyReviews.map((review) => [review.foodId, review]));
+  const hasSafetyFilters = result.safetyRequirements
+    ? result.safetyRequirements.dietaryTags.length > 0 || result.safetyRequirements.avoidAllergens.length > 0
+    : false;
+  const sharedFoods = result.shared.filter((food) => {
+    if (!mealPlanPurpose) return true;
+    const requirements = result.safetyRequirements;
+    if (!food.reviewed || !requirements || requirements.unsupportedRestrictions.length > 0) return false;
+    const review = safetyReviewByFoodId.get(food.id);
+    const metadata: FoodSafetyMetadata | null = review ? {
+      dietaryTags: review.dietaryTags as FoodSafetyMetadata["dietaryTags"],
+      containsAllergens: review.containsAllergens as FoodSafetyMetadata["containsAllergens"],
+      mayContainAllergens: review.mayContainAllergens as FoodSafetyMetadata["mayContainAllergens"],
+    } : null;
+    return isFoodAllowedByReviewedMetadata(metadata, requirements);
+  });
+  const safetyFilterUnavailable = mealPlanPurpose && (!result.safetyRequirements || result.safetyRequirements.unsupportedRestrictions.length > 0);
+  const personalFoods = mealPlanPurpose && (hasSafetyFilters || safetyFilterUnavailable) ? [] : result.personal;
   const foods = [
-    ...result.shared.map((food) => ({
+    ...sharedFoods.map((food) => ({
       id: food.id,
       name: food.name,
       aliases: food.aliases,
@@ -671,7 +712,7 @@ app.get("/v1/foods", async (c) => {
       carbohydrateGPer100g: nutritionValue(food.carbohydrateGPer100g),
       fatGPer100g: nutritionValue(food.fatGPer100g),
     })),
-    ...result.personal.map((food) => ({
+    ...personalFoods.map((food) => ({
       id: food.id,
       name: food.name,
       aliases: food.aliases,
@@ -744,12 +785,17 @@ app.get("/v1/foods/:foodId/portions", async (c) => {
   const userId = c.get("session").user.id;
   const portions = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-    return await tx.select({ id: foodPortions.id, label: foodPortions.label, grams: foodPortions.grams })
+    const saved = await tx.select({ id: foodPortions.id, label: foodPortions.label, grams: foodPortions.grams })
       .from(foodPortions).where(and(
         eq(foodPortions.userId, userId),
         eq(foodPortions.foodSource, foodSource),
         eq(foodPortions.foodId, foodId),
       )).orderBy(asc(foodPortions.label));
+    if (foodSource !== "shared_catalog") return saved.map((portion) => ({ ...portion, isDefault: false }));
+    const defaults = await tx.select({ id: catalogFoodPortions.id, label: catalogFoodPortions.label, grams: catalogFoodPortions.grams })
+      .from(catalogFoodPortions).where(eq(catalogFoodPortions.foodId, foodId)).orderBy(asc(catalogFoodPortions.label));
+    return [...defaults.map((portion) => ({ ...portion, isDefault: true })), ...saved.map((portion) => ({ ...portion, isDefault: false }))]
+      .sort((left, right) => left.label.localeCompare(right.label));
   });
   return c.json({ portions });
 });
@@ -794,7 +840,7 @@ app.post("/v1/foods/:foodId/portions", async (c) => {
   if (result.status === "food_not_found") return c.json({ error: "food_not_found" }, 404);
   if (result.status === "portion_limit") return c.json({ error: "food_portion_limit_reached" }, 409);
   if (result.status === "duplicate") return c.json({ error: "food_portion_label_exists" }, 409);
-  return c.json({ portion: result.portion }, 201);
+  return c.json({ portion: { ...result.portion, isDefault: false } }, 201);
 });
 
 app.delete("/v1/foods/:foodId/portions/:portionId", async (c) => {
@@ -1348,16 +1394,6 @@ app.post("/v1/food-logs", async (c) => {
       return { status: same ? "saved" as const : "conflict" as const, data: existing.data, version: existing.version, idempotent: same };
     }
 
-    const [requestedPortion] = parsed.data.portionId
-      ? await tx.select().from(foodPortions).where(and(
-        eq(foodPortions.id, parsed.data.portionId),
-        eq(foodPortions.userId, userId),
-        eq(foodPortions.foodId, parsed.data.foodId),
-        eq(foodPortions.grams, parsed.data.quantityGrams),
-      )).limit(1)
-      : [];
-    if (parsed.data.portionId && !requestedPortion) return { status: "portion_invalid" as const };
-
     const [shared] = await tx.select().from(catalogFoods).where(and(
       eq(catalogFoods.id, parsed.data.foodId),
       eq(catalogFoods.active, true),
@@ -1368,8 +1404,23 @@ app.post("/v1/food-logs", async (c) => {
     )).limit(1);
     const food = shared ?? personal;
     if (!food) return { status: "food_not_found" as const };
-    if (requestedPortion && requestedPortion.foodSource !== (shared ? "shared_catalog" : "personal")) {
-      return { status: "portion_invalid" as const };
+    let portionLabel: string | null = null;
+    if (parsed.data.portionId) {
+      const foodSource = shared ? "shared_catalog" : "personal";
+      const [savedPortion] = await tx.select({ label: foodPortions.label }).from(foodPortions).where(and(
+        eq(foodPortions.id, parsed.data.portionId),
+        eq(foodPortions.userId, userId),
+        eq(foodPortions.foodSource, foodSource),
+        eq(foodPortions.foodId, parsed.data.foodId),
+        eq(foodPortions.grams, parsed.data.quantityGrams),
+      )).limit(1);
+      const [catalogPortion] = shared && !savedPortion ? await tx.select({ label: catalogFoodPortions.label }).from(catalogFoodPortions).where(and(
+        eq(catalogFoodPortions.id, parsed.data.portionId),
+        eq(catalogFoodPortions.foodId, parsed.data.foodId),
+        eq(catalogFoodPortions.grams, parsed.data.quantityGrams),
+      )).limit(1) : [];
+      portionLabel = savedPortion?.label ?? catalogPortion?.label ?? null;
+      if (!portionLabel) return { status: "portion_invalid" as const };
     }
     const nutritionPer100g = {
       caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
@@ -1386,8 +1437,8 @@ app.post("/v1/food-logs", async (c) => {
       occurredAt: parsed.data.occurredAt,
       mealType: parsed.data.mealType,
       quantityGrams: parsed.data.quantityGrams,
-      portionId: requestedPortion?.id ?? null,
-      portionLabel: requestedPortion?.label ?? null,
+      portionId: parsed.data.portionId ?? null,
+      portionLabel,
       nutritionPer100g,
       nutritionTotal: {
         caloriesKcal: roundNutrition(nutritionPer100g.caloriesKcal * multiplier),
@@ -2051,7 +2102,7 @@ app.patch("/v1/meal-plans/:id", async (c) => {
     data = await recalculateMealPlanEdit(userId, parsed.data, currentData.data.dailyCalorieTargetKcal, currentData.data.macroTargetsGrams);
   } catch (error) {
     const code = error instanceof Error ? error.message : "meal_plan_edit_invalid";
-    return c.json({ error: ["meal_plan_foods_required", "meal_plan_food_not_available", "meal_plan_edit_invalid"].includes(code) ? code : "meal_plan_edit_invalid" }, 422);
+    return c.json({ error: ["meal_plan_foods_required", "meal_plan_food_not_available", "meal_plan_edit_invalid", "meal_plan_food_metadata_required"].includes(code) ? code : "meal_plan_edit_invalid" }, 422);
   }
   const [saved] = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);

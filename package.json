@@ -25,6 +25,7 @@
     "catalog:search": "npm --workspace @healthcare/backend run catalog:search --",
     "catalog:import": "npm --workspace @healthcare/backend run catalog:import --",
     "catalog:seed:fndds": "npm --workspace @healthcare/backend run catalog:seed:fndds --",
-    "catalog:publish": "npm --workspace @healthcare/backend run catalog:publish --"
+    "catalog:publish": "npm --workspace @healthcare/backend run catalog:publish --",
+    "catalog:safety:review": "npm --workspace @healthcare/backend run catalog:safety:review --"
   }
 }

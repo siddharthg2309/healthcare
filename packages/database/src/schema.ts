@@ -206,6 +206,36 @@ export const catalogFoods = pgTable("catalog_foods", {
   `),
 ]);
 
+export const catalogFoodSafetyReviews = pgTable("catalog_food_safety_reviews", {
+  foodId: uuid("food_id").primaryKey().references(() => catalogFoods.id, { onDelete: "cascade" }),
+  dietaryTags: text("dietary_tags").array().default([]).notNull(),
+  containsAllergens: text("contains_allergens").array().default([]).notNull(),
+  mayContainAllergens: text("may_contain_allergens").array().default([]).notNull(),
+  sourceNote: text("source_note").notNull(),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  check("catalog_food_safety_dietary_tags_valid", sql`${table.dietaryTags} <@ ARRAY['vegetarian', 'vegan', 'pescatarian', 'gluten_free', 'dairy_free']::text[]`),
+  check("catalog_food_safety_contains_allergens_valid", sql`${table.containsAllergens} <@ ARRAY['celery', 'crustaceans', 'eggs', 'fish', 'gluten_cereals', 'lupin', 'milk', 'molluscs', 'mustard', 'peanuts', 'sesame', 'soybeans', 'sulphites', 'tree_nuts']::text[]`),
+  check("catalog_food_safety_may_contain_allergens_valid", sql`${table.mayContainAllergens} <@ ARRAY['celery', 'crustaceans', 'eggs', 'fish', 'gluten_cereals', 'lupin', 'milk', 'molluscs', 'mustard', 'peanuts', 'sesame', 'soybeans', 'sulphites', 'tree_nuts']::text[]`),
+  check("catalog_food_safety_allergen_classification_disjoint", sql`NOT (${table.containsAllergens} && ${table.mayContainAllergens})`),
+  check("catalog_food_safety_source_note_valid", sql`length(trim(${table.sourceNote})) BETWEEN 1 AND 200`),
+]);
+
+export const catalogFoodPortions = pgTable("catalog_food_portions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  foodId: uuid("food_id").notNull().references(() => catalogFoods.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  grams: integer("grams").notNull(),
+  sourceNote: text("source_note").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("catalog_food_portions_food_idx").on(table.foodId),
+  uniqueIndex("catalog_food_portions_food_label_idx").on(table.foodId, sql`lower(${table.label})`),
+  check("catalog_food_portions_label_valid", sql`length(trim(${table.label})) BETWEEN 1 AND 80`),
+  check("catalog_food_portions_grams_valid", sql`${table.grams} BETWEEN 1 AND 5000`),
+  check("catalog_food_portions_source_note_valid", sql`length(trim(${table.sourceNote})) BETWEEN 1 AND 200`),
+]);
+
 export type UserFoodRecipe = {
   yieldGrams: number;
   instructions?: string[];

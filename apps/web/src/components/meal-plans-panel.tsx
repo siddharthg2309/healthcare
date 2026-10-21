@@ -37,10 +37,10 @@ function mealPlanError(error: unknown): string {
       profile_or_accepted_goal_required: "Finish your profile and accept a goal before creating a meal plan.",
       accepted_calorie_target_required: "Your accepted goal needs a daily calorie target first.",
       meal_planning_not_available_for_this_profile: "Meal planning is not available for this profile. Food logging remains available.",
-      meal_plan_food_metadata_required: "Add reviewed food and allergen tags to the catalog before asking for a plan with dietary preferences or restrictions.",
+      meal_plan_food_metadata_required: "The catalog needs more reviewed tags for your saved food preferences or restrictions before it can build this plan.",
+      meal_plan_food_not_available: "That food no longer matches your saved dietary filters. Choose another reviewed catalog food.",
       meal_plan_catalog_coverage_insufficient: "The reviewed catalog needs more foods before it can build a useful week. Add more reviewed entries and try again.",
       meal_plan_edit_invalid: "This change puts a day outside the plan's nutrition range. Try a different food or adjust its portion.",
-      meal_plan_food_not_available: "That food is no longer available in your catalog. Choose another food and save again.",
       meal_plan_version_conflict: "This draft changed elsewhere. Reload your meal plans before making more edits.",
       meal_planning_not_configured: "Meal planning is not enabled on the server yet. Add the OpenRouter key in Vercel environment settings.",
       ai_daily_limit_reached: "You have reached the shared AI limit for the last 24 hours. Manual food and activity logging still work; try again later.",
@@ -127,7 +127,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
     const timer = window.setTimeout(() => {
       setSwapBusy(true);
       setSwapError("");
-      const query = new URLSearchParams({ query: swapQuery.trim() });
+      const query = new URLSearchParams({ query: swapQuery.trim(), purpose: "meal_plan" });
       void requestJson<{ foods: SwapFoodOption[] }>(`/v1/foods?${query.toString()}`, { signal: controller.signal })
         .then((response) => {
           if (!controller.signal.aborted) setSwapResults(response.foods);
@@ -325,6 +325,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
           <span className="eyebrow">A WEEK THAT FITS YOUR TARGET</span>
           <h2 id="meal-plans-title">Meal plan</h2>
           <p>Get a seven-day draft from your food catalog, check portions, and approve it when it looks right.</p>
+          <p className="field-note">Dietary filters use reviewed catalog tags. Check current food labels and recipes; these tags do not guarantee allergy safety or prevent cross-contamination.</p>
         </div>
         <span className="meal-plan-mark" aria-hidden="true">7</span>
       </div>
@@ -419,7 +420,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
       {history.length ? <details className="meal-plan-history"><summary>Past meal plans <span>{history.length}</span></summary><div>{history.map((plan) => <article key={plan.id}><strong>{plan.data.name}</strong><span>Version {plan.version} · {plan.status === "archived" ? "Archived" : "Replaced"} · {dateLabel(plan.data.startDate, { month: "short", day: "numeric", year: "numeric" })}</span></article>)}</div></details> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {notice ? <p className="form-message" role="status">{notice}</p> : null}
-      <p className="field-note">General food-planning support only. If your profile has dietary restrictions or saved food preferences, generation stays off until those foods can be filtered using reviewed tags.</p>
+      <p className="field-note">These are general food-planning suggestions. Review portions and current labels. Dietary filters use reviewed catalog tags and cannot guarantee allergy safety.</p>
     </section>
   );
 }

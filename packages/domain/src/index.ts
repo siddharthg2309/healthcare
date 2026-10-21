@@ -18,3 +18,14 @@ export {
   type WorkoutTemplateExercise,
   type WorkoutTemplateSession,
 } from "./workout-templates.js";
+export {
+  deriveFoodSafetyRequirements,
+  foodAllergenTags,
+  foodDietaryTags,
+  isFoodAllowedByReviewedMetadata,
+  validateFoodSafetyTagList,
+  type FoodAllergenTag,
+  type FoodDietaryTag,
+  type FoodSafetyMetadata,
+  type FoodSafetyRequirements,
+} from "./food-safety.js";

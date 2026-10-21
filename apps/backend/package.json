@@ -17,6 +17,7 @@
     "catalog:seed:fndds": "tsx scripts/catalog-foods.ts seed-fndds",
     "catalog:publish": "tsx scripts/catalog-foods.ts publish",
     "catalog:aliases": "tsx scripts/catalog-foods.ts aliases",
+    "catalog:safety:review": "tsx scripts/catalog-foods.ts safety-review",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src scripts --config eslint.config.cjs"
   },

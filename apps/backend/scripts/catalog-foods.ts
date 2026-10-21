@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { and, eq } from "drizzle-orm";
-import { catalogFoods } from "@healthcare/database/schema";
+import { catalogFoods, catalogFoodPortions, catalogFoodSafetyReviews } from "@healthcare/database/schema";
 import { db, pool } from "@healthcare/database";
+import { foodAllergenTags, foodDietaryTags, validateFoodSafetyTagList } from "@healthcare/domain";
 
 const allowedDataTypes = ["Foundation", "SR Legacy", "Survey (FNDDS)"] as const;
 const allowedCategories = ["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"] as const;
@@ -14,6 +15,7 @@ type FnddsFood = {
   description?: string;
   fdcId?: number;
   foodNutrients?: Array<{ nutrient?: { id?: number }; amount?: number }>;
+  foodPortions?: Array<{ portionDescription?: string; modifier?: string; gramWeight?: number }>;
   wweiaFoodCategory?: { wweiaFoodCategoryDescription?: string };
 };
 
@@ -194,6 +196,7 @@ async function seedFndds() {
   }
 
   const rows: Array<typeof catalogFoods.$inferInsert> = [];
+  const portionSeeds = new Map<number, Array<{ label: string; grams: number }>>();
   const seenIds = new Set<number>();
   let skippedMissingOrInvalid = 0;
   for (const food of surveyFoods) {
@@ -223,16 +226,25 @@ async function seedFndds() {
       reviewed: false,
       active: true,
     });
+    const portions = new Map<string, { label: string; grams: number }>();
+    for (const portion of food.foodPortions ?? []) {
+      const label = portion.portionDescription?.trim() || portion.modifier?.trim() || "";
+      const grams = Number.isFinite(portion.gramWeight) ? Math.round(portion.gramWeight!) : 0;
+      if (!label || label.length > 80 || grams < 1 || grams > 5000) continue;
+      portions.set(label.toLocaleLowerCase(), { label, grams });
+    }
+    if (portions.size) portionSeeds.set(food.fdcId, [...portions.values()]);
   }
 
   const dryRun = process.argv.includes("--dry-run");
   if (dryRun) {
-    console.log(`USDA FNDDS rows: ${surveyFoods.length}; importable generic foods: ${rows.length}; skipped for missing or unsafe macros: ${skippedMissingOrInvalid}.`);
+    const portionCount = [...portionSeeds.values()].reduce((total, portions) => total + portions.length, 0);
+    console.log(`USDA FNDDS rows: ${surveyFoods.length}; importable generic foods: ${rows.length}; default portions: ${portionCount}; skipped for missing or unsafe macros: ${skippedMissingOrInvalid}.`);
     console.log("Dry run only. No database rows were written.");
     return;
   }
 
-  const inserted = await db.transaction(async (tx) => {
+  const imported = await db.transaction(async (tx) => {
     let count = 0;
     const batchSize = 250;
     for (let offset = 0; offset < rows.length; offset += batchSize) {
@@ -241,11 +253,27 @@ async function seedFndds() {
         .returning({ id: catalogFoods.id });
       count += saved.length;
     }
-    return count;
+    const foodRows = portionSeeds.size ? await tx.select({ id: catalogFoods.id, externalSourceId: catalogFoods.externalSourceId })
+      .from(catalogFoods).where(eq(catalogFoods.source, fnddsSource)) : [];
+    const idByFdcId = new Map(foodRows.filter((food) => food.externalSourceId !== null)
+      .map((food) => [food.externalSourceId!, food.id]));
+    const portionRows = [...portionSeeds.entries()].flatMap(([fdcId, portions]) => {
+      const foodId = idByFdcId.get(String(fdcId));
+      return foodId ? portions.map((portion) => ({
+        foodId, label: portion.label, grams: portion.grams, sourceNote: "USDA FoodData Central FNDDS portion weight",
+      })) : [];
+    });
+    let portionCount = 0;
+    for (let offset = 0; offset < portionRows.length; offset += batchSize) {
+      const saved = await tx.insert(catalogFoodPortions).values(portionRows.slice(offset, offset + batchSize))
+        .onConflictDoNothing().returning({ id: catalogFoodPortions.id });
+      portionCount += saved.length;
+    }
+    return { count, portionCount };
   });
 
-  console.log(`USDA FNDDS rows: ${surveyFoods.length}; valid foods: ${rows.length}; skipped for missing or unsafe macros: ${skippedMissingOrInvalid}.`);
-  console.log(`${inserted} foods added to the shared catalog; ${rows.length - inserted} already existed and were left unchanged.`);
+  console.log(`USDA FNDDS rows: ${surveyFoods.length}; valid foods: ${rows.length}; default portions: ${imported.portionCount}; skipped for missing or unsafe macros: ${skippedMissingOrInvalid}.`);
+  console.log(`${imported.count} foods added to the shared catalog; ${rows.length - imported.count} already existed and were left unchanged.`);
   console.log("Imported foods are available for manual logging and remain marked not reviewed; they are excluded from AI meal-plan candidates until reviewed and published.");
 }
 
@@ -352,6 +380,39 @@ async function publishFood() {
   console.log(`Reviewed catalog entry published: ${published.name} (${published.id}).`);
 }
 
+async function reviewFoodSafety() {
+  const id = option("food-id");
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error("Usage: npm run catalog:safety:review -- --food-id <catalog-uuid> --dietary-tags vegetarian,vegan --contains-allergens milk --may-contain-allergens none --source-note SOURCE_NOTE");
+  }
+  const rawDietary = option("dietary-tags");
+  const rawContains = option("contains-allergens");
+  const rawMayContain = option("may-contain-allergens");
+  const sourceNote = option("source-note")?.trim();
+  if (rawDietary === undefined || rawContains === undefined || rawMayContain === undefined || !sourceNote || sourceNote.length > 200) {
+    throw new Error("Provide all three tag options (use none for an empty list) and a --source-note of 1–200 characters.");
+  }
+  const dietaryTags = validateFoodSafetyTagList(rawDietary, foodDietaryTags);
+  const containsAllergens = validateFoodSafetyTagList(rawContains, foodAllergenTags);
+  const mayContainAllergens = validateFoodSafetyTagList(rawMayContain, foodAllergenTags);
+  const overlap = containsAllergens.filter((tag) => mayContainAllergens.includes(tag));
+  if (overlap.length) throw new Error("A tag cannot be both contains and may-contain: " + overlap.join(", ") + ".");
+  const [food] = await db.select({ id: catalogFoods.id, name: catalogFoods.name, active: catalogFoods.active, reviewed: catalogFoods.reviewed })
+    .from(catalogFoods).where(eq(catalogFoods.id, id)).limit(1);
+  if (!food || !food.active || !food.reviewed) {
+    throw new Error("Publish and nutrition-review this catalog food before adding dietary/allergen metadata.");
+  }
+  await db.insert(catalogFoodSafetyReviews).values({
+    foodId: food.id, dietaryTags, containsAllergens, mayContainAllergens, sourceNote, reviewedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: catalogFoodSafetyReviews.foodId,
+    set: { dietaryTags, containsAllergens, mayContainAllergens, sourceNote, reviewedAt: new Date() },
+  });
+  console.log(`Reviewed food-safety metadata saved for ${food.name} (${food.id}).`);
+  console.log(`Dietary tags: ${dietaryTags.length ? dietaryTags.join(", ") : "none"}; contains: ${containsAllergens.length ? containsAllergens.join(", ") : "none"}; may contain: ${mayContainAllergens.length ? mayContainAllergens.join(", ") : "none"}.`);
+  console.log("This is a catalog filter, not a guarantee of allergy safety or cross-contamination control. Check current labels and recipes.");
+}
+
 async function main() {
   const action = process.argv[2];
   if (action === "seed-fndds") return await seedFndds();
@@ -359,7 +420,8 @@ async function main() {
   if (action === "import") return await importFood();
   if (action === "publish") return await publishFood();
   if (action === "aliases") return await updateAliases();
-  throw new Error("Use one of: catalog:search, catalog:import, catalog:publish, catalog:aliases.");
+  if (action === "safety-review") return await reviewFoodSafety();
+  throw new Error("Use one of: catalog:search, catalog:import, catalog:publish, catalog:aliases, catalog:safety:review.");
 }
 
 try {

@@ -120,6 +120,20 @@
       "when": 1792524727802,
       "tag": "0016_slim_umar",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792556075667,
+      "tag": "0017_catalog_food_safety_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792556635215,
+      "tag": "0018_catalog_food_portions",
+      "breakpoints": true
     }
   ]
 }

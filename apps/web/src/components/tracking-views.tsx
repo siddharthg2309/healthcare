@@ -44,7 +44,7 @@ export type FoodOption = {
   recipeVersion?: number | null;
 };
 
-type FoodPortion = { id: string; label: string; grams: number };
+type FoodPortion = { id: string; label: string; grams: number; isDefault: boolean };
 type PortionState = { key: string | null; portions: FoodPortion[]; loading: boolean; error: string };
 
 export type FoodLog = {
@@ -218,6 +218,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   const portions = selectedFoodKey && portionState.key === selectedFoodKey ? portionState.portions : [];
   const portionLoading = Boolean(selectedFoodKey) && portionState.key !== selectedFoodKey;
   const portionError = selectedFoodKey && portionState.key === selectedFoodKey ? portionState.error : "";
+  const savedPortionCount = portions.filter((portion) => !portion.isDefault).length;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -410,7 +411,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
   }
 
   async function deletePortion(portion: FoodPortion) {
-    if (!selectedFood) return;
+    if (!selectedFood || portion.isDefault) return;
     const foodKey = `${selectedFood.source}:${selectedFood.id}`;
     setPortionBusy(true);
     try {
@@ -548,16 +549,16 @@ export function FoodTrackingView({ day, onSaved }: Props) {
               <label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as (typeof meals)[number])}>{meals.map((meal) => <option key={meal} value={meal}>{meal[0].toUpperCase() + meal.slice(1)}</option>)}</select></label>
               <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
             </div>
-            {portions.length ? <div className="food-portion-list" role="group" aria-label="Saved household portions">
+            {portions.length ? <div className="food-portion-list" role="group" aria-label="Serving sizes and saved portions">
               {portions.map((portion) => <div className="food-portion-chip" key={portion.id}>
                 <button type="button" aria-pressed={selectedPortionId === portion.id} onClick={() => { setQuantity(String(portion.grams)); setSelectedPortionId(portion.id); }}>{portion.label}<small>{portion.grams} g</small></button>
-                <button type="button" className="food-portion-remove" aria-label={`Remove ${portion.label} portion`} disabled={portionBusy} onClick={() => void deletePortion(portion)}>×</button>
+                {!portion.isDefault ? <button type="button" className="food-portion-remove" aria-label={`Remove ${portion.label} portion`} disabled={portionBusy} onClick={() => void deletePortion(portion)}>×</button> : null}
               </div>)}
             </div> : null}
             {portionLoading ? <p className="muted-copy">Loading your saved portions…</p> : null}
             <div className="food-portion-save">
               <label className="field"><span>Save this gram amount as a portion</span><input value={portionLabel} onChange={(event) => setPortionLabel(event.target.value)} maxLength={40} placeholder="1 katori, 1 medium roti…" /></label>
-              <button type="button" className="button button-secondary" disabled={portionBusy || portions.length >= 20 || !portionLabel.trim()} onClick={() => void savePortion()}>{portionBusy ? "Saving…" : `Save ${quantity || "this amount"} g`}</button>
+              <button type="button" className="button button-secondary" disabled={portionBusy || savedPortionCount >= 20 || !portionLabel.trim()} onClick={() => void savePortion()}>{portionBusy ? "Saving…" : `Save ${quantity || "this amount"} g`}</button>
             </div>
             {portionError ? <p className="form-error" role="alert">{portionError}</p> : null}
             {preview ? <div className="nutrition-preview"><strong>{formatNumber(preview.calories)} kcal</strong><span>Protein {formatNumber(preview.protein, 1)} g</span><span>Carbs {formatNumber(preview.carbs, 1)} g</span><span>Fat {formatNumber(preview.fat, 1)} g</span></div> : null}
