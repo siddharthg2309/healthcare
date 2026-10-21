@@ -78,6 +78,12 @@ Choose **Sure** for one gram amount or **Not sure** for a range such as 300–40
 
 Photo entries are labeled estimates and do not become reviewed catalog foods. The API validates text or photo estimates and signs an account-bound draft valid for two hours. Confirmation verifies that draft, applies bounded user corrections, calculates totals, and saves atomically with retry protection. Uploaded bytes stay out of app storage; confirmed nutrition snapshots and provenance are retained. No new environment values or database migration are required. Builds and runtime checks were not run, following the owner's request.
 
+## If AI estimates are unavailable
+
+Text/food photos and cardio photos share a maximum 40-second provider deadline. Connection failures and HTTP 500/502/503/504 receive at most one retry after a short randomized delay, within that same deadline. Authentication, malformed requests, quota/rate limits, and invalid model output are not retried. There is no automatic model/provider switch. This transport retry does not save a food or activity; explicit review and confirmation remain required. One account operation may make two provider requests, so upstream usage can be higher than the account operation count. Stored token/cost figures reflect the returned response; failed attempts may have unreported usage.
+
+The UI distinguishes provider busy/errors, connection failure, timeout, missing configuration, and quota limits. Retry diagnostics log only event/status/attempt, without prompts, photos, keys, or account identifiers. A generic completion failure can still originate outside the provider; the message alone does not prove an outage. Manual database food logging remains available. No new environment values or migrations are required. Build, typecheck, runtime checks, and live inference remain skipped at the owner's request; reading saved sanitized failure records for diagnosis is not a live inference check.
+
 ## Run locally
 
 ### Requirements

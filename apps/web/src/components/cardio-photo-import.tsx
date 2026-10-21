@@ -36,6 +36,9 @@ export function CardioPhotoImport({ report, disabled, onChange, onReading, onBus
         ai_not_configured: "Photo import isn’t available. You can enter minutes manually.",
         ai_daily_limit_reached: "Today’s AI limit is reached. You can still log manually.",
         ai_rate_limited: "Photo import is busy. Try again shortly.",
+        ai_service_busy: "The AI service is busy. Try again in a moment.",
+        ai_service_error: "The AI service had an error. Try again shortly.",
+        ai_connection_failed: "Couldn’t reach the AI service. You can still log manually.",
         ai_timeout: "Reading took too long. Try another photo or enter minutes.",
         ai_invalid_response: "Couldn’t read this session. Try a clearer image.",
       };

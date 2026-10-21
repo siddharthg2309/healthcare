@@ -5,7 +5,7 @@ import {
   type FoodTextEstimateRequest,
 } from "@healthcare/contracts";
 import { env } from "../env.js";
-import { geminiChatCompletion } from "./gemini.js";
+import { geminiChatCompletion, GeminiConnectionError } from "./gemini.js";
 import { providerCostToMicros } from "./ai-usage.js";
 
 export type FoodVisionStatus = 400 | 429 | 502 | 503 | 504;
@@ -82,6 +82,9 @@ export function providerFailure(status: number, usage: FoodVisionUsage | null = 
     case 408:
     case 504: return new FoodVisionError("ai_timeout", 504, usage);
     case 429: return new FoodVisionError("ai_rate_limited", 429, usage);
+    case 500:
+    case 502: return new FoodVisionError("ai_service_error", 503, usage);
+    case 503: return new FoodVisionError("ai_service_busy", 503, usage);
     default: return new FoodVisionError("ai_provider_unavailable", 503, usage);
   }
 }
@@ -106,7 +109,7 @@ async function requestFoodEstimate(input: FoodPhotoRecognitionRequest | FoodText
   if (!env.GEMINI_API_KEY) throw new FoodVisionError("ai_not_configured", 503);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), 40_000);
   try {
     const response = await geminiChatCompletion({
       temperature: 0.1,
@@ -156,7 +159,7 @@ async function requestFoodEstimate(input: FoodPhotoRecognitionRequest | FoodText
           },
         },
       },
-    }, controller.signal);
+    }, controller.signal, { retryTransient: true });
 
     if (!response.ok) throw providerFailure(response.status);
     const body = await response.json().catch(() => null) as {
@@ -183,10 +186,10 @@ async function requestFoodEstimate(input: FoodPhotoRecognitionRequest | FoodText
     }
   } catch (error) {
     if (error instanceof FoodVisionError) throw error;
-    if (error instanceof Error && error.name === "AbortError") {
+    if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw new FoodVisionError("ai_timeout", 504);
     }
-    throw new FoodVisionError("ai_provider_unavailable", 503);
+    throw new FoodVisionError(error instanceof GeminiConnectionError ? "ai_connection_failed" : "ai_provider_unavailable", 503);
   } finally {
     clearTimeout(timeout);
   }

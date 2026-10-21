@@ -4,7 +4,7 @@ import { db } from "@healthcare/database";
 import { aiRuns, userRecords } from "@healthcare/database/schema";
 import { cardioPhotoExtractionSchema, type ActivityLogRecord, type CardioPhotoResponse, type FoodPhotoRecognitionRequest } from "@healthcare/contracts";
 import { env } from "../env.js";
-import { geminiChatCompletion } from "./gemini.js";
+import { geminiChatCompletion, GeminiConnectionError } from "./gemini.js";
 import { hasAiOperationCapacity, lockAiUsageWindow, providerCostToMicros } from "./ai-usage.js";
 import { FoodVisionError, imageMatchesMimeType, providerFailure, responseText, safeTokenCount, type FoodVisionUsage } from "./food-vision.js";
 
@@ -29,7 +29,7 @@ export async function hasOwnedCardioReport(reader: Reader, userId: string, recor
 
 async function extractCardioPhoto(image: FoodPhotoRecognitionRequest) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), 40_000);
   let usage: FoodVisionUsage | null = null;
   try {
     const response = await geminiChatCompletion({
@@ -56,7 +56,7 @@ async function extractCardioPhoto(image: FoodPhotoRecognitionRequest) {
         },
         required: ["isActivity", "durationMinutes", "caloriesKcal", "calorieBasis", "distanceKm", "activityKind", "confidence", "question"],
       } } },
-    }, controller.signal);
+    }, controller.signal, { retryTransient: true });
     if (!response.ok) throw providerFailure(response.status);
     const body = await response.json().catch(() => null) as {
       error?: { code?: unknown }; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; cost?: unknown };
@@ -73,7 +73,8 @@ async function extractCardioPhoto(image: FoodPhotoRecognitionRequest) {
     return { response: parsed.data, usage };
   } catch (error) {
     if (error instanceof FoodVisionError) throw error;
-    throw new FoodVisionError(error instanceof Error && error.name === "AbortError" ? "ai_timeout" : "ai_provider_unavailable", error instanceof Error && error.name === "AbortError" ? 504 : 503, usage);
+    if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) throw new FoodVisionError("ai_timeout", 504, usage);
+    throw new FoodVisionError(error instanceof GeminiConnectionError ? "ai_connection_failed" : "ai_provider_unavailable", 503, usage);
   } finally { clearTimeout(timeout); }
 }
 

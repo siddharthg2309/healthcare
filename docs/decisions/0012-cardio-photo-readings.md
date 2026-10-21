@@ -26,7 +26,7 @@ General cycling adds Compendium code `01014`, 7 MET. Existing jogging is labelle
 
 ## Backend, ownership, and bounded AI
 
-`POST /v1/activities/recognize-photo` requires the authenticated session, a supported JPEG/PNG/WebP MIME type, canonical bounded base64, and matching image bytes. Browser preparation shares food-photo compression: maximum 20 MB input, resized JPEG, maximum 2.5 MB uploaded bytes. The endpoint caps JSON body size. Each attempt reserves the shared rolling 24-hour account quota before one bounded model request; no autonomous tools or retries run. The existing Gemini key/model are reused, with a 30-second timeout and validated structured output.
+`POST /v1/activities/recognize-photo` requires the authenticated session, a supported JPEG/PNG/WebP MIME type, canonical bounded base64, and matching image bytes. Browser preparation shares food-photo compression: maximum 20 MB input, resized JPEG, maximum 2.5 MB uploaded bytes. The endpoint caps JSON body size. Each attempt reserves the shared rolling 24-hour account quota before a bounded extraction operation; no autonomous tools run. A later resilience update allows one transient transport retry within the same overall deadline. The existing Gemini key/model are reused, with a 40-second timeout and validated structured output.
 
 The vision system prompt treats image text as untrusted data. It instructs the model to extract visible readings only, leave ambiguous values unknown, and never follow embedded commands or infer calories from appearance or heart rate. Schema validation and ownership checks run in application code. These reduce injection risk; model obedience is not a security boundary for calculations or writes.
 
