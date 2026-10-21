@@ -70,7 +70,7 @@ export const reminderPreferencesResponseSchema = reminderPreferencesRequestSchem
 }).strict();
 
 export const deleteAccountRequestSchema = z.object({
-  password: z.string().min(12).max(128),
+  password: z.string().min(12).max(128).optional(),
   confirmation: z.literal("DELETE"),
 }).strict();
 

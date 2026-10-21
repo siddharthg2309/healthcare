@@ -401,7 +401,7 @@ app.delete("/v1/account", async (c) => {
   const authRequest = new Request(new URL("/api/auth/delete-user", c.req.url), {
     method: "POST",
     headers,
-    body: JSON.stringify({ password: parsed.data.password }),
+    body: JSON.stringify(parsed.data.password ? { password: parsed.data.password } : {}),
   });
   return auth.handler(authRequest);
 });

@@ -214,13 +214,22 @@ export function SettingsView({ userId, onAccountDeleted }: { userId: string; onA
       const response = await fetch("/v1/account", {
         method: "DELETE",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
-        body: JSON.stringify({ password: deletePassword, confirmation: deleteConfirmation }),
+        body: JSON.stringify({
+          ...(deletePassword ? { password: deletePassword } : {}),
+          confirmation: deleteConfirmation,
+        }),
       });
-      const body = await response.json().catch(() => ({})) as { error?: unknown };
+      const body = await response.json().catch(() => ({})) as { code?: unknown; error?: unknown; message?: unknown };
       if (!response.ok) {
-        const message = body.error === "account_deletion_migration_required"
+        const code = typeof body.code === "string" ? body.code : typeof body.error === "string" ? body.error : "";
+        const message = code === "account_deletion_migration_required"
           ? "Account deletion is unavailable until the app owner applies the latest Neon migration. Your account was not deleted."
-          : typeof body.error === "string" ? body.error.replaceAll("_", " ") : "Account deletion failed. Check your password and try again.";
+          : code === "SESSION_EXPIRED"
+            ? "Your sign-in is older than 24 hours. Sign out and sign in again, then retry. Google sign-in works; no password is needed."
+            : code === "INVALID_PASSWORD"
+              ? "That password does not match. Try again, or leave it blank if you use Google sign-in."
+              : typeof body.message === "string" ? body.message
+                : code ? code.replaceAll("_", " ") : "Account deletion failed. Try again.";
         throw new Error(message);
       }
       clearReminderMarkers(userId);
@@ -268,13 +277,13 @@ export function SettingsView({ userId, onAccountDeleted }: { userId: string; onA
         </> : null}
       </section>
       <section className="panel settings-calendar-panel">
-        <div className="panel-heading"><div><span className="eyebrow">OPTIONAL CONNECTION</span><h2>Google Calendar</h2></div><span className="panel-symbol" aria-hidden="true">▦</span></div>
-        <p className="muted-copy">Sync approved workouts to a separate Goal Health calendar. Events use your workout reminder time and include a 30-minute popup reminder.</p>
+        <div className="panel-heading"><div><span className="eyebrow">SEPARATE GOOGLE PERMISSION</span><h2>Google Calendar</h2></div><span className="panel-symbol" aria-hidden="true">▦</span></div>
+        <p className="muted-copy">Calendar sync is optional because Google sign-in only shares your basic account details. Connect it separately if you want approved workouts copied to a Goal Health calendar. Food, activity, progress, and in-app reminders work without Calendar access.</p>
         {calendar?.connected ? <>
           <div className="calendar-connection-status"><strong>{calendar.calendarName}</strong><span>{calendar.lastSyncedAt ? `Last synced ${new Date(calendar.lastSyncedAt).toLocaleString()}` : "Connected · not synced yet"}</span><span>{calendar.linkedEvents} linked events</span></div>
           <div className="calendar-actions"><button className="button button-primary" type="button" disabled={calendarBusy} onClick={() => void syncCalendar()}>{calendarBusy ? "Syncing…" : "Sync approved workouts"}</button><button className="text-button" type="button" disabled={calendarBusy} onClick={() => void disconnectCalendar()}>Disconnect</button></div>
         </> : <>
-          {calendar && !calendar.configured ? <p className="note-box">The app owner needs to add the Google OAuth values and token encryption key to the server environment before this can connect.</p> : null}
+          {calendar && !calendar.configured ? <p className="note-box">To enable this, the app owner must enable Google Calendar API and set GOOGLE_REDIRECT_URI and TOKEN_ENCRYPTION_KEY in Vercel. The existing Google sign-in client ID and secret can be reused.</p> : null}
           {calendar?.configured
             ? <form action="/v1/connections/google/start" method="get"><button className="button button-secondary" type="submit">Connect Google Calendar</button></form>
             : <button className="button button-secondary" type="button" disabled>Connect Google Calendar</button>}
@@ -290,7 +299,7 @@ export function SettingsView({ userId, onAccountDeleted }: { userId: string; onA
           <strong>Delete account</strong>
           <p>This removes your app records and planning checkpoints and attempts to revoke Google access. The Goal Health calendar and synced events may remain in Google; remove that calendar there if you want those events deleted too.</p>
           {!deleteOpen ? <button className="button button-danger" type="button" onClick={() => { setDeleteOpen(true); setPrivacyError(""); }}>Delete my account</button> : <form className="account-delete-form" onSubmit={(event) => void deleteAccount(event)}>
-            <label className="field"><span>Current password</span><input type="password" minLength={12} maxLength={128} autoComplete="current-password" required value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} /></label>
+            <label className="field"><span>Password (optional)</span><input type="password" minLength={deletePassword ? 12 : undefined} maxLength={128} autoComplete="current-password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} /><small>Use this for an email/password account. Google accounts have no password. If you leave this blank, your sign-in must be less than 24 hours old.</small></label>
             <label className="field"><span>Type DELETE to confirm</span><input autoComplete="off" required value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} /></label>
             <div className="calendar-actions"><button className="button button-danger" type="submit" disabled={deleteBusy}>{deleteBusy ? "Deleting…" : "Permanently delete account"}</button><button className="text-button" type="button" disabled={deleteBusy} onClick={() => { setDeleteOpen(false); setDeletePassword(""); setDeleteConfirmation(""); }}>Cancel</button></div>
           </form>}
