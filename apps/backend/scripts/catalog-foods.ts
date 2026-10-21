@@ -12,13 +12,19 @@ type AllowedDataType = (typeof allowedDataTypes)[number];
 type AllowedCategory = (typeof allowedCategories)[number];
 const fnddsSource = "USDA FoodData Central (Survey (FNDDS))";
 const fnddsCategoryOverrides: Partial<Record<number, AllowedCategory>> = {
+  2707427: "prepared_meal",
   2707429: "snack",
+  2707431: "prepared_meal",
+  2707432: "prepared_meal",
   2707613: "prepared_meal",
   2707713: "prepared_meal",
   2707714: "prepared_meal",
   2707715: "prepared_meal",
+  2708730: "snack",
   2709128: "prepared_meal",
+  2709129: "prepared_meal",
   2709130: "snack",
+  2710066: "snack",
 };
 
 type FnddsFood = {
@@ -165,7 +171,7 @@ function categoryForFnddsFood(food: FnddsFood): AllowedCategory {
   if (/\b(?:snacks?|chips?|cookies?|brownies?|cand(?:y|ies)|desserts?|ice cream|puddings?|pastr(?:y|ies)|cakes?|pies?|doughnuts?|popcorn|crackers?|pretzels?|cereal bars?|nuts and seeds|jams?, syrups?|toppings?)\b/.test(label)) {
     return "snack";
   }
-  if (/\b(?:mixed dish(?:es)?|sandwich(?:es)?|pizzas?|burgers?|tacos?|burritos?|soups?|salads?|curries?|biryanis?|pastas?|noodles?|meals?|dumplings?|sushi|fried rice|pancakes?|waffles?|stir-fry|potato mixtures?|vegetable dishes?)\b/.test(label)) {
+  if (/\b(?:mixed dish(?:es)?|sandwich(?:es)?|pizzas?|burgers?|tacos?|burritos?|soups?|salads?|curr(?:y|ies)|biryanis?|pastas?|noodles?|meals?|dumplings?|sushi|fried rice|pancakes?|waffles?|stir-fry|potato mixtures?|vegetable dishes?)\b/.test(label)) {
     return "prepared_meal";
   }
   return "ingredient";
