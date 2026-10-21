@@ -38,7 +38,7 @@ Import `siddharthg2309/healthcare` from GitHub as one Vercel project. In the imp
 
 See Vercel's [monorepo setup](https://vercel.com/docs/monorepos) and [build settings](https://vercel.com/docs/builds/configure-a-build) for these project options.
 
-In the Vercel project settings, add server-side Environment Variables for the **Production** environment before deploying. Set these to the production Neon database and the chosen stable app domain:
+In the Vercel project settings, add server-side Environment Variables for the **Production** environment before deploying. Set these to the production Neon database and the chosen stable app domain. Keep these variables Production-only for the first deployment; Preview deployments need their own matching auth origin if enabled later.
 
 ```text
 DATABASE_URL=<Neon pooled Postgres connection string>
@@ -49,6 +49,8 @@ OPENROUTER_API_KEY=<your OpenRouter key>
 ```
 
 Local `.env` values are ignored by Git and are not copied into Vercel. Use your existing private Neon URL and auth secret. `OPENROUTER_API_KEY` enables food-photo suggestions and both AI planners. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are optional; add them after deployment if you want Google sign-in. Use the exact HTTPS origin with no path or trailing slash in both auth URL variables. If you change domains, update both values and redeploy. Add matching values to Vercel's Preview environment only if you intend to test authentication on preview deployments; allow only the exact preview origin being used.
+
+Vercel assigns a default `.vercel.app` domain based on the project name when the project is deployed. Use the domain you expect Vercel to assign in both auth variables, then verify the actual value under **Project → Settings → Domains**. If it differs, update `AUTH_BASE_URL` and `AUTH_TRUSTED_ORIGINS` to the assigned HTTPS origin and redeploy before testing sign-in or inviting friends. Do not import a local `.env` unchanged when its auth URLs point to localhost. See Vercel's [domain assignment guide](https://vercel.com/docs/domains/working-with-domains).
 
 Set values in **Vercel → Project → Settings → Environment Variables**; do not put them in source files, GitHub Actions logs, or client `NEXT_PUBLIC_*` variables. Vercel hosts the site and Next.js server routes, so there is no separate API URL to configure. Neon hosts the data, so `DATABASE_URL` remains necessary.
 
