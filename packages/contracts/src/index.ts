@@ -294,9 +294,25 @@ const plannedWorkoutSessionReferenceSchema = z.object({
   label: z.string().trim().min(1).max(80),
 }).strict();
 
+export const activityEnergyKindSchema = z.enum([
+  "walk_slow", "walk_moderate", "walk_brisk", "aerobics", "jogging",
+  "stationary_cycle", "elliptical", "rowing", "strength_general", "strength_vigorous", "bodyweight",
+]);
+
+export const activityEnergyEstimateSchema = z.object({
+  method: z.literal("compendium_2024_net_v1"),
+  caloriesKcal: z.number().int().min(0).max(100000),
+  met: z.number().finite().min(1).max(30),
+  compendiumCode: z.string().regex(/^\d{5}$/),
+  weightKg: z.number().finite().min(25).max(400),
+  weightSource: z.enum(["measurement", "profile"]),
+  weightMeasuredAt: isoDateTime.nullable(),
+}).strict();
+
 const activityLogSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
+  energyKind: activityEnergyKindSchema.optional(),
   durationMinutes: z.number().int().min(0).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
@@ -315,6 +331,7 @@ export const createActivityLogRequestSchema = z.object({
   activityId: uuidSchema,
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
+  energyKind: activityEnergyKindSchema.optional(),
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
@@ -346,6 +363,7 @@ export const updateActivityLogRequestSchema = z.object({
   baseVersion: z.number().int().positive(),
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
+  energyKind: activityEnergyKindSchema.optional(),
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
@@ -380,6 +398,8 @@ export const deleteActivityLogRequestSchema = z.object({
 export const activityLogRecordSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
+  energyKind: activityEnergyKindSchema.optional(),
+  energyEstimate: activityEnergyEstimateSchema.nullable().optional(),
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().max(500).nullable(),
@@ -777,6 +797,8 @@ export type CreateActivityLogRequest = z.infer<typeof createActivityLogRequestSc
 export type UpdateActivityLogRequest = z.infer<typeof updateActivityLogRequestSchema>;
 export type DeleteActivityLogRequest = z.infer<typeof deleteActivityLogRequestSchema>;
 export type ActivityLogRecord = z.infer<typeof activityLogRecordSchema>;
+export type ActivityEnergyKind = z.infer<typeof activityEnergyKindSchema>;
+export type ActivityEnergyEstimate = z.infer<typeof activityEnergyEstimateSchema>;
 export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type ExerciseProgressQuery = z.infer<typeof exerciseProgressQuerySchema>;

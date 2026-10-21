@@ -4,6 +4,13 @@ export {
   type GoalProposal,
 } from "./goals.js";
 export {
+  activityEnergyOptions,
+  defaultActivityEnergyKind,
+  estimateActivityEnergy,
+  isActivityEnergyKindAllowed,
+  selectActivityWeight,
+} from "./activity-energy.js";
+export {
   EXERCISE_CATALOG_VERSION,
   canonicalizeEquipment,
   exerciseCatalog,

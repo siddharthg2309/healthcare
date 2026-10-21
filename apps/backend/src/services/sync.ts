@@ -7,8 +7,9 @@ import {
   userRecords,
   userSyncCounters,
 } from "@healthcare/database/schema";
-import type { SyncOperation, SyncPushRequest } from "@healthcare/contracts";
-import { findExerciseById } from "@healthcare/domain";
+import { activityLogRecordSchema, type SyncOperation, type SyncPushRequest } from "@healthcare/contracts";
+import { findExerciseById, isActivityEnergyKindAllowed } from "@healthcare/domain";
+import { buildActivityEnergyEstimate } from "./activity-energy.js";
 
 type SyncResult =
   | { status: "applied"; entity: string; id: string; version: number; cursor: number }
@@ -29,6 +30,8 @@ type DbReader = Pick<typeof db, "select">;
 async function normalizeOperation(
   operation: SyncOperation,
   reader: DbReader,
+  userId: string,
+  priorData: unknown,
 ): Promise<Record<string, unknown> | null> {
   if (operation.operation === "delete") return null;
 
@@ -54,13 +57,16 @@ async function normalizeOperation(
       };
     }
     case "activity_log": {
+      if (!isActivityEnergyKindAllowed(operation.data.activityType, operation.data.energyKind)) throw new Error("invalid_activity_energy_kind");
       const invalidExerciseReference = operation.data.exercises?.some((exercise) => {
         if (!exercise.exerciseId) return false;
         const catalogExercise = findExerciseById(exercise.exerciseId);
         return !catalogExercise || catalogExercise.name !== exercise.exerciseName;
       });
       if (invalidExerciseReference) throw new Error("invalid_exercise_reference");
-      return operation.data;
+      const prior = activityLogRecordSchema.safeParse(priorData);
+      const energyEstimate = await buildActivityEnergyEstimate(reader, userId, operation.data, prior.success ? prior.data : undefined);
+      return { ...operation.data, energyEstimate };
     }
     case "body_measurement":
       return operation.data;
@@ -132,7 +138,7 @@ export async function pushSync(userId: string, request: SyncPushRequest): Promis
         continue;
       }
 
-      const normalizedData = await normalizeOperation(operation, tx);
+      const normalizedData = await normalizeOperation(operation, tx, userId, current?.data);
       const nextVersion = (current?.version ?? 0) + 1;
       const isDeleted = operation.operation === "delete";
       const [updated] = await tx.insert(userRecords).values({

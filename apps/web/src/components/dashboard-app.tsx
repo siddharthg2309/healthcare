@@ -128,7 +128,7 @@ export function DashboardApp() {
         <div className="content-wrap">
           {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} onWeighIn={() => { setTab("progress"); window.setTimeout(() => document.getElementById("weigh-in-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }} onFood={() => setTab("food")} onActivity={() => setTab("activity")} /> : null}
           {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} foodPreferences={profile.foodPreferences} onSaved={reloadData} /> : null}
-          {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} unitSystem={profile.unitSystem} equipment={profile.equipment} gymWorkoutDays={profile.gymWorkoutDays ?? 0} homeWorkoutDays={profile.homeWorkoutDays ?? profile.availableWorkoutDays} onSaved={reloadData} /> : null}
+          {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} profileWeightKg={profile.currentWeightKg} measurements={measurements} unitSystem={profile.unitSystem} equipment={profile.equipment} gymWorkoutDays={profile.gymWorkoutDays ?? 0} homeWorkoutDays={profile.homeWorkoutDays ?? profile.availableWorkoutDays} onSaved={reloadData} /> : null}
           {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} unitSystem={profile.unitSystem} onMeasurementAdded={reloadData} /> : null}
           {tab === "settings" ? <SettingsView userId={session.user.id} displayName={profile.displayName} email={session.user.email} onSignOut={async () => { await authClient.signOut(); await refetch(); }} onAccountDeleted={refetch} /> : null}
         </div>

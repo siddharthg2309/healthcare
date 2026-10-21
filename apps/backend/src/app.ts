@@ -50,6 +50,7 @@ import {
 } from "@healthcare/contracts";
 import {
   buildGoalProposal,
+  isActivityEnergyKindAllowed,
   deriveMealPlanFoodSafetyRequirements,
   findExerciseById,
   isFoodAllowedByReviewedMetadata,
@@ -61,6 +62,7 @@ import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
 import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
+import { buildActivityEnergyEstimate } from "./services/activity-energy.js";
 import { hasAiOperationCapacity, lockAiUsageWindow } from "./services/ai-usage.js";
 import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
 import { buildWorkoutPlanningContext, hashWorkoutPlanningContext, resumeWorkoutPlan, runWorkoutPlan, workoutPlanningVersions } from "./services/workout-planning.js";
@@ -1717,6 +1719,7 @@ app.post("/v1/activity-logs", async (c) => {
   }
   const parsed = createActivityLogRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_activity_log" }, 400);
+  if (!isActivityEnergyKindAllowed(parsed.data.activityType, parsed.data.energyKind)) return c.json({ error: "invalid_activity_energy_kind" }, 400);
   const invalidExerciseReference = parsed.data.exercises?.some((exercise) => {
     if (!exercise.exerciseId) return false;
     const catalogExercise = findExerciseById(exercise.exerciseId);
@@ -1726,6 +1729,7 @@ app.post("/v1/activity-logs", async (c) => {
   const data = activityLogRecordSchema.parse({
     activityType: parsed.data.activityType,
     occurredAt: parsed.data.occurredAt,
+    ...(parsed.data.energyKind ? { energyKind: parsed.data.energyKind } : {}),
     durationMinutes: parsed.data.durationMinutes,
     steps: parsed.data.steps,
     notes: parsed.data.notes,
@@ -1736,9 +1740,7 @@ app.post("/v1/activity-logs", async (c) => {
   const userId = c.get("session").user.id;
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-    if (parsed.data.plannedSession && !await hasOwnedApprovedWorkoutSession(tx, userId, parsed.data.plannedSession)) {
-      return { status: "planned_session_invalid" as const };
-    }
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"activity-log:" + userId + ":" + parsed.data.activityId}, 0))`);
     const [existing] = await tx.select({ data: userRecords.data, version: userRecords.version }).from(userRecords).where(and(
       eq(userRecords.userId, userId),
       eq(userRecords.entity, "activity_log"),
@@ -1747,20 +1749,26 @@ app.post("/v1/activity-logs", async (c) => {
     )).limit(1);
     if (existing) {
       const prior = activityLogRecordSchema.safeParse(existing.data);
-      const same = prior.success && JSON.stringify(prior.data) === JSON.stringify(data);
+      const priorInput = prior.success ? { ...prior.data } : null;
+      if (priorInput) delete priorInput.energyEstimate;
+      const same = priorInput !== null && JSON.stringify(priorInput) === JSON.stringify(data);
       return { status: same ? "saved" as const : "conflict" as const, data: existing.data, version: existing.version, idempotent: same };
     }
+    if (parsed.data.plannedSession && !await hasOwnedApprovedWorkoutSession(tx, userId, parsed.data.plannedSession)) {
+      return { status: "planned_session_invalid" as const };
+    }
+    const recordedData = activityLogRecordSchema.parse({ ...data, energyEstimate: await buildActivityEnergyEstimate(tx, userId, data) });
     await tx.insert(userRecords).values({
       userId,
       entity: "activity_log",
       recordId: parsed.data.activityId,
       version: 1,
-      data,
+      data: recordedData,
       deleted: false,
       serverUpdatedAt: new Date(),
     });
-    await appendSyncChange(tx, userId, "activity_log", parsed.data.activityId, data);
-    return { status: "saved" as const, data, version: 1, idempotent: false };
+    await appendSyncChange(tx, userId, "activity_log", parsed.data.activityId, recordedData);
+    return { status: "saved" as const, data: recordedData, version: 1, idempotent: false };
   });
   if (result.status === "planned_session_invalid") return c.json({ error: "planned_workout_session_unavailable" }, 409);
   if (result.status === "conflict") return c.json({ error: "activity_log_id_conflict" }, 409);
@@ -1778,6 +1786,7 @@ app.patch("/v1/activity-logs/:id", async (c) => {
   }
   const parsed = updateActivityLogRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_activity_log_update" }, 400);
+  if (!isActivityEnergyKindAllowed(parsed.data.activityType, parsed.data.energyKind)) return c.json({ error: "invalid_activity_energy_kind" }, 400);
   const invalidExerciseReference = parsed.data.exercises?.some((exercise) => {
     if (!exercise.exerciseId) return false;
     const catalogExercise = findExerciseById(exercise.exerciseId);
@@ -1787,6 +1796,7 @@ app.patch("/v1/activity-logs/:id", async (c) => {
   const data = activityLogRecordSchema.parse({
     activityType: parsed.data.activityType,
     occurredAt: parsed.data.occurredAt,
+    ...(parsed.data.energyKind ? { energyKind: parsed.data.energyKind } : {}),
     durationMinutes: parsed.data.durationMinutes,
     steps: parsed.data.steps,
     notes: parsed.data.notes,
@@ -1805,13 +1815,15 @@ app.patch("/v1/activity-logs/:id", async (c) => {
     )).limit(1);
     if (!existing) return { status: "missing" as const };
     if (existing.version !== parsed.data.baseVersion) return { status: "conflict" as const, version: existing.version };
-    if (!activityLogRecordSchema.safeParse(existing.data).success) return { status: "invalid_record" as const };
+    const prior = activityLogRecordSchema.safeParse(existing.data);
+    if (!prior.success) return { status: "invalid_record" as const };
     if (parsed.data.plannedSession && !await hasOwnedApprovedWorkoutSession(tx, userId, parsed.data.plannedSession)) {
       return { status: "planned_session_invalid" as const };
     }
+    const recordedData = activityLogRecordSchema.parse({ ...data, energyEstimate: await buildActivityEnergyEstimate(tx, userId, data, prior.data) });
     const version = existing.version + 1;
     const [saved] = await tx.update(userRecords).set({
-      data,
+      data: recordedData,
       version,
       serverUpdatedAt: new Date(),
     }).where(and(
@@ -1822,7 +1834,7 @@ app.patch("/v1/activity-logs/:id", async (c) => {
       eq(userRecords.deleted, false),
     )).returning({ data: userRecords.data, version: userRecords.version });
     if (!saved) return { status: "conflict" as const, version: existing.version + 1 };
-    await appendSyncChange(tx, userId, "activity_log", recordId, data, version);
+    await appendSyncChange(tx, userId, "activity_log", recordId, recordedData, version);
     return { status: "saved" as const, data: saved.data, version: saved.version };
   });
   if (result.status === "planned_session_invalid") return c.json({ error: "planned_workout_session_unavailable" }, 409);

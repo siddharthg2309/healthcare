@@ -20,6 +20,10 @@ The app is under implementation. The current build includes account setup, goal 
 
 The PWA uses a phone-width layout on every screen, with bottom navigation, safe-area spacing, readable input text, and thumb-sized controls. Food selection opens a bottom sheet: choose a saved serving size, adjust its count with − / + / +2, and add the total to a meal. Custom gram amounts and timestamps stay under **Custom amount & time**. Food and activity each separate their daily log from weekly plans.
 
+Activity opens on a manual log. Enter exercises, sets/reps/loads, and session minutes for strength, or a cardio type and minutes. The app estimates active calories automatically from the saved body weight, activity, and duration. The large starter-session card is removed; **Use my routine** opens the separate routine tab. Meal planning and **Create template draft / Suggest with AI** in My routine remain available. Notes are collapsed and workout names are optional.
+
+Calorie estimates use a versioned MET calculation from the [2024 Compendium](https://pacompendium.com/adult-compendium/), subtract resting energy, and stay separate from the accepted food allowance. Each new activity stores the weight and method used. Step-only entries and unspecified Other activities have no calorie estimate. Existing entries remain unchanged until edited. These activity changes use JSON records and need no database migration. Builds and runtime checks were not run for this change, following the owner's request.
+
 Serving counts use the existing JSON food-log records and do not require a database migration. The API validates the chosen portion against its owner and food, checks the total grams against the count, and calculates nutrition. Existing gram-only logs remain supported.
 
 ## Run locally
