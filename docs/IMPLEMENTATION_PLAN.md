@@ -170,7 +170,7 @@ Collect required inputs first and request integration permissions only when the 
 | Reminders | Preferred meal/workout/weigh-in times and quiet hours |
 | Optional connections | Google Calendar; native Health Connect is deferred |
 
-Do not ask users to choose a calorie equation during initial setup. A goal may track the weight timeline without setting a calorie or macro target; manual daily targets remain optional. Keep any formula-based estimate behind a separately reviewed, explicit choice. Do not send a date of birth to the model when an age range is enough.
+Use plain Female/Male/Skip labels for the optional calorie estimate in goal setup; do not expose equation names. The user chooses date-based planning, intake-based planning, or weight-only tracking and reviews the resulting budget before acceptance. Manual and clinician-supplied targets remain available. Do not send a date of birth to the model when an age range is enough.
 
 Ask about factors that make automatic general-purpose planning unsuitable, such as pregnancy or a clinician-directed diet. In such cases allow logging and user/clinician supplied targets; do not generate a standard weight-change prescription. The initial app should not automatically plan weight loss for children.
 
@@ -188,7 +188,7 @@ The process is:
 6. Store a new goal version and target version with effective dates and calculation metadata.
 7. Create the graph's planned trajectory from that accepted version.
 
-**Energy accounting policy for the first release:** Nutrition targets already account for the person's typical activity. Display workout energy as an estimate, and do not automatically add all reported exercise calories back to the food allowance. Future imported energy/step sources and manual workout estimates must never be blindly summed together.
+**Energy accounting policy:** Under Decision 0010, new budgets use everyday movement excluding workouts plus a separately selected planned exercise average. Daily energy summaries add net logged exercise once to the accepted non-workout baseline, adjusted using measured weight. The food allowance never automatically increases. Existing goals retain their inclusive activity policy until the owner accepts an updated budget. Future imported energy/steps and manual estimates must never be blindly summed together.
 
 Store calorie and macro targets as compatible ranges with a versioned tolerance policy. Catalog energy can differ from a simple `4 × protein + 4 × carbohydrate + 9 × fat` estimate because of fiber, labeling, and rounding. Flag large discrepancies for review rather than replacing authoritative catalog values automatically.
 
@@ -291,28 +291,21 @@ The full graph is a first-class product feature, available on Home in compact fo
 | Layer | Visual treatment | Meaning |
 | --- | --- | --- |
 | Recorded measurements | Small visible dots | Actual recorded values and dates |
-| Actual trend | Solid dark-green line | A documented smoothing of measured values |
-| Accepted plan | Dashed gray line | The path implied by the accepted goal and timeline |
+| Actual trend | Solid black line | Rolling mean of up to three measured-day medians |
+| Accepted plan | Solid lime line | The immutable accepted goal path |
 | Goal | Labeled target/date marker | The accepted end point or maintenance band |
-| Optional forecast | Dotted lighter line | An estimate based on sufficiently recent measurements |
+| Optional forecast | Dashed green line with rate-variation band | Limited recent-pace estimate from measured weights; not a confidence interval |
 | Events | Small selectable annotations | Plan revision, workout milestone, or user note |
 
-X-axis: calendar date. Y-axis: selected metric and its unit. Press/drag should expose the exact date, measurement, trend, planned value, and available context. Offer 7-day, 30-day, 90-day, and full-goal views. Provide an accessible text summary and a list/table of points.
+X-axis: calendar date. Y-axis: selected metric and its unit. Press/drag should expose the exact date, measurement, trend, planned value, and available context. Offer a focused recent/future view, 30-day and 90-day history, and a full-goal view. Provide an accessible text summary and a list/table of points.
 
 Do not use a decorative histogram as the primary progress view. Secondary nutrition and steps views may use simpler charts when appropriate, but weight, calories, steps, and strength must retain their own units and axes.
 
 ### 7.2 Deterministic graph calculations
 
-**Planned trajectory:** The first release uses linear interpolation as a visual plan, not a biological prediction:
+**Planned trajectory:** Decision 0010 supersedes the initial straight-line-only policy. New automatic date and intake budgets use the documented reduced dynamic population scenario; manual dated schedules, maintenance, and legacy goals retain chosen-date interpolation. This approximation is not the full NIH Body Weight Planner or a validated personalized prediction. Initial calorie arithmetic is displayed separately from weight scenarios. The exact coefficients, inverses, limits, and snapshots are in [Decision 0010](decisions/0010-goal-budgets-and-progress.md).
 
-```text
-fraction = clamp((date - start_date) / (target_date - start_date), 0, 1)
-planned_weight = start_weight + fraction × (target_weight - start_weight)
-```
-
-Handle a missing deadline, an invalid date interval, and maintenance goals separately. A maintenance goal uses a user-approved range rather than a descending or ascending line.
-
-**Actual values:** Preserve raw measurements. When several readings exist on one local day, use a documented daily representative value, proposed as the median, while keeping individual readings inspectable. The initial trend can be a trailing seven-calendar-day mean of available daily values, with at least three distinct measured days. Show gaps and sample counts; never treat missing measurements as zero.
+**Actual values:** Preserve raw measurements, use daily medians in the graph, and smooth up to three distinct measured days. Never fill missing weights with zero or with calorie-derived values. Raw readings remain available in measurement history. The focused graph includes recent history and up to 90 future days; 30/90-day history and full-goal views remain available. Tapping or selecting a local date exposes measured/planned values and available energy/completeness data.
 
 **Goal progress:** For gain or loss goals with distinct start and target weights:
 
@@ -326,16 +319,16 @@ Clamp a progress indicator for display if needed, retain the underlying value, a
 
 ### 7.3 Forecasting rules
 
-Forecasting is optional for the first release and must never delay actual-versus-plan tracking.
+A bounded recent-pace forecast is implemented under Decision 0010. It remains separate from the accepted budget scenario and must never replace actual-versus-plan tracking.
 
 - Use recent actual measurements, not a cumulative food-calorie equation as a substitute for measured weight.
 - Proposed eligibility: at least six distinct measurement days spanning at least fourteen days within the recent 28-day window. Tune after real usage.
-- Fit a documented trend method; store its version and date range.
-- Limit the extrapolation horizon and show the available evidence.
+- Use the documented median pairwise slope method with at least seven days between each pair; report its policy version and evidence window.
+- Require a weigh-in within seven days. Show arrival only within 180 days and draw at most 90 days forward; suppress inappropriate rapid/unsupported-profile estimates.
 - If the slope is flat, moving away from the target, or too unstable, show that an arrival estimate is unavailable.
-- Do not display a statistical confidence band unless the method and its interpretation have been implemented and reviewed.
+- The band shows the 25th/75th percentiles of recent pairwise rates, explicitly not a statistical confidence interval. Suppress a bounded date range if both alternatives cannot reach the goal within the supported horizon.
 
-Weight change depends on more than a fixed calories-to-kilograms conversion. The NIH Body Weight Planner and its underlying research are references for later model development, not a license to claim that our first-release line is a validated physiological model. [NIH Body Weight Planner][body-weight-planner]
+Weight change depends on more than a fixed calories-to-kilograms conversion. The current reduced scenario and recent-pace extrapolation must not be described as validated implementations of the full NIH physiological model; full-model integration and longitudinal forecast calibration remain future work. [NIH Body Weight Planner][body-weight-planner]
 
 ### 7.4 Daily context and weekly review
 
@@ -772,7 +765,7 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | POST /v1/workout-sessions | Actual workout, exercises, and sets |
 | POST /v1/activity-entries | Manual walking/cardio/step entry |
 | GET /v1/days/:date | Daily summary with timezone/completeness |
-| GET /v1/progress | Measured, trend, planned, and eligible forecast series |
+| GET /v1/progress/overview | Versioned daily energy summaries, milestones, weekly comparisons, and eligible recent-pace forecasts |
 | POST /v1/uploads | Scoped temporary authorization for a food image |
 | POST /v1/food-recognition/runs | Start a photo-recognition operation |
 | POST /v1/plans/meal/runs | Start meal planning |
@@ -968,7 +961,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 5 — Signature progress graph and daily dashboard
 
-**Current status:** The dashboard and Progress page render the accepted target trajectory beside timezone-aware weigh-ins, with a rolling average over up to three recorded weigh-in days, 30/90-day and full-goal ranges, a target-date marker, accepted goal-version annotations, and a written comparison summary. An authenticated seven-day review now summarizes complete food days, calories and protein on complete days, walks/workouts, logged steps, daily median weigh-ins, and the latest measured-versus-planned comparison. Incomplete food days and absent records remain unknown, and averages exclude incomplete food days. The API reports trend-estimate eligibility only after at least six distinct measurement days spanning fourteen days within the latest 28 days; it does not generate an arrival date. Typecheck and lint pass; live API and Android browser verification remain outstanding.
+**Current status:** Decision 0010 adds date/intake-based goal budgets, explicit acceptance and immutable revision history, a phone-focused plan-versus-measured graph, local-date energy inspection, milestone cards, and daily/weekly comparisons that exclude incomplete food/energy days. Six measured days spanning fourteen days within the latest 28 days, plus a recent weigh-in, unlock a bounded recent-pace arrival estimate when suitable. The shaded band represents variation between recent rates, not statistical confidence. Original accepted goals remain unchanged and can be compared with newer versions. The implementation uses existing JSON records and needs no migration or new environment values. Builds, typecheck, tests, browser checks, numerical validation, and live endpoint verification were not run for this upgrade at the owner's request.
 
 - Add accessible textual summaries and a weekly review payload. Gate forecasts until sufficient measurements exist. **Implemented in code; live verification remains.**
 
@@ -1310,3 +1303,8 @@ Both input modes share the food-inference service, rolling account quota, error 
 Confirmed photo and text estimates automatically save selected foods to **My foods**, without a separate checkbox. Unconfirmed drafts and excluded items are not saved. Confirmation writes selected private foods and logs in one transaction; deterministic record IDs, advisory locking, and retry comparison apply to the whole action. Saved foods become searchable and appear in Recent through normalized personal-food references. Cached estimates are tagged in the private source note and exposed as an estimate flag. Future manual logs retain estimated nutrition provenance and do not need a model call. Shared catalog/review status is unchanged, and no dietary/allergen facts are invented.
 
 Generic foodEstimate metadata records text/photo origin, portion uncertainty, confidence, edits, model/run/request IDs, and private-save status; photoEstimate remains supported for existing records. Quantity edits update the corresponding range. New credentials, storage services, and migrations are not needed. Build, typecheck, browser verification, and live inference remain skipped at the owner's request; deployment and live behavior still need confirmation.
+
+
+### 21 October 2026 — Goal budgets and measured progress
+
+Decision 0010 replaces the disconnected fixed calorie adjustment with date/intake planning, a versioned approximate energy scenario, explicit baseline-versus-exercise accounting, unknown states for incomplete logs, weekly same-day comparisons, and a measured recent-pace forecast. Home and Progress use the authenticated `/v1/progress/overview` response; no LLM participates in calculations. Acceptance uses a preview fingerprint and same-request retry hash, preserves prior versions, and creates no new weigh-in for a revision. Existing records remain compatible without migration or environment changes. The full NIH physiological model, clinical validation, and calibration against longitudinal measurements are not implemented. Builds, tests, typecheck, browser checks, and live/numerical verification remain skipped at the owner's request.

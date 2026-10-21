@@ -25,7 +25,9 @@ export const profileSchema = z.object({
   unitSystem: z.enum(["metric", "imperial"]),
   energyEquation: z.enum(["mifflin_female", "mifflin_male", "manual", "not_provided"]),
   activityLevel: z.enum(["sedentary", "light", "moderate", "active", "very_active"]),
-  timezone: z.string().min(1).max(80),
+  timezone: z.string().min(1).max(80).refine((value) => {
+    try { new Intl.DateTimeFormat("en-US", { timeZone: value }); return true; } catch { return false; }
+  }, "Choose a valid time zone."),
   foodPreferences: foodPreferencesSchema.default({ pattern: "no_preference", vegetarianWeekdays: [] }),
   dietaryPreferences: z.array(z.string().trim().min(1).max(48)).max(30),
   restrictions: z.array(z.string().trim().min(1).max(80)).max(50),
@@ -75,6 +77,10 @@ export const deleteAccountRequestSchema = z.object({
 }).strict();
 
 export const goalProposalRequestSchema = z.object({
+  planningMode: z.enum(["date", "intake", "weight_only"]).default("date"),
+  baselineActivityLevel: z.enum(["sedentary", "light", "moderate", "active", "very_active"]).optional(),
+  energyEquation: z.enum(["mifflin_female", "mifflin_male", "not_provided"]).optional(),
+  plannedExerciseKcalPerDay: z.number().int().min(0).max(1000).default(0),
   direction: z.enum(["lose", "gain", "maintain"]),
   targetWeightKg: z.number().finite().min(25).max(400),
   targetDate: z.string().date(),
@@ -90,6 +96,7 @@ export const goalProposalRequestSchema = z.object({
 });
 
 export const acceptGoalRequestSchema = z.object({
+  proposalFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   goalId: uuidSchema,
   measurementId: uuidSchema,
   request: goalProposalRequestSchema,
@@ -107,7 +114,28 @@ const trajectoryPointSchema = z.object({
   targetWeightKg: z.number().finite().min(25).max(400),
 }).strict();
 
+export const goalBudgetSchema = z.object({
+  model: z.literal("hall_reduced_v1"),
+  energyEquation: z.enum(["mifflin_female", "mifflin_male"]),
+  profileSnapshot: z.object({ ageYears: z.number().int(), heightCm: z.number().finite(), weightKg: z.number().finite() }).strict(),
+  baselineActivityLevel: z.enum(["sedentary", "light", "moderate", "active", "very_active"]),
+  restingCaloriesKcal: z.number().finite().positive(),
+  baselineCaloriesKcal: z.number().finite().positive(),
+  plannedExerciseKcalPerDay: z.number().finite().min(0),
+  maintenanceCaloriesKcal: z.number().finite().positive(),
+  initialDailyDeficitKcal: z.number().finite(),
+  initialWeeklyDeficitKcal: z.number().finite(),
+  initialThirtyDayDeficitKcal: z.number().finite(),
+  sevenDayWeightChangeKg: z.number().finite(),
+  thirtyDayWeightChangeKg: z.number().finite(),
+  estimatedTargetDate: z.string().date().nullable(),
+  durationDays: z.number().int().min(14).max(730),
+}).strict();
+
 export const goalSchema = z.object({
+  acceptanceRequestHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  planningMode: z.enum(["date", "intake", "weight_only"]).optional(),
+  budget: goalBudgetSchema.optional(),
   goalVersion: z.number().int().positive(),
   direction: z.enum(["lose", "gain", "maintain"]),
   startWeightKg: z.number().finite().min(25).max(400),
@@ -556,6 +584,66 @@ export const weeklyProgressReviewResponseSchema = z.object({
   }).strict(),
 }).strict();
 
+export const dailyGoalEnergySchema = z.object({
+  date: z.string().date(),
+  goalVersion: z.number().int().positive().nullable(),
+  targetCaloriesKcal: z.number().finite().nullable(),
+  intakeCaloriesKcal: z.number().finite().min(0).nullable(),
+  foodDayComplete: z.boolean(),
+  activityCaloriesKcal: z.number().finite().min(0),
+  activitiesMissingEnergy: z.number().int().min(0),
+  baselineCaloriesKcal: z.number().finite().positive().nullable(),
+  expenditureCaloriesKcal: z.number().finite().positive().nullable(),
+  deficitCaloriesKcal: z.number().finite().nullable(),
+  plannedDeficitCaloriesKcal: z.number().finite().nullable(),
+  weightKg: z.number().finite().min(25).max(400).nullable(),
+  weightSource: z.enum(["measurement", "accepted_baseline"]).nullable(),
+  energyWeightKg: z.number().finite().min(25).max(400).nullable(),
+  plannedWeightKg: z.number().finite().min(25).max(400).nullable(),
+}).strict();
+
+export const goalForecastSchema = z.object({
+  status: z.enum(["collecting", "stale", "ready", "not_approaching", "at_goal", "maintenance", "outside_range"]),
+  message: z.string().max(300),
+  measuredDays: z.number().int().min(0).max(28),
+  spanDays: z.number().int().min(0).max(27),
+  weeklyChangeKg: z.number().finite().nullable(),
+  arrivalDate: z.string().date().nullable(),
+  earliestDate: z.string().date().nullable(),
+  latestDate: z.string().date().nullable(),
+  points: z.array(z.object({
+    date: z.string().date(), weightKg: z.number().finite().min(25).max(400),
+    lowKg: z.number().finite().min(25).max(400), highKg: z.number().finite().min(25).max(400),
+  }).strict()).max(28),
+}).strict();
+
+export const progressOverviewResponseSchema = z.object({
+  policyVersion: z.literal("progress-budget-v1"),
+  timezone: z.string(),
+  today: z.string().date(),
+  goalVersion: z.number().int().positive(),
+  currentWeightKg: z.number().finite().min(25).max(400),
+  currentWeightDate: z.string().date(),
+  progressKg: z.number().finite(),
+  remainingKg: z.number().finite().min(0),
+  progressPercent: z.number().finite().min(0).max(100),
+  plannedWeeklyChangeKg: z.number().finite(),
+  todayEnergy: dailyGoalEnergySchema,
+  days: z.array(dailyGoalEnergySchema).max(731),
+  forecast: goalForecastSchema,
+  weekly: z.object({
+    completeFoodDays: z.number().int().min(0).max(7),
+    energyDays: z.number().int().min(0).max(7),
+    averageIntakeKcal: z.number().finite().min(0).nullable(),
+    averageDeficitKcal: z.number().finite().nullable(),
+    recordedDeficitKcal: z.number().finite().nullable(),
+    plannedDeficitForRecordedDaysKcal: z.number().finite().nullable(),
+    activityCaloriesKcal: z.number().finite().min(0),
+    message: z.string().max(300),
+  }).strict(),
+  milestones: z.array(z.object({ percent: z.number(), weightKg: z.number(), reached: z.boolean() }).strict()).max(4),
+}).strict();
+
 const workoutPlanExerciseSchema = z.object({
   exerciseId: z.string().trim().min(1).max(80),
   sets: z.number().int().min(1).max(20),
@@ -846,6 +934,9 @@ export type SetFoodFavoriteRequest = z.infer<typeof setFoodFavoriteRequestSchema
 export type CreateFoodPortionRequest = z.infer<typeof createFoodPortionRequestSchema>;
 export type GoalProposalRequest = z.infer<typeof goalProposalRequestSchema>;
 export type GoalRecord = z.infer<typeof goalSchema>;
+export type DailyGoalEnergy = z.infer<typeof dailyGoalEnergySchema>;
+export type GoalForecast = z.infer<typeof goalForecastSchema>;
+export type ProgressOverview = z.infer<typeof progressOverviewResponseSchema>;
 export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;
 export type CopyFoodLogsRequest = z.infer<typeof copyFoodLogsRequestSchema>;
 export type FoodPhotoRecognitionRequest = z.infer<typeof foodPhotoRecognitionRequestSchema>;

@@ -815,3 +815,91 @@ a { color: inherit; text-decoration: none; }
 
 .text-estimate-trigger { width: 100%; margin-bottom: 10px; white-space: normal; overflow-wrap: anywhere; }
 .text-estimate-setup { display: grid; gap: 14px; margin-top: 16px; }
+
+/* Goals and progress: compact phone cards, with detail on demand. */
+.goal-planner, .goal-progress-summary, .goal-weekly-review, .today-energy-panel { margin-bottom: 18px; }
+.goal-planner-fields { display: grid; gap: 16px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.goal-planner-fields .field > span { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; }
+.goal-planner-fields .field small { font-size: 12px; color: var(--muted); font-weight: 400; line-height: 1.5; }
+.goal-planner .panel-heading h2, .goal-progress-summary h2 { font-size: 25px; }
+.goal-progress-summary h2 small { font-size: 14px; color: var(--muted); font-weight: 400; }
+.goal-proposal-review { display: grid; gap: 17px; margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
+.goal-proposal-review .goal-review-hero { padding: 16px; border-radius: 18px; }
+.goal-proposal-review .goal-review-hero strong { font-size: 28px; }
+.goal-budget { display: grid; gap: 14px; }
+.budget-main { display: grid; gap: 5px; padding: 16px; border-radius: 18px; background: #eff7df; }
+.budget-main > span { font-size: 13px; color: #495d35; }
+.budget-main > strong { font-size: 35px; line-height: 1.2; letter-spacing: -.055em; }
+.budget-main strong small { font-size: 14px; font-weight: 400; letter-spacing: 0; }
+.budget-grid, .goal-progress-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px 12px; }
+.budget-grid > div, .goal-progress-stats > div { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.budget-grid span, .goal-progress-stats span { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.budget-grid strong { font-size: 21px; letter-spacing: -.04em; }
+.goal-progress-stats strong { font-size: 24px; letter-spacing: -.045em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.goal-progress-stats strong small { font-size: 11px; font-weight: 400; letter-spacing: 0; color: var(--muted); }
+.budget-details summary, .accepted-budget > summary, .goal-forecast-summary summary, .today-energy-panel summary, .goal-weekly-review summary, .progress-extra-details > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 13px; font-weight: 600; gap: 8px; }
+.budget-details summary::after, .accepted-budget > summary::after, .goal-forecast-summary summary::after, .today-energy-panel summary::after, .goal-weekly-review summary::after, .progress-extra-details > summary::after { content: '+'; margin-left: auto; font-size: 19px; font-weight: 400; }
+.budget-details[open] > summary::after, .accepted-budget[open] > summary::after, .goal-forecast-summary details[open] > summary::after, .today-energy-panel details[open] > summary::after, .goal-weekly-review details[open] > summary::after, .progress-extra-details[open] > summary::after { content: '−'; }
+.budget-details dl, .energy-breakdown { margin: 6px 0 14px; display: grid; gap: 12px; }
+.budget-details dl > div, .energy-breakdown > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-size: 12px; }
+.budget-details dt, .energy-breakdown dt { color: var(--muted); line-height: 1.5; }
+.budget-details dd, .energy-breakdown dd { margin: 0; text-align: right; flex-shrink: 0; font-weight: 600; }
+.budget-details p, .goal-forecast-summary p, .today-energy-panel details p, .goal-weekly-review p, .goal-alternatives p { font-size: 13px; line-height: 1.65; color: var(--muted); }
+.goal-alternatives { margin-top: 18px; padding: 16px; border: 1px solid #dce9c5; border-radius: 18px; background: #f5f8ee; }
+.goal-alternatives h3 { margin: 0; font-size: 18px; }
+.goal-alternatives .button-row { flex-wrap: wrap; }
+.goal-completion-track { height: 6px; border-radius: 99px; background: #edf0e8; overflow: hidden; margin-top: 23px; }
+.goal-completion-track span { display: block; height: 100%; background: #97cf36; border-radius: inherit; }
+.goal-milestones { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 10px 0 20px; gap: 4px; }
+.goal-milestones > div { display: grid; gap: 4px; color: #7a8274; font-size: 11px; }
+.goal-milestones strong { font-weight: 500; font-size: 11px; }
+.goal-milestones .milestone-reached { color: #3e6224; }
+.goal-milestones > div:last-child { text-align: right; }
+.goal-forecast-summary { display: grid; gap: 7px; background: #f5f7f1; border-radius: 16px; padding: 15px; margin-top: 20px; }
+.goal-forecast-summary > strong { font-size: 22px; letter-spacing: -.04em; }
+.goal-forecast-summary > span:not(.eyebrow) { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.goal-forecast-summary > p { margin: 0; }
+.goal-forecast-summary summary { font-size: 12px; min-height: 36px; }
+.accepted-budget { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 4px; }
+.accepted-budget > summary { min-height: 48px; }
+.home-goal-status { display: grid; gap: 5px; margin: 0 0 18px; padding: 0 4px; }
+.home-goal-status strong { font-size: 14px; }
+.home-goal-status span { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.today-energy-panel { margin-top: 18px; }
+.energy-equation { display: grid; grid-template-columns: 1fr 12px 1fr 12px 1fr; align-items: start; gap: 5px; text-align: center; margin: 5px 0 12px; }
+.energy-equation > div { display: grid; gap: 6px; }
+.energy-equation strong { font-size: clamp(21px, 6vw, 28px); letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.energy-equation span { font-size: 11px; color: var(--muted); }
+.energy-equation > b { margin-top: 8px; font-size: 16px; color: var(--muted); font-weight: 400; }
+.today-energy-panel .text-button { font-size: 12px; text-align: left; min-height: 44px; line-height: 1.5; }
+.goal-review-days { display: grid; gap: 10px; }
+.goal-review-days > article { display: grid; gap: 5px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.goal-review-days article > span, .goal-review-days small { color: var(--muted); line-height: 1.5; }
+.progress-extra-details { margin-bottom: 20px; }
+.progress-extra-details > summary { padding: 4px 8px; }
+.chart-legend .legend-plan { border-top-style: solid; }
+.chart-legend .legend-forecast { border-color: #4e7050; border-top-style: dashed; }
+.chart-plan-path { stroke: #91c72d; stroke-width: 3; stroke-dasharray: none; }
+.chart-trend-path { stroke: #1d261a; stroke-width: 2.5; }
+.chart-actual-dot { fill: #1d261a; stroke: #fff; stroke-width: 1.5; }
+.chart-forecast-path { stroke: #4e7050; stroke-width: 2.5; stroke-dasharray: 5 5; fill: none; stroke-linecap: round; }
+.chart-forecast-band { fill: #b7d68d; opacity: .24; }
+.chart-today-marker { stroke: #aeb8a6; stroke-width: 1; stroke-dasharray: 2 5; }
+.chart-selected-marker { stroke: #536444; stroke-width: 1; }
+.chart-selected-dot { fill: #fff; stroke: #202a1a; stroke-width: 2; }
+.goal-chart-interactive svg { cursor: crosshair; touch-action: pan-y; }
+.goal-chart-inspector { margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.goal-chart-inspector .field { gap: 7px; }
+.goal-chart-inspector .field > span { font-size: 12px; }
+.chart-day-details { display: grid; gap: 10px; background: #f5f7f1; padding: 14px; border-radius: 14px; margin-top: 12px; font-size: 12px; }
+.chart-day-details > strong { font-size: 14px; }
+.chart-day-details > div { display: flex; justify-content: space-between; gap: 8px; }
+.chart-day-details > div > span, .chart-day-details > small { color: var(--muted); }
+.chart-day-details b { text-align: right; font-weight: 600; }
+.plan-version-picker { margin-bottom: 20px; }
+.plan-version-picker > span, .chart-plan-summary > summary { font-size: 12px; color: var(--muted); }
+.chart-plan-summary > summary { padding: 14px 0; cursor: pointer; }
+@media (max-width: 350px) {
+  .budget-details dl > div, .energy-breakdown > div { flex-wrap: wrap; gap: 4px; }
+  .goal-progress-stats strong { font-size: 21px; }
+}

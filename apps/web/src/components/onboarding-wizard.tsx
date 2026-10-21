@@ -1,12 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { acceptGoalRequestSchema, goalProposalRequestSchema, profileSchema, type GoalRecord, type GoalProposalRequest, type Profile } from "@healthcare/contracts";
-import { ApiError, postJson, putJson } from "@/lib/api";
-
-type ProposalResponse =
-  | { status: "ready"; goal: Omit<GoalRecord, "goalVersion" | "acceptedAt">; notes: string[] }
-  | { status: "manual_required"; reasonCode: "timeline_too_fast" | "clinician_target_required" | "estimate_out_of_range"; reasons: string[] };
+import { profileSchema, type Profile } from "@healthcare/contracts";
+import { GoalPlanner } from "./goal-planner";
 
 type Draft = {
   displayName: string;
@@ -31,21 +27,7 @@ type Draft = {
   movementLimitations: string;
   pregnancyOrBreastfeeding: boolean;
   clinicianDirectedDiet: boolean;
-  direction: GoalProposalRequest["direction"];
-  targetWeightKg: string;
-  targetDate: string;
-  manualDailyCalories: string;
-  manualTargetSource: GoalProposalRequest["manualTargetSource"];
 };
-
-function dateInWeeks(weeks: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() + weeks * 7);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function splitList(value: string, max: number): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, max);
@@ -60,13 +42,6 @@ const weekdayOptions = [
   { value: 6, label: "Saturday", shortLabel: "Sat" },
   { value: 0, label: "Sunday", shortLabel: "Sun" },
 ];
-
-function errorMessage(error: unknown): string {
-  if (error instanceof ApiError && Array.isArray(error.details.reasons)) {
-    return (error.details.reasons as string[]).join(" ");
-  }
-  return error instanceof Error ? error.message : "Please check your details and try again.";
-}
 
 export function OnboardingWizard({
   initialName,
@@ -98,19 +73,10 @@ export function OnboardingWizard({
     movementLimitations: "",
     pregnancyOrBreastfeeding: false,
     clinicianDirectedDiet: false,
-    direction: "lose",
-    targetWeightKg: "",
-    targetDate: dateInWeeks(12),
-    manualDailyCalories: "",
-    manualTargetSource: null,
   }));
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [proposal, setProposal] = useState<ProposalResponse | null>(null);
-  const [step, setStep] = useState<"profile" | "goal" | "review">("profile");
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<"profile" | "goal">("profile");
   const [error, setError] = useState("");
-  const [acceptanceIds, setAcceptanceIds] = useState<{ goalId: string; measurementId: string } | null>(null);
 
   function update<Key extends keyof Draft>(key: Key, value: Draft[Key]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -154,78 +120,16 @@ export function OnboardingWizard({
     setStep("goal");
   }
 
-  function createGoalRequest(): GoalProposalRequest | null {
-    const parsed = goalProposalRequestSchema.safeParse({
-      direction: draft.direction,
-      targetWeightKg: Number(draft.targetWeightKg),
-      targetDate: draft.targetDate,
-      manualDailyCalories: draft.manualDailyCalories.trim() ? Number(draft.manualDailyCalories) : null,
-      manualTargetSource: draft.manualDailyCalories.trim() ? draft.manualTargetSource : null,
-    });
-    if (!parsed.success) {
-      setError("Enter a valid target weight and date. Manual calorie targets need a source.");
-      return null;
-    }
-    return parsed.data;
-  }
-
-  async function makeProposal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    if (!profile) return;
-    const request = createGoalRequest();
-    if (!request) return;
-    setBusy(true);
-    try {
-      await putJson("/v1/me", profile);
-      const nextProposal = await postJson<ProposalResponse>("/v1/goals/proposal", request);
-      setProposal(nextProposal);
-      setAcceptanceIds(null);
-      setAcknowledged(false);
-      setStep("review");
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function acceptProposal() {
-    setError("");
-    if (!profile || proposal?.status !== "ready" || !acknowledged) return;
-    const request = createGoalRequest();
-    if (!request) return;
-    const ids = acceptanceIds ?? {
-      goalId: globalThis.crypto.randomUUID(),
-      measurementId: globalThis.crypto.randomUUID(),
-    };
-    setAcceptanceIds(ids);
-    const parsed = acceptGoalRequestSchema.safeParse({ ...ids, request, accepted: true });
-    if (!parsed.success) {
-      setError("Review the goal details and try again.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await postJson("/v1/goals/accept", parsed.data);
-      onComplete();
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <section className="onboarding-shell" aria-labelledby="onboarding-title">
       <div className="onboarding-heading">
         <span className="eyebrow">YOUR STARTING POINT</span>
-        <h1 id="onboarding-title">{step === "profile" ? "Build your profile" : step === "goal" ? "Choose your goal" : "Review your plan"}</h1>
+        <h1 id="onboarding-title">{step === "profile" ? "Build your profile" : "Choose your goal"}</h1>
       </div>
 
-      <div className="step-track" aria-label={`Step ${step === "profile" ? 1 : step === "goal" ? 2 : 3} of 3`}>
-        {["profile", "goal", "review"].map((item, index) => (
-          <span key={item} className={step === item ? "step-dot step-dot-active" : index < ["profile", "goal", "review"].indexOf(step) ? "step-dot step-dot-done" : "step-dot"} />
+      <div className="step-track" aria-label={`Step ${step === "profile" ? 1 : 2} of 2`}>
+        {["profile", "goal"].map((item, index) => (
+          <span key={item} className={step === item ? "step-dot step-dot-active" : index < ["profile", "goal"].indexOf(step) ? "step-dot step-dot-done" : "step-dot"} />
         ))}
       </div>
 
@@ -324,117 +228,8 @@ export function OnboardingWizard({
         </form>
       ) : null}
 
-      {step === "goal" ? (
-        <form className="form-card" onSubmit={(event) => void makeProposal(event)}>
-          <div className="form-section">
-            <h2>What do you want to work toward?</h2>
-            <div className="segmented" role="group" aria-label="Goal direction">
-              {(["lose", "maintain", "gain"] as const).map((direction) => (
-                <button key={direction} type="button" aria-pressed={draft.direction === direction} className={draft.direction === direction ? "segment segment-selected" : "segment"} onClick={() => update("direction", direction)}>
-                  {direction === "lose" ? "Lose" : direction === "gain" ? "Gain" : "Maintain"}
-                </button>
-              ))}
-            </div>
-            <div className="form-grid">
-              <Field label="Target weight (kg)" type="number" value={draft.targetWeightKg} onChange={(value) => update("targetWeightKg", value)} min="25" max="400" step="0.1" />
-              <Field label="Target date" type="date" value={draft.targetDate} onChange={(value) => update("targetDate", value)} />
-            </div>
-          </div>
+      {step === "goal" && profile ? <GoalPlanner profile={profile} saveProfileBeforePreview onAccepted={onComplete} onCancel={() => setStep("profile")} /> : null}
 
-          <div className="form-section">
-            <h2>Optional manual calorie target</h2>
-            <Field label="Daily calories (kcal)" type="number" value={draft.manualDailyCalories} onChange={(value) => {
-              update("manualDailyCalories", value);
-              if (value && !draft.manualTargetSource) update("manualTargetSource", "self");
-              if (!value) update("manualTargetSource", null);
-            }} min="800" max="5000" />
-            {draft.manualDailyCalories ? (
-              <SelectField label="Target source" value={draft.manualTargetSource ?? "self"} onChange={(value) => update("manualTargetSource", value as Draft["manualTargetSource"])} options={[["self", "Entered by me"], ["clinician", "Provided by a clinician"]]} />
-            ) : <p className="field-note">Leave blank for weight tracking only.</p>}
-          </div>
-
-          {error ? <p className="form-error" role="alert">{error}</p> : null}
-          <div className="button-row">
-            <button className="button button-secondary" type="button" onClick={() => setStep("profile")}>Back</button>
-            <button className="button button-primary" type="submit" disabled={busy}>{busy ? "Calculating…" : "Review plan"}</button>
-          </div>
-        </form>
-      ) : null}
-
-      {step === "review" && proposal ? (
-        <div className="form-card">
-          {proposal.status === "ready" ? (
-            <>
-              <div className="goal-review-hero">
-                <span className="eyebrow">YOUR TARGET PATH</span>
-                <strong>{proposal.goal.startWeightKg.toFixed(1)} <span>→</span> {proposal.goal.targetWeightKg.toFixed(1)} kg</strong>
-                <span>{proposal.goal.startDate} to {proposal.goal.targetDate}</span>
-              </div>
-              <div className="review-grid">
-                <div className="review-stat"><span>Daily calories</span><strong>{proposal.goal.dailyCaloriesKcal?.toLocaleString("en-IN") ?? "Not set"}</strong><small>{proposal.goal.calculationMode === "automatic_estimate" ? "Estimated target" : proposal.goal.calculationMode === "manual_target" ? "Manual target" : "Weight tracking only"}</small></div>
-                {proposal.goal.macrosGrams ? (
-                  <>
-                    <div className="review-stat"><span>Protein</span><strong>{proposal.goal.macrosGrams.protein} g</strong><small>Daily starter target</small></div>
-                    <div className="review-stat"><span>Carbohydrate</span><strong>{proposal.goal.macrosGrams.carbohydrate} g</strong><small>Daily starter target</small></div>
-                    <div className="review-stat"><span>Fat</span><strong>{proposal.goal.macrosGrams.fat} g</strong><small>Daily starter target</small></div>
-                  </>
-                ) : null}
-              </div>
-              {proposal.goal.calculationMode === "weight_only" ? (
-                <div className="manual-review weight-only-review">
-                  <span className="eyebrow">NO CALORIE TARGET</span>
-                  <h2>Continue with weight tracking?</h2>
-                  <p>An automatic calorie estimate is not available with the current profile settings. You can still save this weight and date goal, log meals, and see your food totals.</p>
-                  <p>To add a calorie target, choose “Add calorie target” and enter one yourself or use a clinician-provided target. Changing your activity level or date alone will not create an estimate for this profile.</p>
-                </div>
-              ) : null}
-              <details className="plan-explanation"><summary>Plan details</summary><div className="rationale-list">
-                {proposal.goal.rationale.map((item) => <p key={item}>{item}</p>)}
-                {proposal.notes.map((item) => <p key={item}>{item}</p>)}
-              </div></details>
-            </>
-          ) : (
-            <div className="manual-review">
-              <span className="eyebrow">NEXT STEP</span>
-              <h2>{proposal.reasonCode === "timeline_too_fast" ? "Choose a later target date" : proposal.reasonCode === "clinician_target_required" ? "Add a clinician-provided target" : "Review the calorie estimate"}</h2>
-              {proposal.reasons.map((reason) => <p key={reason}>{reason}</p>)}
-              {proposal.reasonCode === "timeline_too_fast" ? <p>Move the target date later to bring the planned pace within the app’s automatic limit. Activity level does not change this pace check.</p> : null}
-              {proposal.reasonCode === "clinician_target_required" ? <p>Enter the calorie target provided by your clinician. Food and activity tracking are still available.</p> : null}
-              {proposal.reasonCode === "estimate_out_of_range" ? <p>If your activity level does not match your usual routine, correct it in your profile. Otherwise, enter a calorie target you have chosen or received from a clinician.</p> : null}
-            </div>
-          )}
-
-          {proposal.status === "ready" ? (
-            <label className="acknowledgment">
-              <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />
-              <span>I reviewed this goal. I understand it is for general tracking and is not medical advice.</span>
-            </label>
-          ) : null}
-          {error ? <p className="form-error" role="alert">{error}</p> : null}
-          {proposal.status === "ready" ? (
-            <>
-              <div className="button-row">
-                <button className="button button-secondary" type="button" onClick={() => setStep("goal")}>{proposal.goal.calculationMode === "weight_only" ? "Add calorie target" : "Edit goal"}</button>
-                <button className="button button-primary" type="button" disabled={busy || !acknowledged} onClick={() => void acceptProposal()}>
-                  {busy ? "Saving…" : proposal.goal.calculationMode === "weight_only" ? "Continue with weight tracking" : "Accept goal"}
-                </button>
-              </div>
-              <button className="text-button" type="button" onClick={() => setStep("profile")}>Edit profile</button>
-            </>
-          ) : (
-            <div className="button-row">
-              {proposal.reasonCode === "estimate_out_of_range" ? <button className="button button-secondary" type="button" onClick={() => setStep("profile")}>Check activity level</button> : null}
-              {proposal.reasonCode === "clinician_target_required" ? <button className="button button-secondary" type="button" onClick={() => setStep("profile")}>Review profile</button> : null}
-              <button className="button button-primary" type="button" onClick={() => {
-                if (proposal.reasonCode === "clinician_target_required") update("manualTargetSource", "clinician");
-                setStep("goal");
-              }}>
-                {proposal.reasonCode === "timeline_too_fast" ? "Change target date" : proposal.reasonCode === "clinician_target_required" ? "Enter clinician target" : "Enter manual target"}
-              </button>
-            </div>
-          )}
-        </div>
-      ) : null}
     </section>
   );
 }

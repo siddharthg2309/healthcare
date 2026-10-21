@@ -3,6 +3,8 @@ export {
   getLocalDate,
   type GoalProposal,
 } from "./goals.js";
+export * from "./goal-energy.js";
+export * from "./goal-progress.js";
 export {
   activityEnergyOptions,
   defaultActivityEnergyKind,

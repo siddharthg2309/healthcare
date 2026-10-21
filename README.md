@@ -26,6 +26,18 @@ Calorie estimates use a versioned MET calculation from the [2024 Compendium](htt
 
 Serving counts use the existing JSON food-log records and do not require a database migration. The API validates the chosen portion against its owner and food, checks the total grams against the count, and calculates nutrition. Existing gram-only logs remain supported.
 
+## Goals and Progress
+
+On signup or under **Progress → Edit plan**, choose **My target date**, **My daily intake**, or **Weight tracking only**. Date mode suggests a daily intake; intake mode calculates an approximate timeline. Review the calorie budget, adjust it if needed, and explicitly accept the plan. Select Female/Male under **Calorie estimate** to enable a supported estimate; equation names stay out of the form. Everyday movement excludes workouts. Optional planned exercise is entered as an average across all seven days.
+
+The budget shows estimated maintenance, chosen intake, initial daily/weekly/30-day deficit or surplus, first-week/month weight scenarios, and plan length. Numeric values come from versioned application code, with no AI call. The scenario uses a published reduced population approximation and is explicitly **not the full NIH model or a guaranteed weight prediction**. Infeasible plans show alternatives and a weight-tracking option.
+
+Home adds an estimated energy balance. Complete food logs before a daily deficit is shown; missing meals and incomplete activity estimates remain unknown. Logged net workout calories are added once to the baseline, while the food allowance stays fixed. Existing accepted goals keep their original values: accept an updated plan to add a detailed energy budget.
+
+Progress separates the accepted plan, measured weights/trend, and a recent-pace forecast. Tap the graph or use its date input to inspect food, activity, weight, balance, and logging completeness. Compare earlier accepted plan versions, see weight milestones, and review the last seven days. Forecasts require at least six measured days across fourteen days, with recent evidence and a limited horizon. Their shaded rate-variation band is not a statistical confidence interval. Plan changes require preview and explicit acceptance; updated profiles/weights invalidate a stale preview. Changing a plan does not invent a new weigh-in.
+
+No new environment variables or Neon migration are needed. Existing JSON records remain readable. Builds, typecheck, tests, browser checks, and numerical/live verification were not run for this upgrade, following the owner's request. Calculation methods, limits, history semantics, and remaining validation work are documented in [Decision 0010](docs/decisions/0010-goal-budgets-and-progress.md).
+
 ## When a food is missing
 
 Search the database first. If **All foods** returns no match, tap **Estimate “curd rice” with AI**, then add optional amount/recipe details such as “one bowl” or “300–400 g, not sure.” Tap **Estimate meal** to generate a draft. Typing, database searches, and opening the form do not call AI.

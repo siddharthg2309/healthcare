@@ -68,6 +68,7 @@ import { FoodVisionError } from "./services/food-vision.js";
 import { createFoodEstimate, SAVED_AI_FOOD_PREFIX } from "./services/food-estimation.js";
 import { buildPhotoFoodRecords, readFoodPhotoDraft } from "./services/food-photo-draft.js";
 import { buildActivityEnergyEstimate, createActivityEnergyEstimator } from "./services/activity-energy.js";
+import { readProgressOverview, withLatestGoalWeight } from "./services/goal-progress.js";
 import { hasAiOperationCapacity, lockAiUsageWindow } from "./services/ai-usage.js";
 import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
 import { buildWorkoutPlanningContext, hashWorkoutPlanningContext, resumeWorkoutPlan, runWorkoutPlan, workoutPlanningVersions } from "./services/workout-planning.js";
@@ -1987,6 +1988,12 @@ app.get("/v1/days/:date", async (c) => {
   return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted, activityEnergy, foodDayComplete: result.foodDayComplete });
 });
 
+app.get("/v1/progress/overview", async (c) => {
+  const overview = await readProgressOverview(c.get("session").user.id);
+  if (!overview) return c.json({ error: "accepted_goal_required" }, 409);
+  return c.json(overview);
+});
+
 app.get("/v1/progress/weekly-review", async (c) => {
   const userId = c.get("session").user.id;
   const result = await db.transaction(async (tx) => {
@@ -2924,14 +2931,15 @@ app.post("/v1/goals/proposal", async (c) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
     const [saved] = await tx.select({ data: userProfiles.data })
       .from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
-    return saved?.data ?? null;
+    const parsed = profileSchema.safeParse(saved?.data);
+    return parsed.success ? await withLatestGoalWeight(tx, userId, parsed.data) : null;
   });
   const parsedProfile = profileSchema.safeParse(profile);
   if (!parsedProfile.success) return c.json({ error: "profile_required" }, 409);
 
   const proposal = buildGoalProposal(parsedProfile.data, parsedRequest.data);
   if (proposal.status === "invalid") return c.json({ error: "invalid_goal", message: proposal.reason }, 422);
-  return c.json(proposal);
+  return c.json(proposal.status === "ready" ? { ...proposal, fingerprint: createHash("sha256").update(JSON.stringify(proposal.goal)).digest("hex") } : proposal);
 });
 
 app.get("/v1/goals", async (c) => {
@@ -2971,6 +2979,9 @@ app.post("/v1/goals/accept", async (c) => {
   if (!parsed.success) return c.json({ error: "invalid_goal_acceptance" }, 400);
 
   const userId = c.get("session").user.id;
+  const acceptanceRequestHash = createHash("sha256").update(JSON.stringify({
+    request: parsed.data.request, measurementId: parsed.data.measurementId, proposalFingerprint: parsed.data.proposalFingerprint,
+  })).digest("hex");
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${userId}))`);
@@ -2984,6 +2995,7 @@ app.post("/v1/goals/accept", async (c) => {
       )).limit(1);
     if (existing) {
       const priorGoal = goalSchema.safeParse(existing.data);
+      if (priorGoal.success && priorGoal.data.acceptanceRequestHash && priorGoal.data.acceptanceRequestHash !== acceptanceRequestHash) return { status: "conflict" as const };
       if (priorGoal.success) return { status: "accepted" as const, goal: { id: existing.id, ...priorGoal.data }, idempotent: true };
       return { status: "conflict" as const };
     }
@@ -2993,11 +3005,14 @@ app.post("/v1/goals/accept", async (c) => {
     const profile = profileSchema.safeParse(savedProfile?.data);
     if (!profile.success) return { status: "profile_required" as const };
 
-    const proposal = buildGoalProposal(profile.data, parsed.data.request);
+    const effectiveProfile = await withLatestGoalWeight(tx, userId, profile.data);
+    const proposal = buildGoalProposal(effectiveProfile, parsed.data.request);
     if (proposal.status === "manual_required") {
       return { status: "manual_required" as const, reasonCode: proposal.reasonCode, reasons: proposal.reasons };
     }
     if (proposal.status === "invalid") return { status: "invalid" as const, message: proposal.reason };
+    const fingerprint = createHash("sha256").update(JSON.stringify(proposal.goal)).digest("hex");
+    if (parsed.data.proposalFingerprint && parsed.data.proposalFingerprint !== fingerprint) return { status: "stale" as const };
 
     const existingGoals = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
       eq(userRecords.userId, userId),
@@ -3010,13 +3025,14 @@ app.post("/v1/goals/accept", async (c) => {
     });
     const goal = goalSchema.parse({
       ...proposal.goal,
+      acceptanceRequestHash,
       goalVersion: Math.max(0, ...previousVersions) + 1,
       acceptedAt: new Date().toISOString(),
     });
 
     const measurementData = {
       measuredAt: new Date().toISOString(),
-      weightKg: profile.data.currentWeightKg,
+      weightKg: effectiveProfile.currentWeightKg,
     };
     const [existingMeasurement] = await tx.select({ data: userRecords.data })
       .from(userRecords).where(and(
@@ -3031,7 +3047,7 @@ app.post("/v1/goals/accept", async (c) => {
     await tx.insert(userSyncCounters).values({ userId, cursor: 0 }).onConflictDoNothing();
     const records = [
       { entity: "goal" as const, recordId: parsed.data.goalId, data: goal },
-      { entity: "body_measurement" as const, recordId: parsed.data.measurementId, data: measurementData },
+      ...(existingGoals.length === 0 ? [{ entity: "body_measurement" as const, recordId: parsed.data.measurementId, data: measurementData }] : []),
     ];
     for (const record of records) {
       if (record.entity === "body_measurement" && existingMeasurement) continue;
@@ -3058,9 +3074,13 @@ app.post("/v1/goals/accept", async (c) => {
         deleted: false,
       });
     }
+    if (parsed.data.request.energyEquation) {
+      await tx.update(userProfiles).set({ data: { ...profile.data, energyEquation: parsed.data.request.energyEquation }, updatedAt: new Date() }).where(eq(userProfiles.userId, userId));
+    }
     return { status: "accepted" as const, goal: { id: parsed.data.goalId, ...goal }, idempotent: false };
   });
 
+  if (result.status === "stale") return c.json({ error: "goal_proposal_changed", message: "Your profile, weight, or start date changed. Preview the plan again before accepting." }, 409);
   if (result.status === "profile_required") return c.json({ error: "profile_required" }, 409);
   if (result.status === "manual_required") return c.json({ error: "manual_target_required", reasonCode: result.reasonCode, reasons: result.reasons }, 422);
   if (result.status === "invalid") return c.json({ error: "invalid_goal", message: result.message }, 422);
