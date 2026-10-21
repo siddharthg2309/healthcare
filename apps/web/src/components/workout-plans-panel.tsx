@@ -36,10 +36,12 @@ function workoutSuggestionError(error: unknown): string {
 type Props = {
   unitSystem: "metric" | "imperial";
   equipment: string[];
+  gymWorkoutDays: number;
+  homeWorkoutDays: number;
   onStartSession: (plan: WorkoutPlanVersion, session: WorkoutPlanSession) => void;
 };
 
-function templateData(templateId: string): WorkoutPlanData | null {
+function templateData(templateId: string, location: "gym" | "home"): WorkoutPlanData | null {
   const template = workoutTemplates.find((item) => item.id === templateId);
   if (!template) return null;
   const preferredDays = template.sessions.length === 2 ? [1, 4] : template.sessions.length === 3 ? [1, 3, 5] : [1, 3, 5, 0, 2, 4, 6];
@@ -48,6 +50,7 @@ function templateData(templateId: string): WorkoutPlanData | null {
     focus: template.summary,
     sessions: template.sessions.map((session, index) => ({
       weekday: preferredDays[index] ?? index,
+      location,
       label: session.label,
       estimatedMinutes: session.estimatedMinutes,
       exercises: session.exercises.flatMap((target) => {
@@ -81,7 +84,7 @@ function toTemplateExercise(exerciseId: string) {
   } as WorkoutPlanData["sessions"][number]["exercises"][number];
 }
 
-export function WorkoutPlansPanel({ unitSystem, equipment, onStartSession }: Props) {
+export function WorkoutPlansPanel({ unitSystem, equipment, gymWorkoutDays, homeWorkoutDays, onStartSession }: Props) {
   const [plans, setPlans] = useState<WorkoutPlanVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -148,7 +151,7 @@ export function WorkoutPlansPanel({ unitSystem, equipment, onStartSession }: Pro
   }
 
   async function createDraft() {
-    const draftData = templateData(templateId);
+    const draftData = templateData(templateId, homeWorkoutDays > 0 ? "home" : "gym");
     if (!draftData) return;
     setBusy(true);
     setError("");
@@ -291,6 +294,16 @@ export function WorkoutPlansPanel({ unitSystem, equipment, onStartSession }: Pro
   }
 
   const parsedData = data ? workoutPlanDataSchema.safeParse(data) : null;
+  const locationDaysExceeded = editingPlan?.source === "ai" && data !== null && (
+    data.sessions.filter((session) => session.location === "gym").length > gymWorkoutDays
+    || data.sessions.filter((session) => session.location === "home").length > homeWorkoutDays
+  );
+  const unavailableHomeEquipment = editingPlan?.source === "ai" && data !== null && data.sessions.some((session) =>
+    session.location === "home" && session.exercises.some((target) => {
+      const exercise = findExerciseById(target.exerciseId);
+      return !exercise || !isExerciseAvailable(exercise, equipment);
+    })
+  );
 
   return <section className="panel workout-plans-panel">
     <div className="panel-heading"><div><span className="eyebrow">WEEKLY ROUTINE</span><h2>Workout plans</h2></div><span className="panel-symbol">▦</span></div>
@@ -311,7 +324,7 @@ export function WorkoutPlansPanel({ unitSystem, equipment, onStartSession }: Pro
       return <article className="workout-plan-card" key={groupId}>
         <div className="workout-plan-title-row"><div><span className={`plan-status plan-status-${current.status}`}>{current.status}</span><h3>{current.data.name}</h3><p>Version {current.version} · {current.data.sessions.length} days each week · {current.data.focus}</p></div></div>
         {active ? <div className="workout-plan-session-list">{active.data.sessions.slice().sort((a, b) => a.weekday - b.weekday).map((session, index) => <div className="workout-plan-session" key={`${active.id}-${index}`}>
-          <div><strong>{weekdays[session.weekday]} · {session.label}</strong><small>{session.estimatedMinutes} min · {session.exercises.length} exercises</small></div>
+          <div><strong>{weekdays[session.weekday]} · {session.label}</strong><small>{session.location === "gym" ? "Gym" : "Home"} · {session.estimatedMinutes} min · {session.exercises.length} exercises</small></div>
           <button type="button" className="text-button" onClick={() => onStartSession(active, session)}>Log session</button>
         </div>)}</div> : null}
         {draft ? <div className="workout-plan-actions">
@@ -331,14 +344,17 @@ export function WorkoutPlansPanel({ unitSystem, equipment, onStartSession }: Pro
         <div className="workout-exercise-heading"><strong>Session {sessionIndex + 1}</strong>{data.sessions.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => updateData((current) => ({ ...current, sessions: current.sessions.filter((_, index) => index !== sessionIndex) }))}>Remove session</button> : null}</div>
         <div className="form-grid">
           <label className="field"><span>Day</span><select value={session.weekday} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, weekday: Number(event.target.value) }))}>{weekdays.map((weekday, dayIndex) => <option key={weekday} value={dayIndex} disabled={data.sessions.some((other, sessionPosition) => sessionPosition !== sessionIndex && other.weekday === dayIndex)}>{weekday}</option>)}</select></label>
+          <label className="field"><span>Location</span><select value={session.location} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, location: event.target.value as "gym" | "home" }))}><option value="gym" disabled={gymWorkoutDays === 0}>Gym</option><option value="home" disabled={homeWorkoutDays === 0}>Home</option></select></label>
           <label className="field"><span>Session name</span><input maxLength={80} value={session.label} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, label: event.target.value }))} /></label>
           <label className="field"><span>Minutes</span><input type="number" min="5" max="240" value={session.estimatedMinutes} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, estimatedMinutes: Number(event.target.value) }))} /></label>
         </div>
         <div className="workout-plan-edit-exercises">{session.exercises.map((target, exerciseIndex) => {
           const exercise = findExerciseById(target.exerciseId);
+          const locationExercises = session.location === "gym" ? [...exerciseCatalog] : availableExercises;
+          const existingExerciseAvailable = editingPlan.source !== "ai" || locationExercises.some((item) => item.id === target.exerciseId);
           return <div className="workout-plan-edit-exercise" key={`${sessionIndex}-${exerciseIndex}`}>
             <div className="workout-exercise-heading"><strong>{exercise?.name ?? target.exerciseId}</strong>{session.exercises.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.filter((_, index) => index !== exerciseIndex) }))}>Remove</button> : null}</div>
-            <label className="field"><span>Exercise</span><select value={target.exerciseId} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? toTemplateExercise(event.target.value) : item) }))}>{(editingPlan.source === "ai" ? availableExercises : exerciseCatalog).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label className="field"><span>Exercise</span><select value={target.exerciseId} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? toTemplateExercise(event.target.value) : item) }))}>{(editingPlan.source === "ai" ? locationExercises : exerciseCatalog).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}{!existingExerciseAvailable ? <option value={target.exerciseId}>{exercise?.name ?? target.exerciseId} · unavailable here</option> : null}</select></label>
             <div className="form-grid">
               <label className="field"><span>Sets</span><input type="number" min="1" max="20" value={target.sets} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? { ...item, sets: Number(event.target.value) } : item) }))} /></label>
               <label className="field"><span>{target.trackingMode === "time" ? "Hold min (sec)" : "Reps min"}</span><input type="number" min="1" max={target.trackingMode === "time" ? 7200 : 200} value={target.targetMin} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.map((item, index) => index === exerciseIndex ? { ...item, targetMin: Number(event.target.value) } : item) }))} /></label>
@@ -352,16 +368,18 @@ export function WorkoutPlansPanel({ unitSystem, equipment, onStartSession }: Pro
             </div>
           </div>;
         })}</div>
-        <button type="button" className="text-button" disabled={session.exercises.length >= 20 || (editingPlan.source === "ai" && availableExercises.length === 0)} onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: [...current.exercises, toTemplateExercise((editingPlan.source === "ai" ? availableExercises : exerciseCatalog)[0]?.id ?? "bodyweight-squat")] }))}>＋ Add exercise</button>
+        <button type="button" className="text-button" disabled={session.exercises.length >= 20 || (editingPlan.source === "ai" && locationExercises.length === 0)} onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: [...current.exercises, toTemplateExercise((editingPlan.source === "ai" ? locationExercises : exerciseCatalog)[0]?.id ?? "bodyweight-squat")] }))}>＋ Add exercise</button>
       </article>)}</div>
       <button type="button" className="button button-secondary" disabled={data.sessions.length >= 7} onClick={() => {
         const occupied = new Set(data.sessions.map((session) => session.weekday));
         const nextDay = weekdays.findIndex((_, index) => !occupied.has(index));
         if (nextDay < 0) return;
-        updateData((current) => ({ ...current, sessions: [...current.sessions, { weekday: nextDay, label: "New session", estimatedMinutes: 30, exercises: [toTemplateExercise(exerciseCatalog[0]?.id ?? "bodyweight-squat")] }] }));
+        updateData((current) => ({ ...current, sessions: [...current.sessions, { weekday: nextDay, location: homeWorkoutDays > 0 ? "home" : "gym", label: "New session", estimatedMinutes: 30, exercises: [toTemplateExercise(exerciseCatalog[0]?.id ?? "bodyweight-squat")] }] }));
       }}>＋ Add session</button>
+      {locationDaysExceeded ? <p className="field-note">This draft exceeds your selected gym or home day count. Change a session location before activating it.</p> : null}
+      {unavailableHomeEquipment ? <p className="field-note">A home session uses equipment you did not select. Replace that exercise or move the session to the gym.</p> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="workout-plan-actions"><button type="button" className="button button-secondary" disabled={busy || !dirty} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft"}</button>{editingPlan.source === "ai" ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => void rejectPlan(editingPlan)}>Reject suggestion</button> : null}<button type="button" className="button button-primary" disabled={busy || dirty || !parsedData?.success || parsedData.success && !parsedData.data.sessions.length} onClick={() => void approvePlan(editingPlan)}>Activate plan</button></div>
+      <div className="workout-plan-actions"><button type="button" className="button button-secondary" disabled={busy || !dirty} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft"}</button>{editingPlan.source === "ai" ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => void rejectPlan(editingPlan)}>Reject suggestion</button> : null}<button type="button" className="button button-primary" disabled={busy || dirty || !parsedData?.success || parsedData.success && !parsedData.data.sessions.length || locationDaysExceeded || unavailableHomeEquipment} onClick={() => void approvePlan(editingPlan)}>Activate plan</button></div>
       <p className="field-note">{dirty ? "Save your changes before activation." : "Activation replaces the current version for this routine. Previous versions stay in history."}</p>
     </div> : null}
     {error && !editingPlan ? <p className="form-error" role="alert">{error}</p> : null}

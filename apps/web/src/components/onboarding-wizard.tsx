@@ -19,8 +19,11 @@ type Draft = {
   timezone: string;
   dietaryPreferences: string;
   restrictions: string;
-  equipment: string;
-  availableWorkoutDays: string;
+  equipment: string[];
+  gymEnabled: boolean;
+  homeEnabled: boolean;
+  gymWorkoutDays: string;
+  homeWorkoutDays: string;
   trainingExperience: Profile["trainingExperience"];
   preferredWorkoutMinutes: string;
   movementLimitations: string;
@@ -71,8 +74,11 @@ export function OnboardingWizard({
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     dietaryPreferences: "",
     restrictions: "",
-    equipment: "",
-    availableWorkoutDays: "3",
+    equipment: [],
+    gymEnabled: false,
+    homeEnabled: true,
+    gymWorkoutDays: "2",
+    homeWorkoutDays: "3",
     trainingExperience: "beginner",
     preferredWorkoutMinutes: "45",
     movementLimitations: "",
@@ -110,8 +116,10 @@ export function OnboardingWizard({
       timezone: draft.timezone,
       dietaryPreferences: splitList(draft.dietaryPreferences, 30),
       restrictions: splitList(draft.restrictions, 50),
-      equipment: splitList(draft.equipment, 50),
-      availableWorkoutDays: Number(draft.availableWorkoutDays),
+      equipment: draft.homeEnabled ? draft.equipment : [],
+      availableWorkoutDays: (draft.gymEnabled ? Number(draft.gymWorkoutDays) : 0) + (draft.homeEnabled ? Number(draft.homeWorkoutDays) : 0),
+      gymWorkoutDays: draft.gymEnabled ? Number(draft.gymWorkoutDays) : 0,
+      homeWorkoutDays: draft.homeEnabled ? Number(draft.homeWorkoutDays) : 0,
       trainingExperience: draft.trainingExperience,
       preferredWorkoutMinutes: Number(draft.preferredWorkoutMinutes),
       movementLimitations: splitList(draft.movementLimitations, 20),
@@ -119,7 +127,7 @@ export function OnboardingWizard({
       clinicianDirectedDiet: draft.clinicianDirectedDiet,
     });
     if (!parsed.success) {
-      setError("Enter a name, age, height, weight, and workout days within the shown ranges.");
+      setError("Check your name, age, measurements, and that gym plus home days total no more than seven.");
       return;
     }
     setProfile(parsed.data);
@@ -223,10 +231,27 @@ export function OnboardingWizard({
               <SelectField label="Usual activity" value={draft.activityLevel} onChange={(value) => update("activityLevel", value as Draft["activityLevel"])} options={[
                 ["sedentary", "Mostly sitting"], ["light", "Light activity"], ["moderate", "Moderately active"], ["active", "Active most days"], ["very_active", "Very active"],
               ]} />
-              <Field label="Workout days per week" type="number" value={draft.availableWorkoutDays} onChange={(value) => update("availableWorkoutDays", value)} min="0" max="7" />
+              <div className="field availability-field">
+                <span>Where do you work out?</span>
+                <div className="availability-options">
+                  <label className="toggle-row"><input type="checkbox" checked={draft.gymEnabled} onChange={(event) => update("gymEnabled", event.target.checked)} /><span>Gym</span></label>
+                  <label className="toggle-row"><input type="checkbox" checked={draft.homeEnabled} onChange={(event) => update("homeEnabled", event.target.checked)} /><span>Home</span></label>
+                </div>
+              </div>
+              {draft.gymEnabled ? <Field label="Gym days per week" type="number" value={draft.gymWorkoutDays} onChange={(value) => update("gymWorkoutDays", value)} min="0" max="7" /> : null}
+              {draft.homeEnabled ? <Field label="Home days per week" type="number" value={draft.homeWorkoutDays} onChange={(value) => update("homeWorkoutDays", value)} min="0" max="7" /> : null}
+              <p className="field-note availability-note">Gym and home days together can add up to seven days per week.</p>
               <SelectField label="Strength-training experience" value={draft.trainingExperience} onChange={(value) => update("trainingExperience", value as Draft["trainingExperience"])} options={[["beginner", "New or returning"], ["intermediate", "Some experience"], ["advanced", "Experienced"]]} />
               <Field label="Preferred workout length (minutes)" type="number" value={draft.preferredWorkoutMinutes} onChange={(value) => update("preferredWorkoutMinutes", value)} min="10" max="180" />
-              <Field label="Equipment you have" value={draft.equipment} onChange={(value) => update("equipment", value)} placeholder="Dumbbells, bands" />
+              {draft.homeEnabled ? <fieldset className="field home-equipment-field">
+                <legend>Equipment available at home</legend>
+                <div className="home-equipment-options">
+                  {[["dumbbells", "Dumbbells"], ["kettlebell", "Kettlebells"], ["resistance bands", "Resistance bands"], ["bench", "Bench or stable chair"], ["pull-up bar", "Pull-up bar"], ["barbell and rack", "Barbell and rack"]].map(([value, label]) => (
+                    <label className="toggle-row" key={value}><input type="checkbox" checked={draft.equipment.includes(value)} onChange={(event) => update("equipment", event.target.checked ? [...draft.equipment, value] : draft.equipment.filter((item) => item !== value))} /><span>{label}</span></label>
+                  ))}
+                </div>
+                <small>If none are selected, home sessions use bodyweight exercises.</small>
+              </fieldset> : null}
               <Field label="Movements you need to avoid" value={draft.movementLimitations} onChange={(value) => update("movementLimitations", value)} placeholder="Optional; comma-separated" />
               <Field label="Food preferences" value={draft.dietaryPreferences} onChange={(value) => update("dietaryPreferences", value)} placeholder="Vegetarian, South Indian" />
               <Field label="Allergies or foods to avoid" value={draft.restrictions} onChange={(value) => update("restrictions", value)} placeholder="Peanuts, shellfish" />
@@ -235,11 +260,7 @@ export function OnboardingWizard({
           </div>
 
           <div className="form-section">
-            <h2>Calorie estimate</h2>
-            <p className="field-note">Choose an energy equation only if you’re comfortable. The choice is explicit and is not inferred from gender identity.</p>
-            <SelectField label="Equation input" value={draft.energyEquation} onChange={(value) => update("energyEquation", value as Draft["energyEquation"])} options={[
-              ["not_provided", "I prefer not to choose"], ["mifflin_female", "Mifflin–St Jeor · female coefficient"], ["mifflin_male", "Mifflin–St Jeor · male coefficient"], ["manual", "I will enter a target manually"],
-            ]} />
+            <h2>Health considerations</h2>
             <Toggle label="Pregnant or breastfeeding" checked={draft.pregnancyOrBreastfeeding} onChange={(value) => update("pregnancyOrBreastfeeding", value)} />
             <Toggle label="Following a clinician-directed diet" checked={draft.clinicianDirectedDiet} onChange={(value) => update("clinicianDirectedDiet", value)} />
           </div>
@@ -275,7 +296,7 @@ export function OnboardingWizard({
             }} min="800" max="5000" />
             {draft.manualDailyCalories ? (
               <SelectField label="Target source" value={draft.manualTargetSource ?? "self"} onChange={(value) => update("manualTargetSource", value as Draft["manualTargetSource"])} options={[["self", "Entered by me"], ["clinician", "Provided by a clinician"]]} />
-            ) : <p className="field-note">Leave this blank for an automatic estimate when your profile is eligible.</p>}
+            ) : <p className="field-note">Leave this blank to set a weight goal without a calorie or macro target. You can still track your food and daily totals.</p>}
           </div>
 
           {error ? <p className="form-error" role="alert">{error}</p> : null}
@@ -296,7 +317,7 @@ export function OnboardingWizard({
                 <span>{proposal.goal.startDate} to {proposal.goal.targetDate}</span>
               </div>
               <div className="review-grid">
-                <div className="review-stat"><span>Daily calories</span><strong>{proposal.goal.dailyCaloriesKcal?.toLocaleString("en-IN") ?? "Not set"}</strong><small>{proposal.goal.calculationMode === "automatic_estimate" ? "Estimated target" : "Manual target"}</small></div>
+                <div className="review-stat"><span>Daily calories</span><strong>{proposal.goal.dailyCaloriesKcal?.toLocaleString("en-IN") ?? "Not set"}</strong><small>{proposal.goal.calculationMode === "automatic_estimate" ? "Estimated target" : proposal.goal.calculationMode === "manual_target" ? "Manual target" : "Weight tracking only"}</small></div>
                 {proposal.goal.macrosGrams ? (
                   <>
                     <div className="review-stat"><span>Protein</span><strong>{proposal.goal.macrosGrams.protein} g</strong><small>Daily starter target</small></div>
@@ -321,7 +342,7 @@ export function OnboardingWizard({
 
           <label className="acknowledgment">
             <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />
-            <span>I reviewed this estimate. I understand it is for general tracking and is not medical advice.</span>
+            <span>I reviewed this goal. I understand it is for general tracking and is not medical advice.</span>
           </label>
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           <div className="button-row">

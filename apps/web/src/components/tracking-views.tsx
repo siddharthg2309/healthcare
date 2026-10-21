@@ -1006,7 +1006,7 @@ function emptyExercise(): ExerciseDraft {
   return { exerciseId: null, exerciseName: "", trackingMode: "reps", sets: [{ reps: "", durationSeconds: "", loadKg: "" }] };
 }
 
-export function ActivityTrackingView({ day, unitSystem, equipment, onSaved }: Props & { unitSystem: "metric" | "imperial"; equipment: string[] }) {
+export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDays, homeWorkoutDays, onSaved }: Props & { unitSystem: "metric" | "imperial"; equipment: string[]; gymWorkoutDays: number; homeWorkoutDays: number }) {
   const [viewDate, setViewDate] = useState(day.date);
   const [loadedHistoryDay, setLoadedHistoryDay] = useState<DaySummary>(day);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -1138,7 +1138,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, onSaved }: Pr
     setDurationMinutes("");
     setSteps("");
     setNotes("");
-    setWorkoutTitle(`${plan.data.name} · ${session.label}`);
+    setWorkoutTitle(`${session.location === "gym" ? "Gym" : "Home"} · ${plan.data.name} · ${session.label}`);
     setPlannedSession({ planId: plan.id, planVersion: plan.version, weekday: session.weekday, label: session.label });
     setExercises(session.exercises.flatMap((target) => {
       const exercise = findExerciseById(target.exerciseId);
@@ -1233,7 +1233,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, onSaved }: Pr
 
   return <>
     <div className="page-heading"><div><span className="eyebrow">ACTIVITY TRACKING</span><h1>Record your movement</h1><p>Enter steps or a workout. Health Connect is not available in this web app.</p></div><span className="date-chip">{viewDate}</span></div>
-    <WorkoutPlansPanel unitSystem={unitSystem} equipment={equipment} onStartSession={startPlannedSession} />
+    <WorkoutPlansPanel unitSystem={unitSystem} equipment={equipment} gymWorkoutDays={gymWorkoutDays} homeWorkoutDays={homeWorkoutDays} onStartSession={startPlannedSession} />
     <section className="tracking-grid">
       <form id="activity-entry-form" className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
         <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : viewDate === day.date ? "Today’s activity" : "Activity for this day"}</h2></div><span className="panel-symbol">↗</span></div>

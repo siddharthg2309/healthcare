@@ -24,16 +24,18 @@ import {
 import { env } from "../env.js";
 import { openRouterCostToMicros } from "./ai-usage.js";
 
-const PROMPT_VERSION = "workout-plan-v1";
-const SCHEMA_VERSION = "workout-plan-data-v1";
+const PROMPT_VERSION = "workout-plan-v2";
+const SCHEMA_VERSION = "workout-plan-data-v2";
 const MIN_EXERCISE_CANDIDATES = 6;
 
 export interface WorkoutPlanningContext {
   goalDirection: GoalRecord["direction"];
   trainingExperience: "beginner" | "intermediate" | "advanced";
   availableWorkoutDays: number;
+  gymWorkoutDays: number;
+  homeWorkoutDays: number;
   preferredWorkoutMinutes: number;
-  equipment: string[];
+  homeEquipment: string[];
   adultEligible: boolean;
   pregnancyOrBreastfeeding: boolean;
   hasMovementLimitations: boolean;
@@ -50,6 +52,7 @@ export interface WorkoutExerciseCandidate {
   name: string;
   movementPattern: ExerciseDefinition["movementPattern"];
   primaryMuscles: string[];
+  locations: Array<"gym" | "home">;
   equipment: string[];
   trackingMode: ExerciseDefinition["trackingMode"];
   techniqueCue: string;
@@ -96,9 +99,10 @@ const outputJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["weekday", "label", "exercises"],
+        required: ["weekday", "location", "label", "exercises"],
         properties: {
           weekday: { type: "integer", minimum: 0, maximum: 6 },
+          location: { type: "string", enum: ["gym", "home"] },
           label: { type: "string", minLength: 1, maxLength: 80 },
           exercises: {
             type: "array",
@@ -180,8 +184,10 @@ function makeContext(
     goalDirection: goal.direction,
     trainingExperience: profile.trainingExperience,
     availableWorkoutDays: profile.availableWorkoutDays,
+    gymWorkoutDays: profile.gymWorkoutDays ?? 0,
+    homeWorkoutDays: profile.homeWorkoutDays ?? profile.availableWorkoutDays,
     preferredWorkoutMinutes: profile.preferredWorkoutMinutes,
-    equipment: canonicalizeEquipment(profile.equipment),
+    homeEquipment: canonicalizeEquipment(profile.equipment),
     adultEligible: profile.ageYears >= 18,
     pregnancyOrBreastfeeding: profile.pregnancyOrBreastfeeding,
     hasMovementLimitations: profile.movementLimitations.length > 0,
@@ -227,12 +233,16 @@ function validatePlanData(
   const maximumDays = maxPlanDays(context);
   if (parsed.data.sessions.length > maximumDays) errors.push("workout_frequency_exceeds_profile");
   let weeklySets = 0;
+  let gymSessions = 0;
+  let homeSessions = 0;
   const sessions = parsed.data.sessions.map((session) => {
+    if (session.location === "gym") gymSessions += 1;
+    else homeSessions += 1;
     const seenExercises = new Set<string>();
     let sessionSets = 0;
     const exercises = session.exercises.map((target) => {
       const candidate = candidates.get(target.exerciseId);
-      if (!candidate || candidate.trackingMode !== target.trackingMode) {
+      if (!candidate || candidate.trackingMode !== target.trackingMode || !candidate.locations.includes(session.location)) {
         errors.push("exercise_not_available_for_profile");
         return target;
       }
@@ -263,6 +273,7 @@ function validatePlanData(
     return { ...normalizedSession, estimatedMinutes };
   });
   if (weeklySets > maxWeeklySets(context)) errors.push("weekly_volume_exceeds_experience_limit");
+  if (gymSessions > context.gymWorkoutDays || homeSessions > context.homeWorkoutDays) errors.push("workout_location_days_exceeded");
   if (new Set(sessions.map((session) => session.weekday)).size !== sessions.length) errors.push("duplicate_workout_day");
   if (errors.length) return { plan: null, errors: [...new Set(errors)] };
   const normalized = workoutPlanDataSchema.safeParse({ ...parsed.data, sessions });
@@ -275,7 +286,8 @@ function buildPrompt(state: WorkoutPlanGraphState): string {
   return JSON.stringify({
     instructions: [
       "Create a practical weekly strength and general-fitness routine for an adult using only the supplied reviewed exercise IDs.",
-      "Never invent exercise IDs or equipment. Use no exercise whose listed equipment is unavailable.",
+      "Never invent exercise IDs or equipment. Use only exercises listed as available at the session's location.",
+      "Assign each session to gym or home. Never use gym equipment in a home session. Do not schedule more gym or home sessions than the user selected.",
       "Respect the user's experience, maximum workout days, and preferred session length. Schedule recovery days.",
       "Use the recent activity summary to avoid abrupt increases and unnecessary repetition. It is a partial log, not proof of fitness or recovery.",
       "Use moderate, comfortable targets; do not prescribe training to failure, medical treatment, rehabilitation, or calorie burn.",
@@ -289,9 +301,11 @@ function buildPrompt(state: WorkoutPlanGraphState): string {
       goalDirection: state.context.goalDirection,
       experience: state.context.trainingExperience,
       availableWorkoutDays: state.context.availableWorkoutDays,
+      gymWorkoutDays: state.context.gymWorkoutDays,
+      homeWorkoutDays: state.context.homeWorkoutDays,
       maxPlanDays: maxPlanDays(state.context),
       preferredWorkoutMinutes: state.context.preferredWorkoutMinutes,
-      equipment: state.context.equipment,
+      homeEquipment: state.context.homeEquipment,
       recentTraining: state.context.recentTraining,
     },
     reviewedExamples: workoutTemplates.map((template) => ({
@@ -368,6 +382,7 @@ function normalizeDraft(state: WorkoutPlanGraphState): { plan: PlanData | null; 
     focus: state.modelDraft.focus,
     sessions: state.modelDraft.sessions.map((session) => ({
       weekday: session.weekday,
+      location: session.location,
       label: session.label,
       estimatedMinutes: 10,
       exercises: session.exercises.map((exercise) => ({ ...exercise, targetLoadKg: null })),
@@ -570,16 +585,22 @@ export async function buildWorkoutPlanningContext(userId: string): Promise<{
     if (!context.adultEligible || context.pregnancyOrBreastfeeding) throw new Error("workout_planning_not_available_for_this_profile");
     if (context.hasMovementLimitations) throw new Error("workout_movement_review_required");
     if (context.availableWorkoutDays < 1) throw new Error("workout_days_required");
-    const candidates = exerciseCatalog.filter((exercise) => isExerciseAvailable(exercise, context.equipment)).map((exercise) => ({
-      id: exercise.id,
-      name: exercise.name,
-      movementPattern: exercise.movementPattern,
-      primaryMuscles: exercise.primaryMuscles,
-      equipment: exercise.equipment,
-      trackingMode: exercise.trackingMode,
-      techniqueCue: exercise.techniqueCue,
-      typicalRestSeconds: exercise.typicalRestSeconds,
-    }));
+    const candidates = exerciseCatalog.map((exercise) => {
+      const locations: Array<"gym" | "home"> = [];
+      if (context.gymWorkoutDays > 0) locations.push("gym");
+      if (context.homeWorkoutDays > 0 && isExerciseAvailable(exercise, context.homeEquipment)) locations.push("home");
+      return {
+        id: exercise.id,
+        name: exercise.name,
+        movementPattern: exercise.movementPattern,
+        primaryMuscles: exercise.primaryMuscles,
+        locations,
+        equipment: exercise.equipment,
+        trackingMode: exercise.trackingMode,
+        techniqueCue: exercise.techniqueCue,
+        typicalRestSeconds: exercise.typicalRestSeconds,
+      };
+    }).filter((exercise) => exercise.locations.length > 0);
     if (candidates.length < MIN_EXERCISE_CANDIDATES) throw new Error("workout_exercise_coverage_insufficient");
     return { context, candidates };
   });

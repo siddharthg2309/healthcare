@@ -16,12 +16,24 @@ export const profileSchema = z.object({
   restrictions: z.array(z.string().trim().min(1).max(80)).max(50),
   equipment: z.array(z.string().trim().min(1).max(80)).max(50),
   availableWorkoutDays: z.number().int().min(0).max(7),
+  gymWorkoutDays: z.number().int().min(0).max(7).optional(),
+  homeWorkoutDays: z.number().int().min(0).max(7).optional(),
   trainingExperience: z.enum(["beginner", "intermediate", "advanced"]).default("beginner"),
   preferredWorkoutMinutes: z.number().int().min(10).max(180).default(45),
   movementLimitations: z.array(z.string().trim().min(1).max(100)).max(20).default([]),
   pregnancyOrBreastfeeding: z.boolean(),
   clinicianDirectedDiet: z.boolean(),
-}).strict();
+}).strict().superRefine((profile, context) => {
+  if (profile.gymWorkoutDays !== undefined && profile.homeWorkoutDays !== undefined) {
+    const locationDays = profile.gymWorkoutDays + profile.homeWorkoutDays;
+    if (locationDays > 7) {
+      context.addIssue({ code: "custom", path: ["homeWorkoutDays"], message: "Gym and home days cannot add up to more than seven." });
+    }
+    if (locationDays !== profile.availableWorkoutDays) {
+      context.addIssue({ code: "custom", path: ["availableWorkoutDays"], message: "Total workout days must equal gym days plus home days." });
+    }
+  }
+});
 
 export const reminderKindSchema = z.enum(["breakfast", "lunch", "dinner", "workout", "weigh_in"]);
 
@@ -93,7 +105,7 @@ export const goalSchema = z.object({
     carbohydrate: z.number().finite().min(0).max(1000),
     fat: z.number().finite().min(0).max(500),
   }).strict().nullable(),
-  calculationMode: z.enum(["automatic_estimate", "manual_target"]),
+  calculationMode: z.enum(["automatic_estimate", "manual_target", "weight_only"]),
   calculationPolicyVersion: z.string().min(1).max(40),
   rationale: z.array(z.string().min(1).max(180)).max(10),
   trajectory: z.array(trajectoryPointSchema).min(2).max(106),
@@ -467,6 +479,7 @@ const workoutPlanExerciseSchema = z.object({
 
 const workoutPlanSessionSchema = z.object({
   weekday: z.number().int().min(0).max(6),
+  location: z.enum(["gym", "home"]).default("home"),
   label: z.string().trim().min(1).max(80),
   estimatedMinutes: z.number().int().min(5).max(240),
   exercises: z.array(workoutPlanExerciseSchema).min(1).max(20),
@@ -492,6 +505,7 @@ export const workoutPlanModelOutputSchema = z.object({
   focus: z.string().trim().min(1).max(180),
   sessions: z.array(z.object({
     weekday: z.number().int().min(0).max(6),
+    location: z.enum(["gym", "home"]),
     label: z.string().trim().min(1).max(80),
     exercises: z.array(z.object({
       exerciseId: z.string().trim().min(1).max(80),

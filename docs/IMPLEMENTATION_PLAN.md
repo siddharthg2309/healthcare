@@ -166,11 +166,11 @@ Collect required inputs first and request integration permissions only when the 
 | Baseline activity | Typical work/activity level, walking habits, current exercise frequency |
 | Food | Vegetarian/vegan/other preference, allergies, exclusions, preferred cuisines, disliked foods |
 | Practical constraints | Meals per day, cooking access, available preparation time, optional budget |
-| Exercise | Experience, available days, session duration, equipment, walking access, movement limitations |
+| Exercise | Experience, gym days, home days, home equipment checkboxes, session duration, walking access, movement limitations |
 | Reminders | Preferred meal/workout/weigh-in times and quiet hours |
 | Optional connections | Google Calendar; native Health Connect is deferred |
 
-If an energy equation requires a sex-related physiological parameter, explain the purpose, make the choice explicit, and offer a manually supplied target where appropriate. Do not silently substitute gender identity for that parameter. Do not send a date of birth to the model when an age range is enough.
+Do not ask users to choose a calorie equation during initial setup. A goal may track the weight timeline without setting a calorie or macro target; manual daily targets remain optional. Keep any formula-based estimate behind a separately reviewed, explicit choice. Do not send a date of birth to the model when an age range is enough.
 
 Ask about factors that make automatic general-purpose planning unsuitable, such as pregnancy or a clinician-directed diet. In such cases allow logging and user/clinician supplied targets; do not generate a standard weight-change prescription. The initial app should not automatically plan weight loss for children.
 
@@ -181,9 +181,9 @@ The backend owns target calculations. Implement a versioned calculation module w
 The process is:
 
 1. Validate measurement units, values, and dates.
-2. Estimate baseline energy needs using the selected reviewed formula and activity assumptions, or accept an explicit manually supplied target.
+2. Use an explicit manual target if provided; otherwise accept a weight-only goal when no reviewed formula has been selected.
 3. Assess the requested target/timeline against the supported planning policy.
-4. Propose a calorie range, macro targets, and an achievable planning timeline; explain uncertain assumptions.
+4. When an approved formula or manual target is available, show the calorie target and explain its assumptions; otherwise offer a weight-only timeline.
 5. Let the user review and accept the proposal.
 6. Store a new goal version and target version with effective dates and calculation metadata.
 7. Create the graph's planned trajectory from that accepted version.
@@ -566,7 +566,7 @@ flowchart TD
   T --> U[Create optional reminder and Calendar delivery jobs]
 ```
 
-Workout validation must include unsupported exercises, equipment mismatches, impossible scheduling, session duration, missing rest, and the bounds defined for the supported experience level. Movement limitations require suitable reviewed alternatives; the LLM should not diagnose injuries or choose rehabilitation protocols.
+Workout validation must include unsupported exercises, location-specific equipment mismatches, gym/home day limits, impossible scheduling, session duration, missing rest, and the bounds defined for the supported experience level. Movement limitations require suitable reviewed alternatives; the LLM should not diagnose injuries or choose rehabilitation protocols.
 
 ### 10.3 State and durable memory
 

@@ -1,6 +1,6 @@
 import type { GoalProposalRequest, GoalRecord, Profile } from "@healthcare/contracts";
 
-export const GOAL_CALCULATION_POLICY_VERSION = "goal-target-v1";
+export const GOAL_CALCULATION_POLICY_VERSION = "goal-target-v2";
 
 export type GoalProposal =
   | {
@@ -133,7 +133,6 @@ export function buildGoalProposal(
 
   const baseNotes = [
     "The graph is a straight line between the starting and target weights you chose; it is not a forecast of actual body weight.",
-    "The calorie target is an estimate and does not add workout calories back to your food allowance.",
   ];
 
   let dailyCaloriesKcal: number | null;
@@ -173,33 +172,33 @@ export function buildGoalProposal(
 
     const rmr = getRmr(profile);
     if (rmr === null) {
-      return {
-        status: "manual_required",
-        reasons: ["Automatic calorie estimates are available only for adults 19–78 who explicitly select one of the supported energy equations."],
-      };
-    }
+      dailyCaloriesKcal = null;
+      macrosGrams = null;
+      calculationMode = "weight_only";
+      rationale = ["This goal follows the weight and date you chose. No calorie or macro target is set."];
+    } else {
+      const estimatedMaintenance = rmr * activityMultipliers[profile.activityLevel];
+      const adjustment = request.direction === "lose" ? -250 : request.direction === "gain" ? 250 : 0;
+      dailyCaloriesKcal = roundToNearest(estimatedMaintenance + adjustment, 50);
+      if (dailyCaloriesKcal < minimumAutomaticCalories || dailyCaloriesKcal > maximumAutomaticCalories) {
+        return {
+          status: "manual_required",
+          reasons: ["The estimate is outside the app's automatic calorie range. Enter a target supplied by you or a clinician."],
+        };
+      }
 
-    const estimatedMaintenance = rmr * activityMultipliers[profile.activityLevel];
-    const adjustment = request.direction === "lose" ? -250 : request.direction === "gain" ? 250 : 0;
-    dailyCaloriesKcal = roundToNearest(estimatedMaintenance + adjustment, 50);
-    if (dailyCaloriesKcal < minimumAutomaticCalories || dailyCaloriesKcal > maximumAutomaticCalories) {
-      return {
-        status: "manual_required",
-        reasons: ["The estimate is outside the app's automatic calorie range. Enter a target supplied by you or a clinician."],
+      macrosGrams = {
+        protein: Math.round(dailyCaloriesKcal * 0.2 / 4),
+        carbohydrate: Math.round(dailyCaloriesKcal * 0.5 / 4),
+        fat: Math.round(dailyCaloriesKcal * 0.3 / 9),
       };
+      calculationMode = "automatic_estimate";
+      rationale = [
+        "Uses the Mifflin–St Jeor resting-energy estimate and the activity level selected by the user.",
+        "Applies an app-selected 250 kcal adjustment for weight change; this is an estimate, not a medical prescription.",
+        "Macro amounts use a default 20% protein, 50% carbohydrate, and 30% fat energy split.",
+      ];
     }
-
-    macrosGrams = {
-      protein: Math.round(dailyCaloriesKcal * 0.2 / 4),
-      carbohydrate: Math.round(dailyCaloriesKcal * 0.5 / 4),
-      fat: Math.round(dailyCaloriesKcal * 0.3 / 9),
-    };
-    calculationMode = "automatic_estimate";
-    rationale = [
-      "Uses the Mifflin–St Jeor resting-energy estimate and the activity level selected by the user.",
-      "Applies an app-selected 250 kcal adjustment for weight change; this is an estimate, not a medical prescription.",
-      "Macro amounts use a default 20% protein, 50% carbohydrate, and 30% fat energy split.",
-    ];
   }
 
   const trajectory = buildTrajectory(
@@ -224,6 +223,8 @@ export function buildGoalProposal(
       rationale,
       trajectory,
     },
-    notes: baseNotes,
+    notes: dailyCaloriesKcal === null
+      ? [...baseNotes, "No calorie or macro target is set. Food totals remain available without a daily calorie allowance."]
+      : [...baseNotes, "The calorie target is an estimate and does not add workout calories back to your food allowance."],
   };
 }
