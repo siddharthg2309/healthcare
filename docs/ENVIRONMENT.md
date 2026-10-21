@@ -19,7 +19,7 @@ For local development, use:
 | `AUTH_BASE_URL` | `http://localhost:3000` | Local Next.js origin. For deployed production, use the exact HTTPS Vercel/custom domain. |
 | `AUTH_TRUSTED_ORIGINS` | `http://localhost:3000` | The exact origin allowed to use auth. Separate multiple origins with commas. |
 
-The browser calls relative same-origin routes such as `/api/auth/*` and `/v1/*`. The optional APK shell needs only the public `EXPO_PUBLIC_APP_URL` at build time; it loads the same web app and API in a WebView. Never place credentials in `EXPO_PUBLIC_*` variables.
+The browser calls relative same-origin routes such as `/api/auth/*` and `/v1/*`. The database client makes legacy PostgreSQL `sslmode=prefer`, `require`, or `verify-ca` values explicit as `verify-full`, preserving certificate and host verification across driver upgrades. The optional APK shell needs only the public `EXPO_PUBLIC_APP_URL` at build time; it loads the same web app and API in a WebView. Never place credentials in `EXPO_PUBLIC_*` variables.
 
 Run the auth, application, and LangGraph checkpoint migrations once, then launch the app:
 

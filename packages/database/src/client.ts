@@ -7,11 +7,23 @@ import * as schema from "./schema.js";
 
 config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
-const connectionString = process.env.DATABASE_URL;
+function explicitTlsMode(connectionString: string): string {
+  const parsed = new URL(connectionString);
+  const currentAliases = new Set(["prefer", "require", "verify-ca"]);
+  const sslMode = parsed.searchParams.get("sslmode")?.toLowerCase();
+  if (sslMode && currentAliases.has(sslMode)) {
+    parsed.searchParams.set("sslmode", "verify-full");
+  }
+  return parsed.toString();
+}
 
-if (!connectionString) {
+const configuredConnectionString = process.env.DATABASE_URL;
+
+if (!configuredConnectionString) {
   throw new Error("DATABASE_URL is required to connect to Neon Postgres.");
 }
+
+const connectionString = explicitTlsMode(configuredConnectionString);
 
 export const pool = new Pool({
   connectionString,
