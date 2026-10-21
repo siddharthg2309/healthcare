@@ -12,7 +12,8 @@ export const activityEnergyOptions: ReadonlyArray<{
   { id: "walk_moderate", activityType: "walk", label: "Moderate walk", met: 3.8, code: "17190" },
   { id: "walk_brisk", activityType: "walk", label: "Brisk walk", met: 4.8, code: "17200" },
   { id: "aerobics", activityType: "cardio", label: "General aerobics", met: 7.3, code: "02000" },
-  { id: "jogging", activityType: "cardio", label: "Jogging", met: 7.5, code: "12020" },
+  { id: "jogging", activityType: "cardio", label: "Run / treadmill jog", met: 7.5, code: "12020" },
+  { id: "cycling_general", activityType: "cardio", label: "Cycling · general", met: 7, code: "01014" },
   { id: "stationary_cycle", activityType: "cardio", label: "Stationary bike", met: 6.8, code: "01200" },
   { id: "elliptical", activityType: "cardio", label: "Elliptical · moderate", met: 5, code: "02048" },
   { id: "rowing", activityType: "cardio", label: "Rowing · moderate", met: 5, code: "02071" },
@@ -71,10 +72,29 @@ export function estimateActivityEnergy(input: {
   };
 }
 
+/** Select exactly one net-active energy value; never sum device and MET estimates. */
+export function resolveActivityEnergy(record: Pick<ActivityLogRecord, "activityType" | "durationMinutes" | "energyEstimate" | "cardioReport">) {
+  if (!["walk", "cardio", "strength"].includes(record.activityType)) return null;
+  const report = record.cardioReport;
+  if (report && ["walk", "cardio"].includes(record.activityType) && record.durationMinutes
+    && report.caloriesKcal !== null && report.calorieBasis !== "unknown") {
+    if (report.calorieBasis === "active") return { caloriesKcal: report.caloriesKcal, source: "reported_active" as const };
+    // Total includes rest. Use the same 1-MET resting convention as the MET fallback.
+    if (record.energyEstimate) return {
+      caloriesKcal: Math.max(0, Math.round(report.caloriesKcal - 3.5 * record.energyEstimate.weightKg / 200 * record.durationMinutes)),
+      source: "reported_total_net" as const,
+    };
+  }
+  return record.energyEstimate ? { caloriesKcal: record.energyEstimate.caloriesKcal, source: "met" as const } : null;
+}
+
 /** Daily activity burn is separate from food intake and resting expenditure. */
-export function summarizeActivityEnergy(records: ReadonlyArray<Pick<ActivityLogRecord, "activityType" | "energyEstimate">>) {
+export function summarizeActivityEnergy(records: ReadonlyArray<Pick<ActivityLogRecord, "activityType" | "durationMinutes" | "energyEstimate" | "cardioReport">>) {
   const sessions = records.filter((record) => ["walk", "cardio", "strength"].includes(record.activityType));
-  const estimates = sessions.flatMap((record) => record.energyEstimate ? [record.energyEstimate] : []);
+  const estimates = sessions.flatMap((record) => {
+    const energy = resolveActivityEnergy(record);
+    return energy ? [energy] : [];
+  });
   return {
     caloriesKcal: estimates.length ? estimates.reduce((sum, estimate) => sum + estimate.caloriesKcal, 0) : sessions.length ? null : 0,
     estimatedSessions: estimates.length,

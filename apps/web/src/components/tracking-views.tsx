@@ -7,15 +7,19 @@ import type {
   FoodLogRecord,
   ActivityLogRecord,
   ActivityEnergyKind,
+  CardioReport,
+  CardioPhotoResponse,
   DailyGoalEnergy,
 } from "@healthcare/contracts";
-import { activityEnergyOptions, defaultActivityEnergyKind, estimateActivityEnergy, exerciseCatalog, findExerciseById, getLocalDate, localNoonInstant, selectActivityWeight, summarizeActivityEnergy } from "@healthcare/domain";
+import { activityEnergyOptions, defaultActivityEnergyKind, estimateActivityEnergy, exerciseCatalog, findExerciseById, getLocalDate, localNoonInstant, selectActivityWeight, summarizeActivityEnergy, resolveActivityEnergy } from "@healthcare/domain";
 import type { WorkoutPlanSession, WorkoutPlanVersion } from "@healthcare/contracts";
 import {
   postJson,
   requestJson,
+  ApiError,
 } from "@/lib/api";
 import { MealPlansPanel } from "./meal-plans-panel";
+import { CardioPhotoImport } from "./cardio-photo-import";
 import { FoodEstimateLogger } from "./food-estimate-logger";
 import { WorkoutPlansPanel } from "./workout-plans-panel";
 
@@ -911,6 +915,8 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
   const [plannedSession, setPlannedSession] = useState<ActivityLog["data"]["plannedSession"]>(undefined);
   const [exercises, setExercises] = useState<ExerciseDraft[]>([emptyExercise()]);
   const [energyKind, setEnergyKind] = useState<ActivityEnergyKind | undefined>(undefined);
+  const [cardioReport, setCardioReport] = useState<CardioReport | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingVersion, setEditingVersion] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -967,6 +973,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
     && priorEntry.energyKind === selectedEnergyKind ? priorEntry.energyEstimate
     : selectActivityWeight(measurements.map((item) => item.data), profileWeightKg, occurredAtIso);
   const energyPreview = estimateActivityEnergy({ activityType, energyKind: selectedEnergyKind, durationMinutes: durationMinutes ? Number(durationMinutes) : null, weight });
+  const selectedEnergy = resolveActivityEnergy({ activityType, durationMinutes: durationMinutes ? Number(durationMinutes) : null, energyEstimate: energyPreview, cardioReport: cardioReport ?? undefined });
   const activityEnergy = viewDay.activityEnergy ?? summarizeActivityEnergy(viewDay.activityLogs.map((item) => item.data));
   const validEnergyDuration = Number.isInteger(Number(durationMinutes)) && Number(durationMinutes) >= 1 && Number(durationMinutes) <= 1440;
 
@@ -979,6 +986,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
     setEditingVersion(null);
     setActivityType("steps");
     setEnergyKind(undefined);
+    setCardioReport(null);
     setOccurredAt(dateTimeForDay(viewDate, day.date));
     setDurationMinutes("");
     setSteps("");
@@ -992,6 +1000,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
     setEditingId(item.id);
     setEditingVersion(item.version);
     setActivityType(item.data.activityType);
+    setCardioReport(item.data.cardioReport ?? null);
     setEnergyKind(item.data.energyKind ?? defaultActivityEnergyKind(item.data.activityType));
     setOccurredAt(toLocalInput(item.data.occurredAt));
     setDurationMinutes(item.data.durationMinutes === null ? "" : String(item.data.durationMinutes));
@@ -1018,6 +1027,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
     setEditingId(null);
     setEditingVersion(null);
     setActivityType("strength");
+    setCardioReport(null);
     setEnergyKind(session.exercises.every((target) => findExerciseById(target.exerciseId)?.equipment.length === 0) ? "bodyweight" : "strength_general");
     setOccurredAt(dateTimeForDay(viewDate, day.date));
     setDurationMinutes("");
@@ -1062,6 +1072,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy || photoBusy) return;
     setBusy(true);
     setError("");
     setMessage("");
@@ -1069,6 +1080,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
       const data = {
         activityType,
         ...(selectedEnergyKind ? { energyKind: selectedEnergyKind } : {}),
+        ...(cardioReport && ["walk", "cardio"].includes(activityType) ? { cardioReport } : {}),
         occurredAt: new Date(occurredAt).toISOString(),
         durationMinutes: durationMinutes ? Number(durationMinutes) : null,
         steps: activityType === "strength" ? null : steps ? Number(steps) : null,
@@ -1093,7 +1105,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
       if (editingId && editingVersion !== null) {
         await requestJson(`/v1/activity-logs/${editingId}`, {
           method: "PATCH",
-          body: JSON.stringify({ baseVersion: editingVersion, ...data }),
+          body: JSON.stringify({ baseVersion: editingVersion, ...data, ...(priorEntry?.cardioReport && !cardioReport ? { removeCardioReport: true } : {}) }),
         });
         resetForm();
         setMessage("Activity updated.");
@@ -1103,6 +1115,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
         pendingActivity.current = pending;
         await postJson("/v1/activity-logs", { activityId: pending.id, ...data });
         pendingActivity.current = null;
+        setCardioReport(null);
         setDurationMinutes("");
         setSteps("");
         setNotes("");
@@ -1116,7 +1129,9 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
       await onSaved();
       if (viewDate !== day.date) await selectHistoryDay(viewDate);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save this activity.");
+      setError(caught instanceof ApiError && caught.code === "cardio_report_unavailable"
+        ? "This photo import is already used or unavailable. Edit its existing activity, or remove the imported readings."
+        : caught instanceof Error ? caught.message : "Could not save this activity.");
     } finally {
       setBusy(false);
     }
@@ -1124,15 +1139,16 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
 
   return <>
     <div className="page-heading"><div><h1>Activity</h1></div><span className="date-chip">{viewDate}</span></div>
-    <div className="food-section-switch" role="tablist" aria-label="Activity tools">{(["log", "plan"] as const).map((view) => <button key={view} type="button" role="tab" aria-selected={activityView === view} className={activityView === view ? "food-section-tab food-section-tab-active" : "food-section-tab"} onClick={() => setActivityView(view)}>{view === "log" ? "Activity log" : "My routine"}</button>)}</div>
+    <div className="food-section-switch" role="tablist" aria-label="Activity tools">{(["log", "plan"] as const).map((view) => <button key={view} type="button" role="tab" disabled={busy || photoBusy} aria-selected={activityView === view} className={activityView === view ? "food-section-tab food-section-tab-active" : "food-section-tab"} onClick={() => setActivityView(view)}>{view === "log" ? "Activity log" : "My routine"}</button>)}</div>
     {activityView === "plan" ? <WorkoutPlansPanel unitSystem={unitSystem} equipment={equipment} gymWorkoutDays={gymWorkoutDays} homeWorkoutDays={homeWorkoutDays} onStartSession={startPlannedSession} /> : null}
     {activityView === "log" ? <section className="tracking-grid">
       <form id="activity-entry-form" className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
         <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : viewDate === day.date ? "Today’s activity" : "Activity for this day"}</h2></div><span className="panel-symbol">↗</span></div>
         <div className="form-grid">
-          <label className="field"><span>Activity</span><select value={activityType} onChange={(event) => {
+          <label className="field"><span>Activity</span><select value={activityType} disabled={photoBusy || busy} onChange={(event) => {
             const next = event.target.value as ActivityLog["data"]["activityType"];
             setActivityType(next);
+            setCardioReport(null);
             setEnergyKind(defaultActivityEnergyKind(next));
             setDurationMinutes("");
             setSteps("");
@@ -1140,6 +1156,15 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           }}><option value="steps">Steps</option><option value="walk">Walk</option><option value="cardio">Cardio</option><option value="strength">Strength session</option><option value="other">Other</option></select></label>
           <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
         </div>
+        {["walk", "cardio"].includes(activityType) ? <CardioPhotoImport key={editingId ?? "new"} report={cardioReport} disabled={busy} onChange={setCardioReport} onBusyChange={setPhotoBusy} onReading={(reading: CardioPhotoResponse) => {
+          const kind: Partial<Record<CardioPhotoResponse["activityKind"], ActivityEnergyKind>> = { walk: "walk_moderate", run: "jogging", cycle: "cycling_general", elliptical: "elliptical", rowing: "rowing" };
+          if (kind[reading.activityKind]) {
+            setActivityType(reading.activityKind === "walk" ? "walk" : "cardio");
+            setEnergyKind(kind[reading.activityKind]);
+          }
+          setDurationMinutes(reading.durationMinutes === null ? "" : String(reading.durationMinutes));
+          setCardioReport({ photoRunId: reading.photoRunId, caloriesKcal: reading.caloriesKcal, calorieBasis: reading.calorieBasis, distanceKm: reading.distanceKm });
+        }} /> : null}
         {activityType === "strength" ? <>
           <div className="activity-routine-tools">
             {!editingId ? <button type="button" className="text-button" onClick={() => setActivityView("plan")}>Use my routine ↗</button> : null}
@@ -1189,19 +1214,20 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
         </div>}
         {energyChoices.length ? <>
           <label className="field"><span>{activityType === "walk" ? "Pace" : activityType === "strength" ? "Training style" : "Cardio type"}</span><select value={selectedEnergyKind} onChange={(event) => setEnergyKind(event.target.value as ActivityEnergyKind)}>{energyChoices.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
-          <div className="activity-energy-preview" role="status"><span>Calories burned · estimated</span><strong>{energyPreview ? `${formatNumber(energyPreview.caloriesKcal)} kcal` : validEnergyDuration ? "Add your weight" : durationMinutes ? "Check minutes" : "Enter minutes"}</strong></div>
+          <div className="activity-energy-preview" role="status"><span>{selectedEnergy?.source === "reported_active" ? "Active calories · reported" : selectedEnergy?.source === "reported_total_net" ? "Active calories · adjusted from total" : "Active calories · estimated"}</span><strong>{selectedEnergy ? `${formatNumber(selectedEnergy.caloriesKcal)} kcal` : validEnergyDuration ? "Add your weight" : durationMinutes ? "Check minutes" : "Enter minutes"}</strong></div>
+          {activityType === "strength" ? <details className="activity-note-details"><summary>How workout calories work</summary><p className="muted-copy">Sets, reps, and load track your training. Calories use your body weight, session minutes, and training style; they are estimates.</p></details> : null}
         </> : null}
         <details className="activity-note-details"><summary>Notes</summary><label className="field"><span>Notes · optional</span><input value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} /></label></details>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {message ? <p className="form-message" role="status">{message}</p> : null}
         <div className="activity-form-actions">
-          <button className="button button-primary" disabled={busy || (activityType === "strength" ? !workoutIsReady : activityType === "steps" ? !steps : !durationMinutes)}>{busy ? "Saving…" : editingId ? "Save changes" : activityType === "strength" ? "Save workout" : "Save activity"}</button>
-          {editingId ? <button type="button" className="button button-secondary" onClick={resetForm} disabled={busy}>Cancel edit</button> : null}
+          <button className="button button-primary" disabled={busy || photoBusy || (activityType === "strength" ? !workoutIsReady : activityType === "steps" ? !steps : !durationMinutes)}>{busy ? "Saving…" : editingId ? "Save changes" : activityType === "strength" ? "Save workout" : cardioReport ? "Save reviewed activity" : "Save activity"}</button>
+          {editingId ? <button type="button" className="button button-secondary" onClick={resetForm} disabled={busy || photoBusy}>Cancel edit</button> : null}
         </div>
       </form>
       <section className="panel daily-log-panel">
         <div className="panel-heading"><div><span className="eyebrow">MOVEMENT · {viewDate}</span><h2>Activity history</h2></div><span className="count-badge">{viewDay.activityLogs.length}</span></div>
-        <label className="field"><span>Choose a day</span><input type="date" value={viewDate} max={day.date} onChange={(event) => {
+        <label className="field"><span>Choose a day</span><input type="date" disabled={busy || photoBusy} value={viewDate} max={day.date} onChange={(event) => {
           const nextDate = event.target.value;
           if (!nextDate) return;
           void selectHistoryDay(nextDate);
@@ -1214,6 +1240,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
         <div className="activity-history-totals"><span>{formatNumber(viewDay.steps)} steps · {viewDay.workoutsCompleted} sessions</span>{activityEnergy.sessionsMissingEstimate ? <span>{activityEnergy.sessionsMissingEstimate} {activityEnergy.sessionsMissingEstimate === 1 ? "session needs" : "sessions need"} minutes or weight</span> : null}</div>
         {historyError ? <p className="form-error" role="alert">{historyError}</p> : null}
         {historyLoading ? <p className="muted-copy" role="status">Loading activity history…</p> : viewDay.activityLogs.length ? <div className="daily-entry-list">{[...viewDay.activityLogs].reverse().map((item) => {
+          const entryEnergy = resolveActivityEnergy(item.data);
           const title = item.data.workoutTitle ?? (item.data.activityType === "steps" ? "Step count" : item.data.activityType[0].toUpperCase() + item.data.activityType.slice(1));
           const exerciseDetails = item.data.exercises?.map((exercise) => `${exercise.exerciseName} (${exercise.sets.map((set) => {
             if (set.durationSeconds !== null && set.durationSeconds !== undefined) return `${set.durationSeconds} sec`;
@@ -1222,11 +1249,11 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           }).join(", ")})`).join(" · ");
           return <div className="daily-entry" key={item.id}>
             <span className="meal-badge">↗</span>
-            <span className="daily-entry-main"><strong>{title}</strong><small>{item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
-            <div className="activity-entry-totals">{item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}{item.data.energyEstimate ? <strong>{formatNumber(item.data.energyEstimate.caloriesKcal)}<small> kcal burned · est.</small></strong> : ["walk", "cardio", "strength"].includes(item.data.activityType) ? <span className="activity-calorie-missing">{item.data.durationMinutes ? "Needs weight" : "Add minutes"}</span> : null}</div>
+            <span className="daily-entry-main"><strong>{title}</strong><small>{item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{item.data.cardioReport?.distanceKm !== null && item.data.cardioReport?.distanceKm !== undefined ? ` · ${formatNumber(item.data.cardioReport.distanceKm, 2)} km` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
+            <div className="activity-entry-totals">{item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}{entryEnergy ? <strong>{formatNumber(entryEnergy.caloriesKcal)}<small> kcal · {entryEnergy.source === "met" ? "estimated" : entryEnergy.source === "reported_active" ? "reported" : "adjusted total"}</small></strong> : ["walk", "cardio", "strength"].includes(item.data.activityType) ? <span className="activity-calorie-missing">{item.data.durationMinutes ? "Needs weight" : "Add minutes"}</span> : null}</div>
             <div className="entry-actions">
-              <button type="button" className="quiet-button" onClick={() => editingId === item.id ? resetForm() : beginEdit(item)} disabled={busy || deletingId !== null}>{editingId === item.id ? "Editing" : "Edit"}</button>
-              <button type="button" className="quiet-button entry-delete" onClick={() => void removeActivity(item)} disabled={busy || deletingId !== null}>{deletingId === item.id ? "Deleting…" : "Delete"}</button>
+              <button type="button" className="quiet-button" onClick={() => editingId === item.id ? resetForm() : beginEdit(item)} disabled={busy || photoBusy || deletingId !== null}>{editingId === item.id ? "Editing" : "Edit"}</button>
+              <button type="button" className="quiet-button entry-delete" onClick={() => void removeActivity(item)} disabled={busy || photoBusy || deletingId !== null}>{deletingId === item.id ? "Deleting…" : "Delete"}</button>
             </div>
           </div>;
         })}</div> : <div className="empty-inline"><strong>No activity logged on this day</strong><span>Choose another date or add an entry for this day.</span></div>}

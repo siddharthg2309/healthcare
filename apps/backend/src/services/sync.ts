@@ -9,6 +9,7 @@ import {
 } from "@healthcare/database/schema";
 import { activityLogRecordSchema, type SyncOperation, type SyncPushRequest } from "@healthcare/contracts";
 import { findExerciseById, isActivityEnergyKindAllowed } from "@healthcare/domain";
+import { hasOwnedCardioReport } from "./cardio-photo.js";
 import { buildActivityEnergyEstimate } from "./activity-energy.js";
 
 type SyncResult =
@@ -25,7 +26,7 @@ function rounded(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-type DbReader = Pick<typeof db, "select">;
+type DbReader = Pick<typeof db, "select" | "execute">;
 
 async function normalizeOperation(
   operation: SyncOperation,
@@ -65,6 +66,9 @@ async function normalizeOperation(
       });
       if (invalidExerciseReference) throw new Error("invalid_exercise_reference");
       const prior = activityLogRecordSchema.safeParse(priorData);
+      // Older sync clients cannot silently discard a reviewed screenshot.
+      if (prior.success && prior.data.cardioReport && !operation.data.cardioReport) throw new Error("cardio_report_requires_activity_editor");
+      if (!await hasOwnedCardioReport(reader, userId, operation.id, operation.data)) throw new Error("cardio_report_unavailable");
       const energyEstimate = await buildActivityEnergyEstimate(reader, userId, operation.data, prior.success ? prior.data : undefined);
       return { ...operation.data, energyEstimate };
     }

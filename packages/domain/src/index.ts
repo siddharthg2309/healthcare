@@ -13,6 +13,7 @@ export {
   isActivityEnergyKindAllowed,
   selectActivityWeight,
   summarizeActivityEnergy,
+  resolveActivityEnergy,
 } from "./activity-energy.js";
 export {
   EXERCISE_CATALOG_VERSION,

@@ -24,6 +24,7 @@ import {
   deleteFoodLogRequestSchema,
   exerciseProgressQuerySchema,
   foodPhotoRecognitionRequestSchema,
+  cardioPhotoRequestSchema,
   foodTextEstimateRequestSchema,
   confirmFoodPhotoRequestSchema,
   setFoodFavoriteRequestSchema,
@@ -67,6 +68,7 @@ import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
 import { FoodVisionError } from "./services/food-vision.js";
+import { createCardioPhotoReading, hasOwnedCardioReport } from "./services/cardio-photo.js";
 import { createFoodEstimate, SAVED_AI_FOOD_PREFIX } from "./services/food-estimation.js";
 import { buildPhotoFoodRecords, readFoodPhotoDraft } from "./services/food-photo-draft.js";
 import { buildActivityEnergyEstimate, createActivityEnergyEstimator } from "./services/activity-energy.js";
@@ -1748,6 +1750,20 @@ app.delete("/v1/food-logs/:id", async (c) => {
   return c.json({ id: recordId, version: result.version, deleted: true });
 });
 
+app.post("/v1/activities/recognize-photo", bodyLimit({
+  maxSize: 3_400_000,
+  onError: (c) => c.json({ error: "payload_too_large" }, 413),
+}), async (c) => {
+  const body: unknown = await c.req.json().catch(() => null);
+  const parsed = cardioPhotoRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_cardio_photo" }, 400);
+  try { return c.json(await createCardioPhotoReading(c.get("session").user.id, parsed.data)); }
+  catch (error) {
+    if (error instanceof FoodVisionError) return c.json({ error: error.code }, error.status);
+    return c.json({ error: "ai_provider_unavailable" }, 503);
+  }
+});
+
 app.post("/v1/activity-logs", async (c) => {
   let body: unknown;
   try {
@@ -1768,6 +1784,7 @@ app.post("/v1/activity-logs", async (c) => {
     activityType: parsed.data.activityType,
     occurredAt: parsed.data.occurredAt,
     ...(parsed.data.energyKind ? { energyKind: parsed.data.energyKind } : {}),
+    ...(parsed.data.cardioReport ? { cardioReport: parsed.data.cardioReport } : {}),
     durationMinutes: parsed.data.durationMinutes,
     steps: parsed.data.steps,
     notes: parsed.data.notes,
@@ -1795,6 +1812,7 @@ app.post("/v1/activity-logs", async (c) => {
     if (parsed.data.plannedSession && !await hasOwnedApprovedWorkoutSession(tx, userId, parsed.data.plannedSession)) {
       return { status: "planned_session_invalid" as const };
     }
+    if (!await hasOwnedCardioReport(tx, userId, parsed.data.activityId, data)) return { status: "cardio_report_invalid" as const };
     const recordedData = activityLogRecordSchema.parse({ ...data, energyEstimate: await buildActivityEnergyEstimate(tx, userId, data) });
     await tx.insert(userRecords).values({
       userId,
@@ -1808,6 +1826,7 @@ app.post("/v1/activity-logs", async (c) => {
     await appendSyncChange(tx, userId, "activity_log", parsed.data.activityId, recordedData);
     return { status: "saved" as const, data: recordedData, version: 1, idempotent: false };
   });
+  if (result.status === "cardio_report_invalid") return c.json({ error: "cardio_report_unavailable" }, 409);
   if (result.status === "planned_session_invalid") return c.json({ error: "planned_workout_session_unavailable" }, 409);
   if (result.status === "conflict") return c.json({ error: "activity_log_id_conflict" }, 409);
   return c.json({ id: parsed.data.activityId, data: result.data, version: result.version, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
@@ -1835,6 +1854,7 @@ app.patch("/v1/activity-logs/:id", async (c) => {
     activityType: parsed.data.activityType,
     occurredAt: parsed.data.occurredAt,
     ...(parsed.data.energyKind ? { energyKind: parsed.data.energyKind } : {}),
+    ...(parsed.data.cardioReport ? { cardioReport: parsed.data.cardioReport } : {}),
     durationMinutes: parsed.data.durationMinutes,
     steps: parsed.data.steps,
     notes: parsed.data.notes,
@@ -1855,9 +1875,11 @@ app.patch("/v1/activity-logs/:id", async (c) => {
     if (existing.version !== parsed.data.baseVersion) return { status: "conflict" as const, version: existing.version };
     const prior = activityLogRecordSchema.safeParse(existing.data);
     if (!prior.success) return { status: "invalid_record" as const };
+    if (prior.data.cardioReport && !data.cardioReport && !parsed.data.removeCardioReport) return { status: "cardio_report_required" as const };
     if (parsed.data.plannedSession && !await hasOwnedApprovedWorkoutSession(tx, userId, parsed.data.plannedSession)) {
       return { status: "planned_session_invalid" as const };
     }
+    if (!await hasOwnedCardioReport(tx, userId, recordId, data)) return { status: "cardio_report_invalid" as const };
     const recordedData = activityLogRecordSchema.parse({ ...data, energyEstimate: await buildActivityEnergyEstimate(tx, userId, data, prior.data) });
     const version = existing.version + 1;
     const [saved] = await tx.update(userRecords).set({
@@ -1875,6 +1897,8 @@ app.patch("/v1/activity-logs/:id", async (c) => {
     await appendSyncChange(tx, userId, "activity_log", recordId, recordedData, version);
     return { status: "saved" as const, data: saved.data, version: saved.version };
   });
+  if (result.status === "cardio_report_required") return c.json({ error: "cardio_report_requires_activity_editor" }, 409);
+  if (result.status === "cardio_report_invalid") return c.json({ error: "cardio_report_unavailable" }, 409);
   if (result.status === "planned_session_invalid") return c.json({ error: "planned_workout_session_unavailable" }, 409);
   if (result.status === "missing") return c.json({ error: "activity_log_not_found" }, 404);
   if (result.status === "conflict") return c.json({ error: "activity_log_version_conflict", currentVersion: result.version }, 409);

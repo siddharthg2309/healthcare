@@ -20,11 +20,21 @@ The app is under implementation. The current build includes account setup, goal 
 
 The PWA uses a phone-width layout on every screen, with bottom navigation, safe-area spacing, readable input text, and thumb-sized controls. Food selection opens a bottom sheet: choose a saved serving size, adjust its count with − / + / +2, and add the total to a meal. Custom gram amounts and timestamps stay under **Custom amount & time**. Food and activity each separate their daily log from weekly plans.
 
-Activity opens on a manual log. Enter exercises, sets/reps/loads, and session minutes for strength, or a cardio type and minutes. The app estimates active calories automatically from the saved body weight, activity, and duration. The large starter-session card is removed; **Use my routine** opens the separate routine tab. Meal planning and **Create template draft / Suggest with AI** in My routine remain available. Notes are collapsed and workout names are optional.
+Activity opens on a manual log. Enter exercises, sets/reps/loads, and session minutes for strength, or a cardio type and minutes. The app estimates active calories from saved body weight, activity, and duration, or uses the reviewed cardio readings described below. The large starter-session card is removed; **Use my routine** opens the separate routine tab. Meal planning and **Create template draft / Suggest with AI** in My routine remain available. Notes are collapsed and workout names are optional.
 
 Calorie estimates use a versioned MET calculation from the [2024 Compendium](https://pacompendium.com/adult-compendium/), subtract resting energy, and stay separate from the accepted food allowance. Each new activity stores the weight and method used. Step-only entries and unspecified Other activities have no calorie estimate. Previously saved timed activities also get a calculated estimate when loaded; their saved records remain unchanged until edited. Home and Activity history show the daily estimated calories burned, with steps shown separately. Missing weight or minutes is flagged instead of silently displaying zero. These activity changes use JSON records and need no database migration. Builds and runtime checks were not run for this change, following the owner's request.
 
 Serving counts use the existing JSON food-log records and do not require a database migration. The API validates the chosen portion against its owner and food, checks the total grams against the count, and calculates nutrition. Existing gram-only logs remain supported.
+
+## Cardio screenshots and workout calories
+
+Under **Activity → Walk / Cardio**, optionally upload a Strava screenshot or photograph a treadmill/machine display. Check the extracted minutes, activity type, distance, and reported calories; edit anything unclear and tap **Save reviewed activity**. Photos are read by the configured Google AI service and are not stored by this app. Manual logging remains available.
+
+Choose **Active calories**, **Total calories, including rest**, or **Not sure / not labelled**. Active readings count once. Total readings have session resting calories deducted using the saved weight; unknown readings keep the app's duration/weight estimate. An imported reading and the MET estimate are never summed. The selected energy flows through Home, Activity history, weekly reviews, and goal energy balances. History identifies reported versus estimated energy. Reusing the same import in two active records is rejected; independently uploaded or overlapping sessions still need care when logging.
+
+Strength logs record exercise names, sets, reps, weight, and actual session minutes. Estimated burn uses body weight, duration, and training style; repetitions and lifted weight alone cannot establish calorie expenditure. Device readings also remain estimates, as [Strava explains](https://support.strava.com/en-us/articles/15402159-how-does-strava-calculate-calories).
+
+No additional environment values or migrations are needed for cardio imports. Existing `GEMINI_API_KEY` and `AI_MODEL` settings are reused. The shared daily AI quota applies. Checks and live inference remain skipped at the owner's request. See [Decision 0012](docs/decisions/0012-cardio-photo-readings.md) for accounting, privacy, provenance, and limitations.
 
 ## Goals and Progress
 

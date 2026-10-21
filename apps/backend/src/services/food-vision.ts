@@ -27,7 +27,7 @@ export class FoodVisionError extends Error {
   }
 }
 
-function imageMatchesMimeType(bytes: Buffer, mimeType: FoodPhotoRecognitionRequest["mimeType"]): boolean {
+export function imageMatchesMimeType(bytes: Buffer, mimeType: FoodPhotoRecognitionRequest["mimeType"]): boolean {
   if (mimeType === "image/jpeg") return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   if (mimeType === "image/png") {
     return bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
@@ -36,7 +36,7 @@ function imageMatchesMimeType(bytes: Buffer, mimeType: FoodPhotoRecognitionReque
     && bytes.subarray(8, 12).toString("ascii") === "WEBP";
 }
 
-function responseText(body: unknown): string | null {
+export function responseText(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const choices = (body as { choices?: unknown }).choices;
   if (!Array.isArray(choices) || !choices[0] || typeof choices[0] !== "object") return null;
@@ -66,12 +66,12 @@ export interface FoodVisionResult extends FoodVisionUsage {
   response: FoodPhotoEstimate;
 }
 
-function safeTokenCount(value: unknown): number {
+export function safeTokenCount(value: unknown): number {
   const count = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }
 
-function providerFailure(status: number, usage: FoodVisionUsage | null = null): FoodVisionError {
+export function providerFailure(status: number, usage: FoodVisionUsage | null = null): FoodVisionError {
   switch (status) {
     case 401: return new FoodVisionError("ai_authentication_failed", 503, usage);
     case 402: return new FoodVisionError("ai_credits_exhausted", 503, usage);

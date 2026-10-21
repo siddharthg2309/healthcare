@@ -396,7 +396,7 @@ const plannedWorkoutSessionReferenceSchema = z.object({
 
 export const activityEnergyKindSchema = z.enum([
   "walk_slow", "walk_moderate", "walk_brisk", "aerobics", "jogging",
-  "stationary_cycle", "elliptical", "rowing", "strength_general", "strength_vigorous", "bodyweight",
+  "stationary_cycle", "cycling_general", "elliptical", "rowing", "strength_general", "strength_vigorous", "bodyweight",
 ]);
 
 export const activityEnergyEstimateSchema = z.object({
@@ -409,10 +409,33 @@ export const activityEnergyEstimateSchema = z.object({
   weightMeasuredAt: isoDateTime.nullable(),
 }).strict();
 
+export const cardioReportSchema = z.object({
+  photoRunId: uuidSchema,
+  caloriesKcal: z.number().int().min(0).max(20000).nullable(),
+  calorieBasis: z.enum(["active", "total", "unknown"]),
+  distanceKm: z.number().finite().min(0).max(1000).nullable(),
+}).strict();
+
+export const cardioPhotoRequestSchema = foodPhotoRecognitionRequestSchema.omit({ context: true });
+export const cardioPhotoExtractionSchema = z.object({
+  isActivity: z.boolean(),
+  durationMinutes: z.number().int().min(1).max(1440).nullable(),
+  caloriesKcal: z.number().int().min(0).max(20000).nullable(),
+  calorieBasis: z.enum(["active", "total", "unknown"]),
+  distanceKm: z.number().finite().min(0).max(1000).nullable(),
+  activityKind: z.enum(["walk", "run", "cycle", "elliptical", "rowing", "other", "unknown"]),
+  confidence: z.enum(["high", "medium", "low"]),
+  question: z.string().trim().max(240).nullable(),
+}).strict();
+export const cardioPhotoResponseSchema = cardioPhotoExtractionSchema.extend({ photoRunId: uuidSchema });
+export type CardioReport = z.infer<typeof cardioReportSchema>;
+export type CardioPhotoResponse = z.infer<typeof cardioPhotoResponseSchema>;
+
 const activityLogSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
   energyKind: activityEnergyKindSchema.optional(),
+  cardioReport: cardioReportSchema.optional(),
   durationMinutes: z.number().int().min(0).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
@@ -420,6 +443,9 @@ const activityLogSchema = z.object({
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
   plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if (value.cardioReport && (!["walk", "cardio"].includes(value.activityType) || !value.durationMinutes)) {
+    context.addIssue({ code: "custom", path: ["cardioReport"], message: "A cardio import needs a walking or cardio session with minutes." });
+  }
   if (value.activityType !== "strength" && value.plannedSession !== undefined) {
     context.addIssue({ code: "custom", path: ["plannedSession"], message: "Only a strength session can be linked to a workout plan." });
   }
@@ -432,6 +458,7 @@ export const createActivityLogRequestSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
   energyKind: activityEnergyKindSchema.optional(),
+  cardioReport: cardioReportSchema.optional(),
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
@@ -439,6 +466,9 @@ export const createActivityLogRequestSchema = z.object({
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
   plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if (value.cardioReport && (!["walk", "cardio"].includes(value.activityType) || !value.durationMinutes)) {
+    context.addIssue({ code: "custom", path: ["cardioReport"], message: "A cardio import needs a walking or cardio session with minutes." });
+  }
   if (value.durationMinutes === null && value.steps === null && !(value.activityType === "strength" && value.exercises?.length)) {
     context.addIssue({ code: "custom", path: ["durationMinutes"], message: "Enter a duration or step count." });
   }
@@ -464,6 +494,8 @@ export const updateActivityLogRequestSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
   energyKind: activityEnergyKindSchema.optional(),
+  cardioReport: cardioReportSchema.optional(),
+  removeCardioReport: z.literal(true).optional(),
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
   notes: z.string().trim().max(500).nullable(),
@@ -471,6 +503,10 @@ export const updateActivityLogRequestSchema = z.object({
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
   plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if (value.cardioReport && value.removeCardioReport) context.addIssue({ code: "custom", path: ["removeCardioReport"], message: "Keep or remove the import, not both." });
+  if (value.cardioReport && (!["walk", "cardio"].includes(value.activityType) || !value.durationMinutes)) {
+    context.addIssue({ code: "custom", path: ["cardioReport"], message: "A cardio import needs a walking or cardio session with minutes." });
+  }
   if (value.durationMinutes === null && value.steps === null && !(value.activityType === "strength" && value.exercises?.length)) {
     context.addIssue({ code: "custom", path: ["durationMinutes"], message: "Enter a duration or step count." });
   }
@@ -499,6 +535,7 @@ export const activityLogRecordSchema = z.object({
   activityType: z.enum(["steps", "walk", "cardio", "strength", "other"]),
   occurredAt: isoDateTime,
   energyKind: activityEnergyKindSchema.optional(),
+  cardioReport: cardioReportSchema.optional(),
   energyEstimate: activityEnergyEstimateSchema.nullable().optional(),
   durationMinutes: z.number().int().min(1).max(1440).nullable(),
   steps: z.number().int().min(0).max(200000).nullable(),
@@ -507,6 +544,9 @@ export const activityLogRecordSchema = z.object({
   exercises: z.array(workoutExerciseSchema).min(1).max(20).optional(),
   plannedSession: plannedWorkoutSessionReferenceSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if (value.cardioReport && (!["walk", "cardio"].includes(value.activityType) || !value.durationMinutes)) {
+    context.addIssue({ code: "custom", path: ["cardioReport"], message: "A cardio import needs a walking or cardio session with minutes." });
+  }
   if (value.activityType !== "strength" && value.plannedSession !== undefined) {
     context.addIssue({ code: "custom", path: ["plannedSession"], message: "Only a strength session can be linked to a workout plan." });
   }
