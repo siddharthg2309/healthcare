@@ -400,7 +400,6 @@ async function publishFood() {
     externalSourceId: catalogFoods.externalSourceId,
     active: catalogFoods.active,
     reviewed: catalogFoods.reviewed,
-    updatedAt: catalogFoods.updatedAt,
   }).from(catalogFoods).where(inArray(catalogFoods.id, ids));
   const rowsById = new Map(rows.map((food) => [food.id, food]));
   const foods = ids.map((id) => rowsById.get(id)).filter((food) => food !== undefined);
@@ -439,7 +438,13 @@ async function publishFood() {
         eq(catalogFoods.id, food.id),
         eq(catalogFoods.reviewed, false),
         eq(catalogFoods.active, food.active),
-        eq(catalogFoods.updatedAt, food.updatedAt),
+        eq(catalogFoods.name, food.name),
+        eq(catalogFoods.category, food.category),
+        eq(catalogFoods.caloriesKcalPer100g, food.calories),
+        eq(catalogFoods.proteinGPer100g, food.protein),
+        eq(catalogFoods.carbohydrateGPer100g, food.carbohydrates),
+        eq(catalogFoods.fatGPer100g, food.fat),
+        eq(catalogFoods.source, food.source),
       )).returning({ id: catalogFoods.id, name: catalogFoods.name });
       if (!updated) throw new Error(`Catalog food changed during review (${food.name}). The batch was rolled back.`);
       reviewed.push(updated);
