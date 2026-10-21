@@ -45,10 +45,10 @@ DATABASE_URL=<Neon pooled Postgres connection string>
 AUTH_SECRET=<your chosen private auth secret>
 AUTH_BASE_URL=https://your-project.vercel.app
 AUTH_TRUSTED_ORIGINS=https://your-project.vercel.app
-OPENROUTER_API_KEY=<your OpenRouter key>
+GEMINI_API_KEY=<your Google AI Studio key>
 ```
 
-Local `.env` values are ignored by Git and are not copied into Vercel. Use your existing private Neon URL and auth secret. `OPENROUTER_API_KEY` enables food-photo suggestions and both AI planners. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are optional; add them after deployment if you want Google sign-in. Use the exact HTTPS origin with no path or trailing slash in both auth URL variables. If you change domains, update both values and redeploy. Add matching values to Vercel's Preview environment only if you intend to test authentication on preview deployments; allow only the exact preview origin being used.
+Local `.env` values are ignored by Git and are not copied into Vercel. Use your existing private Neon URL and auth secret. `GEMINI_API_KEY` enables food-photo suggestions and both AI planners. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are optional; add them after deployment if you want Google sign-in. Use the exact HTTPS origin with no path or trailing slash in both auth URL variables. If you change domains, update both values and redeploy. Add matching values to Vercel's Preview environment only if you intend to test authentication on preview deployments; allow only the exact preview origin being used.
 
 Vercel assigns a default `.vercel.app` domain based on the project name when the project is deployed. Use the domain you expect Vercel to assign in both auth variables, then verify the actual value under **Project → Settings → Domains**. If it differs, update `AUTH_BASE_URL` and `AUTH_TRUSTED_ORIGINS` to the assigned HTTPS origin and redeploy before testing sign-in or inviting friends. Do not import a local `.env` unchanged when its auth URLs point to localhost. See Vercel's [domain assignment guide](https://vercel.com/docs/domains/working-with-domains).
 
@@ -74,7 +74,7 @@ Email/password sign-up uses invitations; any verified Google account can create 
 npm run invite:create -- --email friend@example.com
 ```
 
-Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_SECRET`, or the OpenRouter key.
+Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_SECRET`, or the Gemini key.
 
 ## Install the PWA on Android (no APK required)
 
@@ -96,7 +96,7 @@ Choose this only if you want a separate Android package. The APK is an Expo WebV
    | --- | --- | --- |
    | `EXPO_PUBLIC_APP_URL` | `https://your-project.vercel.app` | Plain text; this URL is packaged into the APK |
 
-   These URLs are public configuration. Do not add Neon, Better Auth, OpenRouter, Google OAuth, storage, or token-encryption secrets to Expo/EAS or the APK.
+   These URLs are public configuration. Do not add Neon, Better Auth, Gemini, Google OAuth, storage, or token-encryption secrets to Expo/EAS or the APK.
 4. Build an installable APK from `apps/mobile`:
 
    ```bash
@@ -113,7 +113,7 @@ For local Android development, copy `apps/mobile/.env.example` to `apps/mobile/.
 
 | Feature | Variables | When to configure |
 | --- | --- | --- |
-| Food photo suggestions and meal/workout plan generation | `OPENROUTER_API_KEY`; optional `AI_MODEL` (defaults to `minimax/minimax-m3`); optional `AI_USER_DAILY_OPERATION_LIMIT` (defaults to `10`) | Add the OpenRouter key to Vercel as a server-only Production variable to enable AI. Manual tracking works without it. The operation limit applies per account across AI features; the model and image/output size limits are enforced in server code. |
+| Food photo suggestions and meal/workout plan generation | `GEMINI_API_KEY`; optional `AI_MODEL` (defaults to `gemini-3.1-flash-lite`); optional `AI_USER_DAILY_OPERATION_LIMIT` (defaults to `10`) | Add the Gemini key to Vercel as a server-only Production variable to enable AI. Manual tracking works without it. The operation limit applies per account across AI features; the model and image/output size limits are enforced in server code. |
 | Durable background AI jobs | `JOB_DISPATCH_SECRET` | Configure only when a separate authenticated worker/dispatcher is deployed. Generate with `openssl rand -hex 32`. |
 | Private food-photo storage | `STORAGE_PROVIDER`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_FORCE_PATH_STYLE`, `UPLOAD_MAX_BYTES` | Configure after selecting a private S3-compatible storage provider. Keep credentials server-only; use short-lived upload permissions and retention cleanup. |
 | Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional. Enables sign-in and account creation for verified Google accounts. Keep both values server-side. |
@@ -121,13 +121,17 @@ For local Android development, copy `apps/mobile/.env.example` to `apps/mobile/.
 | Curated catalog imports | `USDA_API_KEY` | Optional; needed only for individual USDA search/import commands. The bulk FNDDS seed reads a locally downloaded public dataset and does not need this key. Neither is needed by the deployed app; do not add the key to Vercel. |
 | Email verification/password recovery | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Add after choosing an email provider and implementing those email flows. |
 
-The LangGraph checkpoint store uses `DATABASE_URL`; it does not need a separate database URL. Leave unused integration values empty. The backend limits each account to 10 AI operations in a rolling 24-hour window across food-photo recognition and both planners. Configure `AI_USER_DAILY_OPERATION_LIMIT` in the server environment to change that cap (1–100; default 10). AI run rows retain status, token counts, and OpenRouter-reported cost in micro-USD without storing uploaded photo bytes. This is a per-account request cap. For a shared hard dollar ceiling across everyone using this key, configure the OpenRouter key spending limit and choose its daily, weekly, or monthly reset in OpenRouter; see the [OpenRouter spend-controls guide](https://openrouter.ai/blog/tutorials/team-spend-controls-setup/). Set and verify that cap before sharing the open sign-up link. Meal-plan drafts support catalog food swaps and portion edits; saving recalculates nutrition and revalidates plan ranges on the server. Plans use only published foods with reviewed safety metadata when diet/allergen requirements apply, and unsupported restrictions fail closed. The catalog may not yet have enough reviewed options for a useful plan. These tags do not guarantee allergy safety or prevent cross-contamination, so users must verify current labels and recipes.
+The LangGraph checkpoint store uses `DATABASE_URL`; it does not need a separate database URL. Leave unused integration values empty. The backend limits each account to 10 AI operations in a rolling 24-hour window across food-photo recognition and both planners. Configure `AI_USER_DAILY_OPERATION_LIMIT` in the server environment to change that cap (1–100; default 10). AI run rows retain status, token counts, and OpenRouter-reported cost in micro-USD without storing uploaded photo bytes. This is a per-account request cap. For a shared hard dollar ceiling across everyone using this key, configure the Gemini key spending limit and choose its daily, weekly, or monthly reset in OpenRouter; see the [OpenRouter spend-controls guide](https://openrouter.ai/blog/tutorials/team-spend-controls-setup/). Set and verify that cap before sharing the open sign-up link. Meal-plan drafts support catalog food swaps and portion edits; saving recalculates nutrition and revalidates plan ranges on the server. Plans use only published foods with reviewed safety metadata when diet/allergen requirements apply, and unsupported restrictions fail closed. The catalog may not yet have enough reviewed options for a useful plan. These tags do not guarantee allergy safety or prevent cross-contamination, so users must verify current labels and recipes.
 
-### AI billing and photo errors
+### Gemini setup and photo errors
 
-MiniMax M3 requires available OpenRouter account credits as well as a valid API key. A key's spending limit is a ceiling, not a credit balance. If photo search reports `ai_credits_exhausted`, add credits to the OpenRouter account that owns the deployed key and retry. Topping up the same account does not require changing the key or redeploying. Meal and workout planning share that account balance.
+Add the full Google AI Studio key under the exact server-only name `GEMINI_API_KEY` in both the ignored local `.env` and Vercel Production environment variables. Set `AI_MODEL=gemini-3.1-flash-lite` or remove `AI_MODEL` to use that default, then redeploy. The previous default `minimax/minimax-m3` is also migrated automatically to the Gemini default so existing Vercel settings do not block the switch. `OPENROUTER_API_KEY` is no longer read and can be removed. The app sends requests directly to Google through its [documented compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai); no OpenRouter credits are involved.
 
-The photo endpoint distinguishes insufficient credits, invalid credentials, access restrictions, an unavailable model, rejected requests, timeouts, and rate limits. It stores safe error codes rather than provider response bodies or photo content. See [OpenRouter error handling](https://openrouter.ai/docs/api_reference/errors-and-debugging).
+The [selected model](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite) supports image inputs and structured output. Its free API tier is subject to project/model quotas; check the project's current limits in AI Studio. Food photos and both planners share the same key and per-account app quota. Google OAuth client credentials are separate and still handle sign-in and Calendar.
+
+Photo failures distinguish invalid credentials, access restrictions, an unavailable model, rejected requests, timeouts, and rate limits. A provider quota error does not trigger an automatic retry or fallback charge. The server stores safe error codes rather than provider response bodies or photo content. See [Gemini troubleshooting](https://ai.google.dev/gemini-api/docs/troubleshooting) and [rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+
+Google's [pricing and data-use table](https://ai.google.dev/gemini-api/docs/pricing) states that free-tier content can be used to improve products, whereas the standard paid tier is marked differently. Select the intended tier before sharing personal photos or health context. The app sends only the photo or the bounded planning context needed for that operation, without names or email addresses.
 
 ### Optional Google sign-in setup
 

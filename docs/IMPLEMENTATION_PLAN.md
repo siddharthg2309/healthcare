@@ -49,7 +49,7 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 | Audience | Users with verified Google accounts, with separate private accounts; email/password signup remains invite-based |
 | Distribution | Deploy the PWA to Vercel and install it from Android Chrome; optional private EAS-built APK; no Play Store listing |
 | Cloud database | Neon Postgres |
-| AI model | MiniMax M3; the selected `minimax/minimax-m3` identifier is an OpenRouter route |
+| AI model | Google AI Studio / Gemini 3.1 Flash-Lite; server-only direct Google calls, Decision 0007 |
 | AI orchestration | Two bounded LangGraph workflows: meal planning and workout planning |
 | Food photos | A separate recognition operation that suggests food matches |
 | Food quantities | User enters or confirms the amount; the image does not establish an exact portion |
@@ -63,7 +63,7 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 - Android Chrome installs the Next.js PWA from its stable HTTPS Vercel origin; `apps/mobile` is an optional Expo WebView wrapper that EAS can build as a private APK.
 - One Vercel project hosts both Next.js pages and same-origin API routes. Next Route Handlers forward `/api/*` and `/v1/*` to the modular Hono API.
 - Neon Postgres is the cloud source of truth. Better Auth allows sign-up with any verified Google account and requires invitations for email/password sign-up.
-- Keep OpenRouter credentials and all trusted provider calls in server routes/workers, never in browser code.
+- Keep Gemini credentials and all trusted provider calls in server routes/workers, never in browser code.
 - Add private object storage only when photo recognition is implemented; keep photos private and short-lived by default.
 - Use browser storage for install metadata and safe UI preferences. Cloud logging requires a network connection; do not promise robust offline writes until an encrypted, account-scoped PWA data/outbox design is implemented.
 - Meal/workout plans use two bounded LangGraph workflows, persisted state, deterministic validation, and explicit user review. Food-photo understanding is a separate vision request, not a general autonomous agent.
@@ -252,7 +252,7 @@ Examples such as home-cooked dal should have the user's recipe version instead o
 1. The person takes a photo or selects one through the Android picker.
 2. The app resizes/compresses it, corrects orientation, and removes unnecessary location metadata.
 3. Upload through a short-lived authenticated upload authorization to private object storage.
-4. A single M3 vision operation returns visible food candidates, alternatives, and uncertainty notes.
+4. A single Gemini vision operation returns visible food candidates, alternatives, and uncertainty notes.
 5. Match those labels to the stored catalog using normal search.
 6. The person confirms or changes each match and enters the quantity.
 7. Compute nutrition from confirmed catalog versions and quantities; save normally.
@@ -344,7 +344,7 @@ Below the chart, show calorie/protein target adherence, workouts completed, step
 
 Allow the person to mark a food day complete. Report observed adherence only over sufficiently complete days. A graph point can show same-day logged food/activity context without claiming that one meal caused a same-day weight change.
 
-The weekly review should prioritize measured change, coverage of logs and weigh-ins, consistency, and the next action. A short M3 explanation is optional; every numerical statement must come from a computed summary payload.
+The weekly review should prioritize measured change, coverage of logs and weigh-ins, consistency, and the next action. A short Gemini explanation is optional; every numerical statement must come from a computed summary payload.
 
 ## 8. Technology stack and architecture
 
@@ -362,7 +362,7 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 | Authentication | Better Auth on the server with open verified Google sign-up and invite-gated email/password accounts | Keeps session validation and database credentials server-side |
 | Contracts/domain | Shared Zod contracts and pure deterministic TypeScript services | Validate input/output independently of the model |
 | AI orchestration | Two bounded LangGraph workflows for meal and workout plans | Persisted state, explicit branches, bounded repair, and user approval |
-| Model access | Server adapter to OpenRouter → MiniMax M3 | Multimodal model stays replaceable and its key never reaches the browser |
+| Model access | Server adapter to Google AI Studio → Gemini 3.1 Flash-Lite | Multimodal model stays replaceable and its key never reaches the browser |
 | Food photos | Browser file picker plus private object storage when implemented | User confirms food and portion; the vision result only suggests candidates |
 | Calendar | Optional Google Calendar API through web OAuth | Cross-device schedule sync with explicit consent |
 | PWA cache | Service worker caches only the static shell and safe public assets | Avoids caching private health responses or authentication data |
@@ -399,7 +399,7 @@ flowchart TB
   subgraph Cloud[Managed cloud services]
     DB[(Neon Postgres)]
     Worker[Durable planning worker when needed]
-    Model[OpenRouter: MiniMax M3]
+    Model[Google: Gemini 3.1 Flash-Lite]
     Storage[Private object storage, when photo upload is enabled]
     Calendar[Google Calendar, optional]
   end
@@ -453,7 +453,7 @@ Return a run ID only after the job is durably stored. The UI polls status while 
 
 ### 9.1 Calls by feature
 
-| Operation | M3 call? | Trigger and boundary |
+| Operation | Model call? | Trigger and boundary |
 | --- | --- | --- |
 | Manual food search/log | No | Catalog lookup and numeric calculation |
 | Food photo recognition | Yes | Explicit photo submission; output candidates only |
@@ -469,37 +469,25 @@ Return a run ID only after the job is durably stored. The UI polls status while 
 | Calendar synchronization | No | Deterministic mapping of approved schedule items |
 | Weekly narrative | Optional | One compact explanation of already computed facts |
 
-### 9.2 M3 configuration
+### 9.2 Gemini configuration
 
-Use a server-only model adapter. The OpenRouter model ID is `minimax/minimax-m3`; direct MiniMax access uses its own endpoint and model identifier. Keep route, reasoning settings, timeouts, budgets, and output schema version in server configuration.
+Decision 0007 replaces the original MiniMax/OpenRouter route with Google AI Studio. A shared server-only adapter calls Google's [compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai) with `GEMINI_API_KEY` and defaults to `gemini-3.1-flash-lite`. The model supports [image input and structured output](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite). No OpenRouter key is required. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` remain separate OAuth credentials.
 
-M3 supports image input and toggling thinking. Proposed starting policy: thinking off for straightforward photo labeling when the route supports it, on for meal/workout planning. Actual supported request fields must be verified against the selected endpoint. Equal token rates for thinking modes do not mean equal request cost: extra generated reasoning tokens can increase the total. [MiniMax M3][minimax-m3]
+The adapter uses minimal reasoning effort, bounded output, and the existing operation-specific JSON Schemas. Each caller validates the result. Vision identifies names only; catalog nutrition stays deterministic. The two LangGraph workflows retain their candidate retrieval, deterministic validation, one repair maximum, Postgres checkpoints, and explicit draft approval. No autonomous tools or new provider retries are introduced.
 
-Use JSON Schema output when supported. On OpenRouter, structured output support can vary by serving provider; set routing to require the needed parameters and validate the selected route's image and schema support. If required capabilities are unavailable, return a controlled error instead of silently accepting weaker output guarantees. LangGraph can retrieve database candidates itself, so these workflows do not require autonomous model-selected database tool calls. [OpenRouter structured outputs][openrouter-structured] [Provider routing][openrouter-routing]
+Current token ceilings and request timeouts:
 
-Initial configurable output ceilings, to tune from actual usage:
+- Photo recognition: 2,048 output tokens, including thinking; 30 seconds.
+- Weekly meal plan: 6,000 output tokens; 20 seconds per model request.
+- Workout plan: 4,500 output tokens; 20 seconds per model request.
 
-- Photo recognition: approximately 1,200 output tokens.
-- Weekly meal plan: approximately 6,000 output tokens, using IDs and compact structured fields.
-- Workout plan: approximately 4,000 output tokens.
-- Optional weekly narrative: approximately 500 output tokens.
+These limits need live validation against actual Gemini responses and the deployed Vercel duration limit. Reasoning text is not streamed into the app.
 
-Do not stream reasoning text into the app. Show task status such as “Finding suitable meals” and display a validated draft when ready.
+### 9.3 Cost and quotas
 
-### 9.3 Cost example
+The selected model has a quota-limited free tier; paid prices and content-use rules are listed in [Google's pricing table](https://ai.google.dev/gemini-api/docs/pricing). Monitor AI Studio project usage rather than assuming every request is free. The app's rolling per-account limit is 10 operations, shared by photos and both planners, and each planning operation allows at most one repair.
 
-The current direct MiniMax standard rate for M3 with up to 512K input tokens is $0.30 per million input tokens and $1.20 per million output tokens. OpenRouter rates depend on the selected serving route and must be checked separately. [MiniMax API pricing][minimax-pricing] [OpenRouter M3][openrouter-m3]
-
-For an illustrative direct-API text request with 8,000 input and 3,000 billable output tokens:
-
-```text
-input:  8,000 / 1,000,000 × $0.30 = $0.0024
-output: 3,000 / 1,000,000 × $1.20 = $0.0036
-total:                                  $0.0060
-100 such requests:                      $0.60
-```
-
-This excludes additional image/reasoning token consumption, retries, route differences, and infrastructure costs. Track actual usage rather than using this example as a monthly quote. Database, storage, authentication/email, scheduling, Vercel hosting, and optional push infrastructure are separate cost categories.
+Gemini reports tokens but does not report an exact per-call dollar cost. Retain null cost when unavailable; do not substitute zero or estimates into reported-cost records. The app does not implement a shared hard dollar budget. Google Cloud budget alerts do not enforce a spending cap. Database, hosting, email, storage, and optional push infrastructure are separate costs.
 
 ## 10. Two LangGraph workflows and memory
 
@@ -516,12 +504,12 @@ flowchart TD
   E --> F[Retrieve eligible food and recipe versions]
   F --> G{Enough suitable candidates?}
   G -- No --> H[Explain missing catalog coverage or conflicting constraints]
-  G -- Yes --> I[M3 generates structured meal draft using retrieved IDs]
+  G -- Yes --> I[Gemini generates structured meal draft using retrieved IDs]
   I --> J[Calculate portions, calories, macros, and schedule]
   J --> K[Validate IDs, restrictions, portions, targets, and completeness]
   K --> L{Valid?}
   L -- No --> M{Repair already used?}
-  M -- No --> N[M3 repairs draft with exact validation errors]
+  M -- No --> N[Gemini repairs draft with exact validation errors]
   N --> J
   M -- Yes --> O[Return a useful failure; keep previous active plan]
   L -- Yes --> P[Save draft and checkpoint; release worker]
@@ -547,11 +535,11 @@ flowchart TD
   C -- No --> D[Return focused missing-input questions]
   C -- Yes --> E[Choose eligible templates and compute constraints]
   E --> F[Retrieve suitable exercise IDs and alternatives]
-  F --> G[M3 drafts sessions using those IDs]
+  F --> G[Gemini drafts sessions using those IDs]
   G --> H[Validate equipment, experience, days, duration, volume, and rest]
   H --> I{Valid?}
   I -- No --> J{Repair already used?}
-  J -- No --> K[M3 repairs draft with exact validation errors]
+  J -- No --> K[Gemini repairs draft with exact validation errors]
   K --> H
   J -- Yes --> L[Return useful failure or offer a reviewed template]
   I -- Yes --> M[Save draft and checkpoint; release worker]
@@ -885,15 +873,15 @@ Calendar creation and reminders are deterministic side effects of an approved pl
 
 Allow any Google account with a verified email to create an account; require an email-bound invitation for email/password sign-up. A private URL is not authentication. Validate sessions, resource ownership, nested references, file access, AI run ownership, and integration ownership on every relevant request.
 
-Use HTTPS, private file access, managed password handling, secure same-origin session cookies, and encrypted Google refresh credentials with a server-held encryption key. Keep database passwords, OpenRouter keys, storage signing credentials, and OAuth secrets in server environment variables. Never expose them as NEXT_PUBLIC values.
+Use HTTPS, private file access, managed password handling, secure same-origin session cookies, and encrypted Google refresh credentials with a server-held encryption key. Keep database passwords, Gemini keys, storage signing credentials, and OAuth secrets in server environment variables. Never expose them as NEXT_PUBLIC values.
 
 The Settings screen exports profile, current records and change history, personal foods, plans, AI planning inputs/history, reminder preferences, and safe Calendar metadata to a JSON file. It excludes authentication credentials and OAuth tokens. Account deletion requires typing `DELETE` and either a valid password or a session less than 24 hours old; Google-only users do not need a password. User-owned live rows cascade, LangGraph checkpoints are deleted, Google token revocation is attempted, and local reminder markers are cleared. The app-created Calendar and its events can remain in Google after account deletion. Neon provider backups retain deleted data until the configured backup retention window expires; review the selected Neon plan's retention before inviting friends. Temporary photo objects are not yet used by the deployed feature path; add object deletion before enabling external photo storage.
 
 ### 15.2 Provider exposure and prompt handling
 
-Send only task-relevant context to M3: necessary preferences, target ranges, eligible catalog/exercise IDs, and compact summaries. Avoid names, email, exact birth date, full histories, and unrelated notes.
+Send only task-relevant context to Gemini: necessary preferences, target ranges, eligible catalog/exercise IDs, and compact summaries. Avoid names, email, exact birth date, full histories, and unrelated notes.
 
-Review OpenRouter and serving-provider retention/training settings and select the intended routing policy. A provider-routing preference is not by itself a promise of zero retention. Persist route/setting metadata and explain the actual photo-processing path to the user.
+Review Google AI Studio tier and content-use terms before processing personal data. Google lists free-tier content as usable for product improvement; do not promise zero retention. Explain the actual photo-processing path in Settings privacy details. The app does not store uploaded photo bytes.
 
 Treat notes, food descriptions, imported text, and model outputs as untrusted data. Never let model text execute SQL, choose arbitrary internal URLs, override ownership, or directly write to Calendar. Allergies and restrictions are explicit user facts checked by code; uncertain catalog metadata must not be advertised as verified suitability. Current planners send compact JSON as user-role data, explicitly treat every input string as untrusted, and expose no tools. Meal candidates are server-selected; personal food source notes are omitted; the server accepts only candidate IDs and calculates nutrition itself. Workout IDs must be in the server-filtered exercise set. Both outputs pass strict schemas and deterministic checks, allow at most one repair, and pause for user review before activation.
 
@@ -914,7 +902,7 @@ Apply configurable per-user request limits, a global daily/monthly budget, uploa
 
 Cache planning results only within the proper owner and input version: goal, preferences, catalog/exercise versions, schedule, and request variant. A preference change must invalidate an unsuitable plan cache.
 
-Per-call token counts and OpenRouter-reported USD costs are persisted on AI runs, including repair calls; unavailable cost remains null. The app has per-account rolling operation limits. Configure the shared OpenRouter API-key spending cap for the global hard ceiling and verify it before inviting friends. The app does not reserve or reject requests against a second internal dollar budget. Recheck all infrastructure plan limits before inviting more people.
+Per-call token counts are persisted on AI runs, including repair calls; Gemini does not return a per-call price, so cost remains null. The app has per-account rolling operation limits. Monitor the Google project quotas and usage; provider budget alerts are not a global hard ceiling. The app does not reserve or reject requests against a second internal dollar budget. Recheck all infrastructure plan limits before inviting more people.
 
 ## 16. Implementation phases
 
@@ -929,7 +917,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 - Record the PWA limitation: manual steps/activity first; no direct Health Connect integration.
 - Keep AI provider calls disabled until the server-side secret is configured.
 
-**Current status:** On 21 October 2026, repository typecheck, lint, and production Next.js build passed. The local root `.env` has the app's database, auth, and OpenRouter values and is ignored by Git; its auth base URL is still local. The GitHub repository is connected to `main`, and the Vercel import flow has `apps/web` and Next.js selected. The assigned production domain and Production variables still need to be confirmed in the owner's Vercel account.
+**Deployment history (before the Gemini migration):** On 21 October 2026, repository typecheck, lint, and production Next.js build passed. The local root `.env` has the app's database, auth, and OpenRouter values and is ignored by Git; its auth base URL is still local. The GitHub repository is connected to `main`, and the Vercel import flow has `apps/web` and Next.js selected. The assigned production domain and Production variables still need to be confirmed in the owner's Vercel account.
 
 **Deliverables:** PWA/Vercel decision record, deployment checklist, safe environment template.
 
@@ -1002,10 +990,10 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 7 — Food photo recognition
 
-**Current status:** The authenticated API sends a browser-compressed image to the configured OpenRouter model and validates a bounded list of food-name candidates. The PWA lets the person search those names in the catalog, choose a food, enter the amount, and save through the existing nutrition calculation. Photo files are not stored by the app. Each request is counted in the shared per-account rolling 24-hour AI quota; token counts and provider-reported USD cost are recorded without retaining the image. Live provider checks and Android Chrome verification remain outstanding.
+**Current status:** The authenticated API sends a browser-compressed image to the configured Gemini model and validates a bounded list of food-name candidates. The PWA lets the person search those names in the catalog, choose a food, enter the amount, and save through the existing nutrition calculation. Photo files are not stored by the app. Each request is counted in the shared per-account rolling 24-hour AI quota; token counts and provider-reported USD cost are recorded without retaining the image. Live provider checks and Android Chrome verification remain outstanding.
 
 - Keep browser image processing bounded to a 2.5 MB JPEG, PNG, or WebP payload.
-- Send the image through the authenticated server API; keep the OpenRouter key server-only and do not persist the photo.
+- Send the image through the authenticated server API; keep the Gemini key server-only and do not persist the photo.
 - Return food names and alternatives only; never infer portion size or nutrition from the image.
 - Match candidate labels to the app catalog and let the person confirm food and quantity.
 - Keep the manual catalog-search path available when recognition is disabled or fails.
@@ -1016,20 +1004,20 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 8 — Meal-planning LangGraph workflow
 
-**Current status:** The authenticated backend creates idempotent AI runs, retrieves reviewed shared foods and account-owned foods, calls M3 through OpenRouter with structured output, calculates meal and day nutrition from catalog snapshots, validates seven consecutive dates and daily calorie bounds, performs at most one repair, saves an editable draft, and pauses a Postgres-checkpointed LangGraph run for explicit review. The PWA lets the user change a draft item to another catalog food, edit its grams, see provisional recomputed nutrition, and save through server-side catalog ownership and nutrition-range validation. Draft updates use optimistic edit versions; approval rechecks the accepted goal/profile snapshot. If approval finds stale inputs or a concurrent edit, the review screen refreshes the saved plan list and explains what changed. If saving detects a concurrent edit, local unsaved changes remain visible and an explicit discard-and-reload action is provided. Catalog foods now have separately reviewed dietary and allergen metadata, managed with `npm run catalog:safety:review`; search, edits, and approval filter or revalidate supported constraints. Unknown restrictions fail closed, and personal foods are excluded from a constrained plan until their safety metadata can be reviewed. These tags do not guarantee allergy safety or prevent cross-contamination. The live catalog currently has zero dietary/allergen safety-review rows, so constrained profiles fail closed; accurate metadata must be curated on enough foods before those plans can run. OpenRouter shared-key spend-limit setup/verification, timeout behavior against the live Vercel plan, and live Neon/OpenRouter planner validation remain outstanding. The shared per-account rolling 24-hour quota is enforced for this and the other AI operations.
+**Current status:** The authenticated backend creates idempotent AI runs, retrieves reviewed shared foods and account-owned foods, calls Gemini with structured output, calculates meal and day nutrition from catalog snapshots, validates seven consecutive dates and daily calorie bounds, performs at most one repair, saves an editable draft, and pauses a Postgres-checkpointed LangGraph run for explicit review. The PWA lets the user change a draft item to another catalog food, edit its grams, see provisional recomputed nutrition, and save through server-side catalog ownership and nutrition-range validation. Draft updates use optimistic edit versions; approval rechecks the accepted goal/profile snapshot. If approval finds stale inputs or a concurrent edit, the review screen refreshes the saved plan list and explains what changed. If saving detects a concurrent edit, local unsaved changes remain visible and an explicit discard-and-reload action is provided. Catalog foods now have separately reviewed dietary and allergen metadata, managed with `npm run catalog:safety:review`; search, edits, and approval filter or revalidate supported constraints. Unknown restrictions fail closed, and personal foods are excluded from a constrained plan until their safety metadata can be reviewed. These tags do not guarantee allergy safety or prevent cross-contamination. The live catalog currently has zero dietary/allergen safety-review rows, so constrained profiles fail closed; accurate metadata must be curated on enough foods before those plans can run. Google project quota review, timeout behavior against the live Vercel plan, and live Neon/Gemini planner validation remain outstanding. The shared per-account rolling 24-hour quota is enforced for this and the other AI operations.
 
 - Improve stale-input recovery in the review screen. **Implemented in code; deployed workflow checks remain outstanding.**
 - Curate enough reviewed catalog entries with `npm run catalog:safety:review` to cover common dietary preferences and restrictions; tags must be based on current labels or reliable recipes.
-- Set and verify the OpenRouter shared-key spending cap and verify provider latency/repair behavior on the deployed function limits; per-account quotas and per-call tokens/costs are recorded across AI features.
+- Review Google project quotas and verify provider latency/repair behavior on the deployed function limits; per-account quotas and per-call tokens/costs are recorded across AI features.
 - Do not log planned food as eaten unless the user confirms it.
 
 **Deliverables:** Reviewed weekly meal plans.
 
 ### Phase 9 — Workout-planning LangGraph workflow
 
-**Current status:** The profile collects experience, available training days, preferred session length, equipment, and movement limitations. The authenticated API filters the reviewed exercise catalog by equipment, includes only aggregated recent activity, calls M3 with structured output, and validates exercise IDs, tracking mode, frequency, rest, set/repetition ranges, weekly volume, and server-estimated duration. It allows one repair, stores an idempotent run and Postgres checkpoint, and creates a reviewable draft. The PWA supports edits, explicit rejection or activation, history, stale-input checks, and transactional superseding. Starting an active planned workout creates a blank actual-log form; the saved activity links back to the plan version and session only after the user records it. Minors, pregnancy/breastfeeding, and stated movement limitations are blocked from AI suggestions; template and manual logging paths remain available. Live Neon/OpenRouter, real Vercel duration/cost limits, OpenRouter shared-key spend-limit setup/verification, and real-device review remain outstanding. The shared per-account rolling 24-hour operation quota is enforced.
+**Current status:** The profile collects experience, available training days, preferred session length, equipment, and movement limitations. The authenticated API filters the reviewed exercise catalog by equipment, includes only aggregated recent activity, calls Gemini with structured output, and validates exercise IDs, tracking mode, frequency, rest, set/repetition ranges, weekly volume, and server-estimated duration. It allows one repair, stores an idempotent run and Postgres checkpoint, and creates a reviewable draft. The PWA supports edits, explicit rejection or activation, history, stale-input checks, and transactional superseding. Starting an active planned workout creates a blank actual-log form; the saved activity links back to the plan version and session only after the user records it. Minors, pregnancy/breastfeeding, and stated movement limitations are blocked from AI suggestions; template and manual logging paths remain available. Live Neon/Gemini, real Vercel duration/cost limits, Google project quotas, and real-device review remain outstanding. The shared per-account rolling 24-hour operation quota is enforced.
 
-- Set and verify the OpenRouter shared-key spending cap shared with meal planning; per-account rolling 24-hour operation limits and per-call cost tracking already apply across both planners and photo recognition.
+- Review Google project quotas shared with meal planning; per-account rolling 24-hour operation limits and per-call token tracking already apply across both planners and photo recognition.
 - Verify prompt/schema compatibility and actual function duration against the deployed model route.
 - Expand reviewed exercise/equipment metadata and improve recovery when profile inputs have changed.
 
@@ -1048,7 +1036,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 11 — Production hardening and private release
 
-**Current status: in progress.** The app now has an owner-scoped JSON export, account deletion confirmed by password or a recent sign-in, LangGraph checkpoint cleanup, and migrations that force row-level security on personal tables. Authenticated API responses use `Cache-Control: private, no-store`. On 21 October 2026, Better Auth, Drizzle application, and LangGraph migrations were applied to the configured Neon database. A read-only inventory confirmed all 18 public tables containing `user_id` or `owner_id` have RLS enabled and forced, each with one policy; migration `0019_force_recipe_version_rls` closed the recipe-history table gap. Runtime two-account isolation checks, a backup/restore exercise, live OAuth/provider verification, OpenRouter shared-key spend-limit setup/verification, Vercel deployment, EAS project linking, and Android APK installation checks remain outstanding. The EAS CLI currently has no signed-in Expo account, and the deployed HTTPS origin is not yet available for `EXPO_PUBLIC_APP_URL`. A configurable per-account rolling 24-hour quota plus per-call token and provider-reported cost accounting now cover food vision and both planners.
+**Current status: in progress.** The app now has an owner-scoped JSON export, account deletion confirmed by password or a recent sign-in, LangGraph checkpoint cleanup, and migrations that force row-level security on personal tables. Authenticated API responses use `Cache-Control: private, no-store`. On 21 October 2026, Better Auth, Drizzle application, and LangGraph migrations were applied to the configured Neon database. A read-only inventory confirmed all 18 public tables containing `user_id` or `owner_id` have RLS enabled and forced, each with one policy; migration `0019_force_recipe_version_rls` closed the recipe-history table gap. Runtime two-account isolation checks, a backup/restore exercise, live OAuth/provider verification, Google project quota review, Vercel deployment, EAS project linking, and Android APK installation checks remain outstanding. The EAS CLI currently has no signed-in Expo account, and the deployed HTTPS origin is not yet available for `EXPO_PUBLIC_APP_URL`. A configurable per-account rolling 24-hour quota plus per-call token and provider-reported cost accounting now cover food vision and both planners.
 
 - Configure production Vercel environment variables, define a Neon backup policy, and rehearse a restore. Apply future schema changes from the trusted checkout with reviewed migrations.
 - Verify login, invitations, two-user isolation, browser and APK behavior, error handling, deletion/export, and restore procedures.
@@ -1119,7 +1107,7 @@ The web app uses relative API routes at the same origin. The optional Android sh
 | GOOGLE_REDIRECT_URI and TOKEN_ENCRYPTION_KEY | Optional; required only for Google Calendar sync |
 | Storage and worker variables | Only after private object storage or a separate job worker is deployed |
 
-Do not add database URLs, auth keys, OpenRouter credentials, private storage keys, or token-encryption keys as NEXT_PUBLIC or EXPO_PUBLIC values. Vercel environment variables are set in project settings, not committed into the repository.
+Do not add database URLs, auth keys, Gemini credentials, private storage keys, or token-encryption keys as NEXT_PUBLIC or EXPO_PUBLIC values. Vercel environment variables are set in project settings, not committed into the repository.
 
 ### 17.3 Build and verify
 
@@ -1157,7 +1145,7 @@ The Vercel app and Neon database must remain deployed for APK and browser users 
 
 Keep Vercel/Neon accounts accessible, monitor usage/errors, maintain backups, and remove access for friends who should no longer use the service. AI requests must be bounded and recorded with owner, model route, status, and usage.
 
-The first manual-tracking release needs only the deployed Next.js project and Neon. Add the OpenRouter server key when AI features are implemented. If multi-step LangGraph jobs outlast Vercel's request limits, add a durable worker/dispatcher then; it is not required to serve the PWA or deploy the manual MVP.
+The first manual-tracking release needs only the deployed Next.js project and Neon. Add the Gemini server key when AI features are implemented. If multi-step LangGraph jobs outlast Vercel's request limits, add a durable worker/dispatcher then; it is not required to serve the PWA or deploy the manual MVP.
 
 ## 18. Using the app
 
@@ -1244,7 +1232,7 @@ Defer real-time coaching chat, unrestricted autonomous agents, multiple speciali
 | Public-facing app name | Goal Health working name | Before sharing friend-facing link |
 | Automatic target policy | Reviewed adult general-fitness equations and bounds; manual override path | Goal implementation |
 | Initial foods/recipes | Group's common foods, reviewed and versioned | Food catalog |
-| Provider serving route | OpenRouter M3 route with required capabilities/privacy settings | Before AI release |
+| Provider serving route | Google AI Studio Gemini model with required capabilities/tier settings | Before AI release |
 | Background planning execution | Bounded Vercel request if proven safe; durable worker only if real run times require it | Before meal/workout workflow release |
 | Photo retention | Seven-day temporary retention, optional explicit saved photo | Before photo recognition release |
 | Goal trend/forecast rules | Documented initial rules above, versioned and gated | Before progress forecasting |
@@ -1261,9 +1249,9 @@ Provider features, pricing, quotas, and platform support can change. Recheck ven
 - [Vercel monorepo root directory][vercel-monorepo]
 - [Better Auth installation and base URL][better-auth]
 - [Neon Postgres documentation][neon-postgres]
-- [OpenRouter MiniMax M3 route][openrouter-m3]
-- [OpenRouter structured outputs][openrouter-structured]
-- [OpenRouter provider routing][openrouter-routing]
+- [Gemini 3.1 Flash-Lite](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite)
+- [Gemini compatibility API](https://ai.google.dev/gemini-api/docs/openai)
+- [Gemini pricing and content-use tiers](https://ai.google.dev/gemini-api/docs/pricing)
 - [LangGraph workflow concepts][langgraph-thinking]
 - [LangGraph persistence][langgraph-persistence]
 - [USDA FoodData Central API/licensing][usda]
@@ -1291,3 +1279,7 @@ Provider features, pricing, quotas, and platform support can change. Recheck ven
 [calendar-scopes]: https://developers.google.com/workspace/calendar/api/auth
 [google-oauth]: https://developers.google.com/identity/protocols/oauth2
 [google-oauth-state]: https://developers.google.com/identity/protocols/oauth2/production-readiness/overview
+
+### 21 October 2026 — Gemini provider migration
+
+Photo recognition and both planners now use the shared Google AI Studio adapter (Decision 0007). The owner supplied `GEMINI_API_KEY` locally and reported setting it in Vercel. Local model configuration was updated; an old default MiniMax model value is migrated automatically. No database migration is needed. Build, typecheck, browser checks, and live inference were not run at the owner's request; provider operation and deployment success are not yet confirmed.

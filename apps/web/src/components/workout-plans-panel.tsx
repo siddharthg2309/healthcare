@@ -17,7 +17,7 @@ const poundsPerKilogram = 2.20462262185;
 function workoutSuggestionError(error: unknown): string {
   if (error instanceof ApiError) {
     const messages: Record<string, string> = {
-      workout_planning_not_configured: "Workout suggestions need the server-side OpenRouter key.",
+      workout_planning_not_configured: "Workout planning is unavailable.",
       ai_daily_limit_reached: "You have reached the shared AI limit for the last 24 hours. Manual logging and workout templates still work; try again later.",
       profile_or_accepted_goal_required: "Finish your profile and accept a goal before requesting a workout plan.",
       workout_planning_not_available_for_this_profile: "AI workout suggestions are unavailable for this profile. Use a reviewed template instead.",

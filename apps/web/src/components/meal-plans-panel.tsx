@@ -47,7 +47,7 @@ function mealPlanError(error: unknown): string {
       meal_plan_version_conflict: "Another session saved a newer draft. Your unsaved edits are still on screen; reload the saved version before continuing.",
       meal_plan_review_stale: "Your goal, profile, or food-safety data changed after this draft was created. The draft was archived; review the refreshed plans and create a new draft if needed.",
       meal_plan_review_not_available: "This draft can no longer be approved. The latest saved plans have been refreshed.",
-      meal_planning_not_configured: "Meal planning is not enabled on the server yet. Add the OpenRouter key in Vercel environment settings.",
+      meal_planning_not_configured: "Meal planning is unavailable.",
       ai_daily_limit_reached: "You have reached the shared AI limit for the last 24 hours. Manual food and activity logging still work; try again later.",
       meal_plan_provider_unavailable: "The meal planner could not reach the model. Try again in a little while.",
       meal_plan_draft_exists: "Review or reject your current draft before creating another plan.",

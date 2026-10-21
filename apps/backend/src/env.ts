@@ -30,8 +30,13 @@ const environmentSchema = z.object({
   AUTH_BASE_URL: z.string().url(),
   AUTH_TRUSTED_ORIGINS: z.string().optional(),
   JOB_DISPATCH_SECRET: optionalSecret,
-  OPENROUTER_API_KEY: z.string().optional(),
-  AI_MODEL: z.string().default("minimax/minimax-m3"),
+  GEMINI_API_KEY: optionalText,
+  AI_MODEL: z.preprocess(
+    // Migrate the previous default even if it remains in Vercel's settings.
+    (value) => typeof value === "string" && (!value.trim() || value.trim() === "minimax/minimax-m3")
+      ? undefined : value,
+    z.string().trim().regex(/^gemini-[a-z0-9.-]+$/).default("gemini-3.1-flash-lite"),
+  ),
   AI_USER_DAILY_OPERATION_LIMIT: z.coerce.number().int().min(1).max(100).default(10),
   GOOGLE_CLIENT_ID: optionalText,
   GOOGLE_CLIENT_SECRET: optionalText,
