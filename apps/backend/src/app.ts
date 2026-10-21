@@ -3,6 +3,7 @@ import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle
 import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { cors } from "hono/cors";
+import { bodyLimit } from "hono/body-limit";
 import { db } from "@healthcare/database";
 import { aiRuns, calendarEventLinks, catalogFoods, catalogFoodPortions, catalogFoodSafetyReviews, foodDayStatuses, foodFavorites, foodPortions, googleCalendarConnections, googleOauthStates, plans, privateUploads, reminderPreferences as reminderPreferencesTable, syncChanges, userFoodRecipeVersions, userFoods, userProfiles, userRecords, userSyncCounters } from "@healthcare/database/schema";
 import {
@@ -890,7 +891,10 @@ app.delete("/v1/foods/:foodId/portions/:portionId", async (c) => {
   return c.body(null, 204);
 });
 
-app.post("/v1/foods/recognize-photo", async (c) => {
+app.post("/v1/foods/recognize-photo", bodyLimit({
+  maxSize: 3_400_000,
+  onError: (c) => c.json({ error: "payload_too_large" }, 413),
+}), async (c) => {
   let body: unknown;
   try {
     body = await c.req.json();
