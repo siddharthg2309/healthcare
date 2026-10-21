@@ -30,6 +30,14 @@ npm run dev
 
 ## Vercel deployment
 
+Import `siddharthg2309/healthcare` from GitHub as one Vercel project. In the import/build settings:
+
+- Set **Framework Preset** to **Next.js** and **Root Directory** to `apps/web`.
+- Enable **Include source files outside of the Root Directory in the Build Step**. The web app imports the Hono backend and shared npm workspaces from elsewhere in this repository.
+- Keep the npm install/build defaults. The web workspace build command is `npm run build`; leave the Next.js output directory at its default.
+
+See Vercel's [monorepo setup](https://vercel.com/docs/monorepos) and [build settings](https://vercel.com/docs/builds/configure-a-build) for these project options.
+
 In the Vercel project settings, add server-side Environment Variables for the **Production** environment before deploying. Set these to the production Neon database and the chosen stable app domain:
 
 ```text
@@ -37,10 +45,10 @@ DATABASE_URL=<Neon pooled Postgres connection string>
 AUTH_SECRET=<your chosen private auth secret>
 AUTH_BASE_URL=https://your-project.vercel.app
 AUTH_TRUSTED_ORIGINS=https://your-project.vercel.app
-NODE_ENV=production
+OPENROUTER_API_KEY=<your OpenRouter key>
 ```
 
-Replace the example domain with the real Vercel project domain or your custom domain. If you change domains, update both auth values and redeploy. Add matching values to Vercel's Preview environment only if you intend to test authentication on preview deployments; allow only the exact preview origin being used.
+Local `.env` values are ignored by Git and are not copied into Vercel. Use your existing private Neon URL and auth secret. `OPENROUTER_API_KEY` enables food-photo suggestions and both AI planners. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are optional; add them after deployment if you want Google sign-in. Use the exact HTTPS origin with no path or trailing slash in both auth URL variables. If you change domains, update both values and redeploy. Add matching values to Vercel's Preview environment only if you intend to test authentication on preview deployments; allow only the exact preview origin being used.
 
 Set values in **Vercel → Project → Settings → Environment Variables**; do not put them in source files, GitHub Actions logs, or client `NEXT_PUBLIC_*` variables. Vercel hosts the site and Next.js server routes, so there is no separate API URL to configure. Neon hosts the data, so `DATABASE_URL` remains necessary.
 
@@ -174,7 +182,7 @@ npm run catalog:seed:fndds -- --file /tmp/surveyDownload.json --dry-run
 npm run catalog:seed:fndds -- --file /tmp/surveyDownload.json
 ```
 
-The configured Neon catalog was seeded on 21 October 2026 with 5,431 generic foods and 22,118 standard portion references. The import validates the FNDDS data type, FDC IDs, and the four required macro values, skips records missing or outside the app's safety bounds, and is idempotent by source and FDC ID. It imports generic FNDDS foods for manual search/logging as **not reviewed** and imports the dataset's standard portion weights as shared defaults; AI meal-plan generation continues to use reviewed entries only. Survey serving weights are references, not a promise that a home katori, roti, or recipe has the same weight. Aliases are search labels only: keep them within the USDA description's level of detail. For example, the generic "Biryani with meat" record is not specific enough to label as mutton biryani. The importer adds search aliases and common South Indian spellings for available entries such as idli, dosa, dal, roti, sambar, upma, vadai, chutney, and biryani. FNDDS is a US dietary-survey dataset, not a complete Indian food table; dishes such as rasam and puli kuzhambu are not represented by those aliases and need separately verified entries or private recipes. Use personal foods for household recipes or items whose values differ, and extend the shared catalog only with checked, sourced entries. The archive is about 3.7 MB compressed; the extracted file is temporary, contains no user data, and should not be committed. USDA data are CC0 and should remain attributed to FoodData Central. See [USDA's download page](https://fdc.nal.usda.gov/download-datasets/).
+The configured Neon catalog was seeded on 21 October 2026 with 5,431 generic foods and 22,118 standard portion references. The import validates the FNDDS data type, FDC IDs, and the four required macro values, skips records missing or outside the app's safety bounds, and is idempotent by source and FDC ID. It imports generic FNDDS foods for manual search/logging and imports the dataset's standard portion weights as shared defaults. The maintainer has now source-reviewed 20 foods for general AI meal plans; the remaining 5,411 stay unreviewed and excluded. Neon currently has no dietary/allergen safety reviews, so constrained meal plans fail closed. Survey serving weights are references, not a promise that a home katori, roti, or recipe has the same weight. Aliases are search labels only: keep them within the USDA description's level of detail. For example, the generic "Biryani with meat" record is not specific enough to label as mutton biryani. The importer adds search aliases and common South Indian spellings for available entries such as idli, dosa, dal, roti, sambar, upma, vadai, chutney, and biryani. FNDDS is a US dietary-survey dataset, not a complete Indian food table; dishes such as rasam and puli kuzhambu are not represented by those aliases and need separately verified entries or private recipes. Use personal foods for household recipes or items whose values differ, and extend the shared catalog only with checked, sourced entries. The archive is about 3.7 MB compressed; the extracted file is temporary, contains no user data, and should not be committed. USDA data are CC0 and should remain attributed to FoodData Central. See [USDA's download page](https://fdc.nal.usda.gov/download-datasets/).
 
 ## Phone, PWA, and APK behavior
 
