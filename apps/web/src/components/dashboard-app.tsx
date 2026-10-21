@@ -51,13 +51,15 @@ export function DashboardApp() {
         requestJson<GoalsResponse>("/v1/goals"),
       ]);
       const parsedProfile = profileSchema.safeParse(profileData.profile);
-      const parsedGoal = goalData.current ? goalSchema.safeParse(goalData.current) : null;
+      const { id: currentGoalId, ...currentGoalData } = goalData.current ?? {};
+      const parsedGoal = goalData.current ? goalSchema.safeParse(currentGoalData) : null;
       setProfile(parsedProfile?.success ? parsedProfile.data : null);
-      setGoal(parsedGoal?.success && goalData.current ? { ...parsedGoal.data, id: String(goalData.current.id) } : null);
+      setGoal(parsedGoal?.success && currentGoalId ? { ...parsedGoal.data, id: String(currentGoalId) } : null);
       const parsedGoalVersions = goalData.versions.flatMap((candidate) => {
         if (!candidate || typeof candidate !== "object" || !("id" in candidate)) return [];
-        const parsed = goalSchema.safeParse(candidate);
-        return parsed.success ? [{ ...parsed.data, id: String(candidate.id) }] : [];
+        const { id, ...goalData } = candidate as Record<string, unknown> & { id: string };
+        const parsed = goalSchema.safeParse(goalData);
+        return parsed.success ? [{ ...parsed.data, id: String(id) }] : [];
       }).sort((left, right) => left.goalVersion - right.goalVersion);
       setGoalVersions(parsedGoalVersions);
       setMeasurements(goalData.measurements.filter((item) => Number.isFinite(item.data?.weightKg) && typeof item.data?.measuredAt === "string"));
