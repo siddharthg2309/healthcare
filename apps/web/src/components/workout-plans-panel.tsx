@@ -340,7 +340,9 @@ export function WorkoutPlansPanel({ unitSystem, equipment, gymWorkoutDays, homeW
       <div className="panel-heading"><div><span className="eyebrow">DRAFT · VERSION {editingPlan.version}</span><h3>Edit weekly plan</h3></div><button type="button" className="quiet-button" onClick={() => { setEditingPlan(null); setData(null); setDirty(false); }}>Close</button></div>
       <label className="field"><span>Plan name</span><input maxLength={80} value={data.name} onChange={(event) => updateData((current) => ({ ...current, name: event.target.value }))} /></label>
       <label className="field"><span>Focus</span><input maxLength={180} value={data.focus} onChange={(event) => updateData((current) => ({ ...current, focus: event.target.value }))} /></label>
-      <div className="workout-plan-editor-sessions">{data.sessions.map((session, sessionIndex) => <article className="workout-plan-edit-session" key={sessionIndex}>
+      <div className="workout-plan-editor-sessions">{data.sessions.map((session, sessionIndex) => {
+        const locationExercises = session.location === "gym" ? [...exerciseCatalog] : availableExercises;
+        return <article className="workout-plan-edit-session" key={sessionIndex}>
         <div className="workout-exercise-heading"><strong>Session {sessionIndex + 1}</strong>{data.sessions.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => updateData((current) => ({ ...current, sessions: current.sessions.filter((_, index) => index !== sessionIndex) }))}>Remove session</button> : null}</div>
         <div className="form-grid">
           <label className="field"><span>Day</span><select value={session.weekday} onChange={(event) => updateSession(sessionIndex, (current) => ({ ...current, weekday: Number(event.target.value) }))}>{weekdays.map((weekday, dayIndex) => <option key={weekday} value={dayIndex} disabled={data.sessions.some((other, sessionPosition) => sessionPosition !== sessionIndex && other.weekday === dayIndex)}>{weekday}</option>)}</select></label>
@@ -350,7 +352,6 @@ export function WorkoutPlansPanel({ unitSystem, equipment, gymWorkoutDays, homeW
         </div>
         <div className="workout-plan-edit-exercises">{session.exercises.map((target, exerciseIndex) => {
           const exercise = findExerciseById(target.exerciseId);
-          const locationExercises = session.location === "gym" ? [...exerciseCatalog] : availableExercises;
           const existingExerciseAvailable = editingPlan.source !== "ai" || locationExercises.some((item) => item.id === target.exerciseId);
           return <div className="workout-plan-edit-exercise" key={`${sessionIndex}-${exerciseIndex}`}>
             <div className="workout-exercise-heading"><strong>{exercise?.name ?? target.exerciseId}</strong>{session.exercises.length > 1 ? <button type="button" className="quiet-button entry-delete" onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: current.exercises.filter((_, index) => index !== exerciseIndex) }))}>Remove</button> : null}</div>
@@ -369,7 +370,8 @@ export function WorkoutPlansPanel({ unitSystem, equipment, gymWorkoutDays, homeW
           </div>;
         })}</div>
         <button type="button" className="text-button" disabled={session.exercises.length >= 20 || (editingPlan.source === "ai" && locationExercises.length === 0)} onClick={() => updateSession(sessionIndex, (current) => ({ ...current, exercises: [...current.exercises, toTemplateExercise((editingPlan.source === "ai" ? locationExercises : exerciseCatalog)[0]?.id ?? "bodyweight-squat")] }))}>＋ Add exercise</button>
-      </article>)}</div>
+      </article>;
+      })}</div>
       <button type="button" className="button button-secondary" disabled={data.sessions.length >= 7} onClick={() => {
         const occupied = new Set(data.sessions.map((session) => session.weekday));
         const nextDay = weekdays.findIndex((_, index) => !occupied.has(index));

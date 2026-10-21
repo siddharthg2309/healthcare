@@ -151,7 +151,8 @@ export function deriveMealPlanFoodSafetyRequirements(
     ? foodPreferences.pattern === "vegetarian"
     : isVegetarianOnlyDay(foodPreferences, date);
   if (vegetarianOnly && !requirements.dietaryTags.includes("vegetarian")) {
-    requirements.dietaryTags = [...requirements.dietaryTags, "vegetarian"].sort();
+    requirements.dietaryTags.push("vegetarian");
+    requirements.dietaryTags.sort();
   }
   return requirements;
 }

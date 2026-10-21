@@ -104,7 +104,8 @@ function emptyDaySummary(date: string, timezone: string): DaySummary {
   };
 }
 
-type Props = { day: DaySummary; foodPreferences: FoodPreferences; onSaved: () => Promise<void> };
+type SavedViewProps = { day: DaySummary; onSaved: () => Promise<void> };
+type FoodTrackingProps = SavedViewProps & { foodPreferences: FoodPreferences };
 
 const meals = ["breakfast", "lunch", "dinner", "snack"] as const;
 const categories = ["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"] as const;
@@ -185,7 +186,7 @@ async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest
   throw new Error("The photo is still too large after compression. Choose another photo.");
 }
 
-export function FoodTrackingView({ day, foodPreferences, onSaved }: Props) {
+export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTrackingProps) {
   const [foodView, setFoodView] = useState<"log" | "plan">("log");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
@@ -1007,7 +1008,7 @@ function emptyExercise(): ExerciseDraft {
   return { exerciseId: null, exerciseName: "", trackingMode: "reps", sets: [{ reps: "", durationSeconds: "", loadKg: "" }] };
 }
 
-export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDays, homeWorkoutDays, onSaved }: Props & { unitSystem: "metric" | "imperial"; equipment: string[]; gymWorkoutDays: number; homeWorkoutDays: number }) {
+export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDays, homeWorkoutDays, onSaved }: SavedViewProps & { unitSystem: "metric" | "imperial"; equipment: string[]; gymWorkoutDays: number; homeWorkoutDays: number }) {
   const [viewDate, setViewDate] = useState(day.date);
   const [loadedHistoryDay, setLoadedHistoryDay] = useState<DaySummary>(day);
   const [historyLoading, setHistoryLoading] = useState(false);
