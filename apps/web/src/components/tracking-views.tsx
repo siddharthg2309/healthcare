@@ -1341,7 +1341,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, onSaved }: Pr
           }).join(", ")})`).join(" · ");
           return <div className="daily-entry" key={item.id}>
             <span className="meal-badge">↗</span>
-            <span className="daily-entry-main"><strong>{title}</strong><small>{item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
+            <span className="daily-entry-main"><strong>{title}</strong><small>Manual entry · {item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
             {item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}
             <div className="entry-actions">
               <button type="button" className="quiet-button" onClick={() => editingId === item.id ? resetForm() : beginEdit(item)} disabled={busy || deletingId !== null}>{editingId === item.id ? "Editing" : "Edit"}</button>
