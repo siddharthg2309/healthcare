@@ -55,12 +55,14 @@ async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest
 }
 
 
-export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, onReviewChange }: {
-  defaultMealType: FoodLogRecord["mealType"]; defaultOccurredAt: string;
+export function FoodEstimateLogger({ defaultMealType, defaultOccurredAt, unmatchedFoodName, onSaved, onReviewChange }: {
+  defaultMealType: FoodLogRecord["mealType"]; defaultOccurredAt: string; unmatchedFoodName?: string | null;
   onSaved: () => Promise<void>; onReviewChange: (open: boolean) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const pendingSave = useRef<{ fingerprint: string; id: string } | null>(null);
+  const [textFoodName, setTextFoodName] = useState<string | null>(null);
+  const [saveToMyFoods, setSaveToMyFoods] = useState(false);
   const [image, setImage] = useState<FoodPhotoRecognitionRequest | null>(null);
   const [result, setResult] = useState<FoodPhotoRecognitionResponse | null>(null);
   const [items, setItems] = useState<ReviewItem[]>([]);
@@ -76,7 +78,7 @@ export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, o
   const [notice, setNotice] = useState("");
 
   function resetReview() {
-    setImage(null); setResult(null); setItems([]); setAnswer(""); setRefinements(0); setAnswers([]);
+    setTextFoodName(null); setSaveToMyFoods(false); setContext(""); setImage(null); setResult(null); setItems([]); setAnswer(""); setRefinements(0); setAnswers([]);
     pendingSave.current = null; onReviewChange(false);
   }
 
@@ -84,10 +86,12 @@ export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, o
     setItems((current) => current.map((item) => item.index === index ? { ...item, ...change } : item));
   }
 
-  async function analyze(photo: FoodPhotoRecognitionRequest, details: string) {
-    const response = await postJson<unknown>("/v1/foods/recognize-photo", { ...photo, context: details });
+  async function analyze(photo: FoodPhotoRecognitionRequest | null, details: string, foodName?: string) {
+    const response = photo
+      ? await postJson<unknown>("/v1/foods/recognize-photo", { ...photo, context: details })
+      : await postJson<unknown>("/v1/foods/estimate-text", { foodName: foodName ?? textFoodName ?? "", context: details });
     const parsed = foodPhotoRecognitionResponseSchema.safeParse(response);
-    if (!parsed.success) throw new Error("Photo estimates are not available in this deployment yet. Refresh after deployment.");
+    if (!parsed.success) throw new Error("Food estimates are not available in this deployment yet. Refresh after deployment.");
     setResult(parsed.data);
     setItems(parsed.data.items.map((item, index) => ({
       index, included: true, name: item.name, minimum: String(item.minimumGrams), maximum: String(item.maximumGrams), certainty: "not_sure",
@@ -99,18 +103,19 @@ export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, o
 
   function reportError(caught: unknown) {
     const messages: Record<string, string> = {
-      ai_not_configured: "Photo estimates are unavailable. Try manual entry.",
-      ai_authentication_failed: "The photo service needs its connection updated.",
-      ai_credits_exhausted: "The photo service has no available credits.",
-      ai_access_denied: "The photo service cannot process this image.",
-      ai_model_unavailable: "The photo model is unavailable.",
+      ai_not_configured: "Food estimates are unavailable. Try manual entry.",
+      ai_authentication_failed: "The AI service needs its connection updated.",
+      ai_credits_exhausted: "The AI service has no available credits.",
+      ai_access_denied: "The AI service cannot process this image.",
+      ai_model_unavailable: "The food model is unavailable.",
       ai_request_rejected: "Try another photo or use manual entry.",
-      ai_timeout: "The photo took too long. Try again.",
-      ai_invalid_response: "Could not estimate this meal. Try another angle.",
-      ai_provider_unavailable: "Photo estimates are temporarily unavailable.",
-      ai_rate_limited: "Photo estimates are busy. Try again shortly.",
+      ai_timeout: "The estimate took too long. Try again.",
+      ai_invalid_response: "Could not estimate this food. Add a detail or try again.",
+      ai_provider_unavailable: "Food estimates are temporarily unavailable.",
+      ai_rate_limited: "Food estimates are busy. Try again shortly.",
       ai_daily_limit_reached: "Today’s AI limit is reached. You can still edit and save an existing estimate.",
-      photo_draft_unavailable: "This estimate expired. Take or upload the photo again.",
+      photo_draft_unavailable: "This estimate expired. Generate it again.",
+      invalid_food_estimate_request: "Enter a food name and optional portion details.",
       invalid_photo_food_log: "Check the portion range and nutrition values.",
       food_log_id_conflict: "This meal was already saved with different details. Refresh your log.",
     };
@@ -118,17 +123,32 @@ export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, o
   }
 
   async function pick(file: File) {
-    setBusy(true); setError(""); setNotice(""); resetReview();
+    const details = context;
+    setBusy(true); setError(""); setNotice(""); resetReview(); setContext(details);
     try {
       const photo = await prepareFoodPhoto(file);
       setImage(photo);
-      await analyze(photo, context);
+      await analyze(photo, details);
     } catch (caught) { reportError(caught); }
     finally { setBusy(false); }
   }
 
+  function startTextEstimate() {
+    if (!unmatchedFoodName || busy || saving) return;
+    resetReview(); setTextFoodName(unmatchedFoodName); setContext(""); setError(""); setNotice(""); onReviewChange(true);
+  }
+
+  async function estimateText(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!textFoodName?.trim() || busy || saving) return;
+    setBusy(true); setError(""); setNotice("");
+    try { await analyze(null, context, textFoodName); }
+    catch (caught) { reportError(caught); }
+    finally { setBusy(false); }
+  }
+
   async function refine() {
-    if (!image || !answer.trim() || refinements >= 2 || busy || saving) return;
+    if ((!image && !textFoodName) || !answer.trim() || refinements >= 2 || busy || saving) return;
     setBusy(true); setError("");
     const corrections = items.flatMap((item) => {
       const original = result?.items[item.index];
@@ -143,7 +163,7 @@ export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, o
     });
     const details = JSON.stringify({ initialDetails: context, question: result?.question, previousAnswers: answers, answer: answer.trim(), userCorrections: corrections }).slice(0, 4000);
     setRefinements((count) => count + 1);
-    try { await analyze(image, details); setAnswers((current) => [...current, `${result?.question ?? "Meal details"}: ${answer.trim()}`]); }
+    try { await analyze(image, details, textFoodName ?? undefined); setAnswers((current) => [...current, `${result?.question ?? "Meal details"}: ${answer.trim()}`]); }
     catch (caught) { reportError(caught); }
     finally { setBusy(false); }
   }
@@ -169,30 +189,37 @@ export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, o
     if (!result || !valid || busy || saving) return;
     setSaving(true); setError("");
     try {
-      const payload = { draftToken: result.draftToken, mealType, occurredAt: new Date(occurredAt).toISOString(), items: values };
+      const payload = { draftToken: result.draftToken, saveToMyFoods, mealType, occurredAt: new Date(occurredAt).toISOString(), items: values };
       const fingerprint = JSON.stringify(payload);
       const pending = pendingSave.current?.fingerprint === fingerprint ? pendingSave.current : { fingerprint, id: window.crypto.randomUUID() };
       pendingSave.current = pending;
       const request = confirmFoodPhotoRequestSchema.safeParse({ ...payload, requestId: pending.id });
       if (!request.success) throw new Error("Check the portions, date, and nutrition values.");
       const response = await postJson<{ count: number }>("/v1/food-logs/photo", request.data);
-      resetReview(); setNotice(`${response.count} ${response.count === 1 ? "food" : "foods"} added.`);
+      resetReview(); setNotice(saveToMyFoods ? "Food added and saved to My foods." : `${response.count} ${response.count === 1 ? "food" : "foods"} added.`);
       try { await onSaved(); } catch { setNotice("Food added. Refresh to update your totals."); }
     } catch (caught) { reportError(caught); }
     finally { setSaving(false); }
   }
 
-  return <section className="photo-lookup" aria-label="Log a meal from a photo">
+  return <section className="photo-lookup" aria-label="Estimate and log food">
+    {unmatchedFoodName && !result && textFoodName === null ? <button type="button" className="button button-primary text-estimate-trigger" onClick={startTextEstimate} disabled={busy || saving}>Estimate “{unmatchedFoodName}” with AI</button> : null}
     <input ref={input} type="file" accept="image/*" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void pick(file); }} />
     <button className="button button-secondary photo-pick-button" type="button" disabled={busy || saving} onClick={() => input.current?.click()}><AppIcon name="camera" size={20} />{busy ? "Estimating meal…" : result ? "Use another photo" : "Camera or photo"}</button>
-    {!result ? <details className="photo-context"><summary>Add a detail · optional</summary><label className="field"><span>Food, amount, or recipe</span><textarea value={context} onChange={(event) => setContext(event.target.value)} maxLength={600} placeholder="2 dosas, less oil. Around 300–400 g, not sure." /></label></details> : null}
+    {!result && textFoodName === null ? <details className="photo-context"><summary>Add a detail · optional</summary><label className="field"><span>Food, amount, or recipe</span><textarea value={context} onChange={(event) => setContext(event.target.value)} maxLength={600} placeholder="2 dosas, less oil. Around 300–400 g, not sure." /></label></details> : null}
+    {textFoodName !== null && !result ? <form className="text-estimate-setup" onSubmit={(event) => void estimateText(event)}>
+      <div className="photo-review-heading"><h3>Estimate food</h3><button type="button" className="quiet-button" disabled={busy || saving} onClick={() => { resetReview(); setError(""); }}>Cancel</button></div>
+      <label className="field"><span>Food name</span><input value={textFoodName} required maxLength={100} disabled={busy} onChange={(event) => setTextFoodName(event.target.value)} /></label>
+      <label className="field"><span>Amount or recipe · optional</span><textarea value={context} maxLength={600} disabled={busy} onChange={(event) => setContext(event.target.value)} placeholder="One bowl, about 300–400 g, not sure. Extra curd, little oil." /></label>
+      <button type="submit" className="button button-primary" disabled={busy || saving || !textFoodName.trim()}>{busy ? "Estimating…" : "Estimate meal"}</button>
+    </form> : null}
     {busy ? <p className="photo-status" role="status">Estimating portions and nutrition…</p> : null}
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {notice ? <p className="form-message" role="status">{notice}</p> : null}
     {result ? <form className="photo-meal-review" onSubmit={(event) => void save(event)}>
       <div className="photo-review-heading"><h3>Review your meal</h3><button type="button" className="quiet-button" disabled={busy || saving} onClick={() => { resetReview(); setError(""); }}>Cancel</button></div>
       {refinements < 2 ? <details className="photo-question" open={Boolean(result.question) || !result.items.length}><summary>{result.question ? "Quick question" : "Refine estimate · optional"}</summary><label className="field"><span>{result.question ?? "Food, portion, or cooking details"}</span><input value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={400} placeholder="Your answer, or “not sure”" disabled={busy || saving} /></label><button type="button" className="text-button" onClick={() => void refine()} disabled={!answer.trim() || busy || saving}>Update estimate</button></details> : null}
-      {!result.items.length ? <p className="muted-copy">No meal identified. Add a detail or try another photo.</p> : null}
+      {!result.items.length ? <p className="muted-copy">No food identified. Add a detail, try a photo, or use manual entry.</p> : null}
       <fieldset disabled={busy || saving} className="photo-review-fields">
         {items.map((item) => {
           const value = values.find((candidate) => candidate.index === item.index);
@@ -212,7 +239,7 @@ export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, o
             </fieldset>
           </article>;
         })}
-        {items.length ? <><div className="photo-meal-total" aria-live="polite"><span>Estimated meal</span><strong>{valid ? number(totals.caloriesKcal) : "—"} kcal</strong>{valid && Math.round(minimumKcal) !== Math.round(maximumKcal) ? <small>{number(minimumKcal)}–{number(maximumKcal)} kcal range · midpoint logged</small> : null}</div><div className="photo-item-macros"><span>Protein {valid ? number(totals.proteinG) : "—"} g</span><span>Carbs {valid ? number(totals.carbohydrateG) : "—"} g</span><span>Fat {valid ? number(totals.fatG) : "—"} g</span></div><div className="form-grid"><label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as typeof mealType)}>{["breakfast", "lunch", "dinner", "snack"].map((meal) => <option key={meal} value={meal}>{meal[0]?.toUpperCase()}{meal.slice(1)}</option>)}</select></label><label className="field"><span>Date and time</span><input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label></div>{!valid ? <p className="form-error">Select a food and check the portion range and macros.</p> : null}<button className="button button-primary" type="submit" disabled={!valid || saving || busy}>{saving ? "Adding…" : "Add to food log"}</button></> : null}
+        {items.length ? <><div className="photo-meal-total" aria-live="polite"><span>Estimated meal</span><strong>{valid ? number(totals.caloriesKcal) : "—"} kcal</strong>{valid && Math.round(minimumKcal) !== Math.round(maximumKcal) ? <small>{number(minimumKcal)}–{number(maximumKcal)} kcal range · midpoint logged</small> : null}</div><div className="photo-item-macros"><span>Protein {valid ? number(totals.proteinG) : "—"} g</span><span>Carbs {valid ? number(totals.carbohydrateG) : "—"} g</span><span>Fat {valid ? number(totals.fatG) : "—"} g</span></div><div className="form-grid"><label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as typeof mealType)}>{["breakfast", "lunch", "dinner", "snack"].map((meal) => <option key={meal} value={meal}>{meal[0]?.toUpperCase()}{meal.slice(1)}</option>)}</select></label><label className="field"><span>Date and time</span><input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label></div>{!valid ? <p className="form-error">Select a food and check the portion range and macros.</p> : null}<label className="estimate-save-choice"><input type="checkbox" checked={saveToMyFoods} onChange={(event) => setSaveToMyFoods(event.target.checked)} /><span>Save to My foods for next time</span></label><button className="button button-primary" type="submit" disabled={!valid || saving || busy}>{saving ? "Adding…" : "Add to food log"}</button></> : null}
       </fieldset>
     </form> : null}
   </section>;

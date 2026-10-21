@@ -7,6 +7,8 @@ const draftSchema = z.object({
   userId: z.string().min(1).max(200),
   runId: z.string().uuid(),
   model: z.string().min(1).max(100),
+  inputType: z.enum(["photo", "text"]).default("photo"),
+  foodName: z.string().trim().min(1).max(100).optional(),
   expiresAt: z.number().int().positive(),
   estimate: foodPhotoEstimateSchema,
 }).strict();
@@ -15,8 +17,8 @@ function signature(payload: string): Buffer {
   return createHmac("sha256", env.AUTH_SECRET).update("food-photo-draft-v1.").update(payload).digest();
 }
 
-export function signFoodPhotoDraft(userId: string, runId: string, estimate: FoodPhotoEstimate): string {
-  const payload = Buffer.from(JSON.stringify(draftSchema.parse({ userId, runId, model: env.AI_MODEL, expiresAt: Date.now() + 2 * 60 * 60 * 1000, estimate }))).toString("base64url");
+export function signFoodPhotoDraft(userId: string, runId: string, estimate: FoodPhotoEstimate, inputType: "photo" | "text" = "photo", foodName?: string): string {
+  const payload = Buffer.from(JSON.stringify(draftSchema.parse({ userId, runId, inputType, foodName, model: env.AI_MODEL, expiresAt: Date.now() + 2 * 60 * 60 * 1000, estimate }))).toString("base64url");
   return `${payload}.${signature(payload).toString("base64url")}`;
 }
 
@@ -52,11 +54,18 @@ export function buildPhotoFoodRecords(draft: Draft, request: ConfirmFoodPhotoReq
     const quantityGrams = Math.round((item.minimumGrams + item.maximumGrams) / 2 * 100) / 100;
     const round = (value: number) => Math.round(value * 100) / 100;
     const id = recordId(draft.userId, request.requestId, item.index);
+    const metadata = {
+      runId: draft.runId, model: draft.model, requestId: request.requestId, itemIndex: item.index,
+      minimumGrams: item.minimumGrams, maximumGrams: item.maximumGrams,
+      certainty: item.certainty, confidence: original.confidence,
+      userAdjusted: item.name !== original.name || item.minimumGrams !== original.minimumGrams
+        || item.maximumGrams !== original.maximumGrams || JSON.stringify(nutrition) !== JSON.stringify(original.nutritionPer100g),
+    };
     const data = foodLogRecordSchema.parse({
       foodId: id,
-      foodSource: "photo_estimate",
+      foodSource: draft.inputType === "text" ? "text_estimate" : "photo_estimate",
       foodName: item.name,
-      category: "photo_estimate",
+      category: "estimated_meal",
       occurredAt: request.occurredAt,
       mealType: request.mealType,
       quantityGrams,
@@ -67,13 +76,9 @@ export function buildPhotoFoodRecords(draft: Draft, request: ConfirmFoodPhotoReq
         carbohydrateG: round(nutrition.carbohydrateG * quantityGrams / 100),
         fatG: round(nutrition.fatG * quantityGrams / 100),
       },
-      photoEstimate: {
-        runId: draft.runId, model: draft.model, requestId: request.requestId, itemIndex: item.index,
-        minimumGrams: item.minimumGrams, maximumGrams: item.maximumGrams,
-        certainty: item.certainty, confidence: original.confidence,
-        userAdjusted: item.name !== original.name || item.minimumGrams !== original.minimumGrams
-          || item.maximumGrams !== original.maximumGrams || JSON.stringify(nutrition) !== JSON.stringify(original.nutritionPer100g),
-      },
+      nutritionProvenance: "ai_estimate",
+      ...(draft.inputType === "photo" ? { photoEstimate: metadata } : {}),
+      foodEstimate: { ...metadata, inputType: draft.inputType, savedToMyFoods: request.saveToMyFoods },
     });
     return { id, data };
   });

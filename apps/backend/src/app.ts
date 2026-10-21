@@ -24,6 +24,7 @@ import {
   deleteFoodLogRequestSchema,
   exerciseProgressQuerySchema,
   foodPhotoRecognitionRequestSchema,
+  foodTextEstimateRequestSchema,
   confirmFoodPhotoRequestSchema,
   setFoodFavoriteRequestSchema,
   foodDayStatusRequestSchema,
@@ -63,8 +64,9 @@ import { auth } from "./auth/config.js";
 import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
-import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
-import { buildPhotoFoodRecords, readFoodPhotoDraft, signFoodPhotoDraft } from "./services/food-photo-draft.js";
+import { FoodVisionError } from "./services/food-vision.js";
+import { createFoodEstimate, SAVED_AI_FOOD_PREFIX } from "./services/food-estimation.js";
+import { buildPhotoFoodRecords, readFoodPhotoDraft } from "./services/food-photo-draft.js";
 import { buildActivityEnergyEstimate, createActivityEnergyEstimator } from "./services/activity-energy.js";
 import { hasAiOperationCapacity, lockAiUsageWindow } from "./services/ai-usage.js";
 import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
@@ -687,7 +689,8 @@ app.get("/v1/foods", async (c) => {
       for (const row of recentLogs) {
         const parsed = foodLogRecordSchema.safeParse(row.data);
         if (!parsed.success) continue;
-        const key = `${parsed.data.foodSource}:${parsed.data.foodId}`;
+        const foodSource = parsed.data.foodEstimate?.savedToMyFoods ? "personal" : parsed.data.foodSource;
+        const key = `${foodSource}:${parsed.data.foodId}`;
         if (seen.has(key)) continue;
         seen.add(key);
         recentKeys.push(key);
@@ -767,6 +770,7 @@ app.get("/v1/foods", async (c) => {
       source: "personal" as const,
       isFavorite: favoriteKeys.has(`personal:${food.id}`),
       sourceNote: food.sourceNote,
+      isEstimate: food.sourceNote.startsWith(SAVED_AI_FOOD_PREFIX),
       reviewed: false,
       recipe: food.recipe,
       recipeVersion: food.recipeVersion,
@@ -919,61 +923,23 @@ app.post("/v1/foods/recognize-photo", bodyLimit({
   }
   const parsed = foodPhotoRecognitionRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_food_photo" }, 400);
-  if (!env.GEMINI_API_KEY) return c.json({ error: "ai_not_configured" }, 503);
+  try { return c.json(await createFoodEstimate(c.get("session").user.id, parsed.data)); }
+  catch (error) {
+    if (error instanceof FoodVisionError) return c.json({ error: error.code }, error.status);
+    return c.json({ error: "ai_provider_unavailable" }, 503);
+  }
+});
 
-  const userId = c.get("session").user.id;
-  const runId = randomUUID();
-  const reserved = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-    await lockAiUsageWindow(tx, userId);
-    if (!(await hasAiOperationCapacity(tx, userId))) return false;
-    await tx.insert(aiRuns).values({
-      id: runId,
-      userId,
-      kind: "food_vision",
-      status: "running",
-      idempotencyKey: randomUUID(),
-      inputHash: createHash("sha256").update(runId).digest("hex"),
-      inputSnapshot: { mimeType: parsed.data.mimeType, base64Characters: parsed.data.base64.length, contextCharacters: parsed.data.context?.length ?? 0 },
-      model: env.AI_MODEL,
-      promptVersion: "food-photo-estimate-v2",
-      schemaVersion: "food-photo-estimate-v2",
-    });
-    return true;
-  });
-  if (!reserved) return c.json({ error: "ai_daily_limit_reached" }, 429);
-
-  try {
-    const result = await recognizeFoodPhoto(parsed.data);
-    const draftToken = signFoodPhotoDraft(userId, runId, result.response);
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-      await tx.update(aiRuns).set({
-        status: "completed",
-        inputTokens: result.inputTokens,
-        outputTokens: result.outputTokens,
-        costUsdMicros: result.costUsdMicros,
-        updatedAt: new Date(),
-      }).where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId)));
-    });
-    return c.json({
-      ...result.response,
-      draftToken,
-      candidates: result.response.items.map((item) => ({ name: item.name, alternatives: [] })),
-    });
-  } catch (error) {
-    const code = error instanceof FoodVisionError ? error.code : "ai_provider_unavailable";
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
-      await tx.update(aiRuns).set({
-        status: "failed",
-        errorCode: code,
-        inputTokens: error instanceof FoodVisionError ? error.usage?.inputTokens ?? null : null,
-        outputTokens: error instanceof FoodVisionError ? error.usage?.outputTokens ?? null : null,
-        costUsdMicros: error instanceof FoodVisionError ? error.usage?.costUsdMicros ?? null : null,
-        updatedAt: new Date(),
-      }).where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId), eq(aiRuns.status, "running")));
-    });
+app.post("/v1/foods/estimate-text", bodyLimit({
+  maxSize: 20000,
+  onError: (c) => c.json({ error: "payload_too_large" }, 413),
+}), async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "invalid_request" }, 400); }
+  const parsed = foodTextEstimateRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_food_estimate_request" }, 400);
+  try { return c.json(await createFoodEstimate(c.get("session").user.id, parsed.data)); }
+  catch (error) {
     if (error instanceof FoodVisionError) return c.json({ error: error.code }, error.status);
     return c.json({ error: "ai_provider_unavailable" }, 503);
   }
@@ -997,7 +963,7 @@ app.post("/v1/food-logs/photo", bodyLimit({
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"photo-log:" + userId + ":" + parsed.data.requestId}, 0))`);
     const existing = await tx.select({ id: userRecords.recordId, data: userRecords.data, deleted: userRecords.deleted }).from(userRecords).where(and(
       eq(userRecords.userId, userId), eq(userRecords.entity, "food_log"),
-      sql`${userRecords.data}->'photoEstimate'->>'requestId' = ${parsed.data.requestId}`,
+      sql`COALESCE(${userRecords.data}->'foodEstimate'->>'requestId', ${userRecords.data}->'photoEstimate'->>'requestId') = ${parsed.data.requestId}`,
       sql`${userRecords.data}->>'foodId' = ${userRecords.recordId}::text`,
     ));
     if (existing.length) {
@@ -1008,11 +974,23 @@ app.post("/v1/food-logs/photo", bodyLimit({
       });
       return { status: same ? "saved" as const : "conflict" as const, idempotent: same };
     }
-    const [run] = await tx.select({ id: aiRuns.id }).from(aiRuns).where(and(
+    const [run] = await tx.select({ id: aiRuns.id, inputSnapshot: aiRuns.inputSnapshot }).from(aiRuns).where(and(
       eq(aiRuns.userId, userId), eq(aiRuns.id, draft.runId), eq(aiRuns.kind, "food_vision"), eq(aiRuns.status, "completed"),
     )).limit(1);
-    if (!run) return { status: "draft_missing" as const, idempotent: false };
+    if (!run || (run.inputSnapshot.inputType ?? "photo") !== draft.inputType) return { status: "draft_missing" as const, idempotent: false };
     for (const record of records) {
+      if (parsed.data.saveToMyFoods) {
+        await tx.insert(userFoods).values({
+          id: record.data.foodId, userId, name: record.data.foodName, category: "prepared_meal",
+          aliases: draft.inputType === "text" && draft.foodName && draft.estimate.items.length === 1
+            && draft.foodName.toLocaleLowerCase() !== record.data.foodName.toLocaleLowerCase() ? [draft.foodName] : [],
+          caloriesKcalPer100g: record.data.nutritionPer100g.caloriesKcal.toFixed(2),
+          proteinGPer100g: record.data.nutritionPer100g.proteinG.toFixed(2),
+          carbohydrateGPer100g: record.data.nutritionPer100g.carbohydrateG.toFixed(2),
+          fatGPer100g: record.data.nutritionPer100g.fatG.toFixed(2),
+          sourceNote: `${SAVED_AI_FOOD_PREFIX} ${draft.inputType}; ${draft.model}. Confirm recipe and portion before reuse.`,
+        });
+      }
       await tx.insert(userRecords).values({ userId, entity: "food_log", recordId: record.id, version: 1, data: record.data, deleted: false, serverUpdatedAt: new Date() });
       await appendSyncChange(tx, userId, "food_log", record.id, record.data);
     }
@@ -1534,6 +1512,7 @@ app.post("/v1/food-logs", async (c) => {
       foodId: food.id,
       foodSource: shared ? "shared_catalog" : "personal",
       foodName: food.name,
+      ...(personal?.sourceNote.startsWith(SAVED_AI_FOOD_PREFIX) ? { nutritionProvenance: "ai_estimate" } : {}),
       category: food.category,
       occurredAt: parsed.data.occurredAt,
       mealType: parsed.data.mealType,
@@ -1684,8 +1663,11 @@ app.patch("/v1/food-logs/:id", async (c) => {
     const factor = quantityGrams / 100;
     const data = foodLogRecordSchema.parse({
       ...prior.data,
+      ...(prior.data.foodEstimate && quantityChanged ? { foodEstimate: {
+        ...prior.data.foodEstimate, minimumGrams: quantityGrams, maximumGrams: quantityGrams, userAdjusted: true,
+      } } : {}),
       ...(prior.data.photoEstimate && quantityChanged ? { photoEstimate: {
-        ...prior.data.photoEstimate, minimumGrams: parsed.data.quantityGrams, maximumGrams: parsed.data.quantityGrams, userAdjusted: true,
+        ...prior.data.photoEstimate, minimumGrams: quantityGrams, maximumGrams: quantityGrams, userAdjusted: true,
       } } : {}),
       occurredAt: parsed.data.occurredAt ?? prior.data.occurredAt,
       mealType: parsed.data.mealType ?? prior.data.mealType,

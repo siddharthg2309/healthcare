@@ -455,6 +455,7 @@ Return a run ID only after the job is durably stored. The UI polls status while 
 | Operation | Model call? | Trigger and boundary |
 | --- | --- | --- |
 | Manual food search/log | No | Catalog lookup and numeric calculation |
+| Typed food missing from catalog | Yes | Explicit Estimate meal submission after a no-match search; bounded estimate, then user review |
 | Food photo recognition | Yes | Explicit photo submission; bounded nutrition estimate and optional user-requested clarification |
 | Nutrition target proposal | No | Reviewed deterministic calculation policy |
 | Weekly meal plan | Yes | User requests a new plan or an explicit revision |
@@ -1299,3 +1300,13 @@ Photo recognition and both planners now use the shared Google AI Studio adapter 
 ### 21 October 2026 — Reviewed photo meal estimates
 
 Decision 0008 supersedes the initial name-only vision scope. See sections 5.5 and Phase 7 for implemented behavior. This update adds no migrations or credentials. Checks were skipped as requested; deployment and live photo behavior remain unverified.
+
+### 21 October 2026 — Typed-food fallback and private estimate reuse
+
+Decision 0009 adds an explicit **Estimate with AI** action after a completed All foods search has no match. The typed name and optional grams/bowls/recipe information produce the same bounded review model as photos. The person can refine it, correct portions and macros, and confirm one atomic food-log save. Typing and ordinary database search do not trigger model calls.
+
+Both input modes share the food-inference service, rolling account quota, error handling, two-hour signed owner-bound drafts, one initial model request and up to two user-requested follow-up attempts in the UI. Completed-run checks also verify the signed input type. Historical food_vision run rows remain compatible; new rows record input type and distinct versions without a database migration.
+
+**Save to My foods for next time** is opt-in. Confirmation writes selected private foods and logs in one transaction; deterministic record IDs, advisory locking, and retry comparison apply to the whole action. Saved foods become searchable and appear in Recent through normalized personal-food references. Cached estimates are tagged in the private source note and exposed as an estimate flag. Future manual logs retain estimated nutrition provenance and do not need a model call. Shared catalog/review status is unchanged, and no dietary/allergen facts are invented.
+
+Generic foodEstimate metadata records text/photo origin, portion uncertainty, confidence, edits, model/run/request IDs, and private-save status; photoEstimate remains supported for existing records. Quantity edits update the corresponding range. New credentials, storage services, and migrations are not needed. Build, typecheck, browser verification, and live inference remain skipped at the owner's request; deployment and live behavior still need confirmation.

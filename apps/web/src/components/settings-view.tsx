@@ -295,7 +295,7 @@ export function SettingsView({ userId, displayName, email, onSignOut, onAccountD
       <section className="panel privacy-panel">
         <div className="panel-heading"><div><h2>Privacy and account</h2></div><span className="panel-symbol" aria-hidden="true">⌑</span></div>
         <p className="muted-copy">Download a copy of your data.</p>
-        <details className="settings-info"><summary>Data & connections</summary><p>Food photos and optional details are sent to Google for nutrition estimates. Portions and macros can be corrected before saving. Photos are not stored by the app. Google Calendar needs its own permission to sync workouts.</p></details>
+        <details className="settings-info"><summary>Data & connections</summary><p>Food names, photos, and optional details are sent to Google when you request a nutrition estimate. Portions and macros can be corrected before saving. Photos are not stored by the app. Google Calendar needs its own permission to sync workouts.</p></details>
         <button className="button button-secondary" type="button" disabled={exportBusy} onClick={() => void downloadExport()}>{exportBusy ? "Preparing export…" : "Download my data"}</button>
         <div className="account-delete-block">
           <strong>Delete account</strong>

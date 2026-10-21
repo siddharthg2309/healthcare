@@ -812,3 +812,8 @@ a { color: inherit; text-decoration: none; }
 .photo-meal-total strong { font-size: 28px; letter-spacing: -.04em; }
 .photo-meal-total small { color: #465b31; font-size: 12px; line-height: 1.5; }
 .photo-log-estimate { color: #617940 !important; }
+
+.text-estimate-trigger { width: 100%; margin-bottom: 10px; white-space: normal; overflow-wrap: anywhere; }
+.text-estimate-setup { display: grid; gap: 14px; margin-top: 16px; }
+.estimate-save-choice { display: flex; gap: 10px; align-items: center; min-height: 48px; font-size: 14px; }
+.estimate-save-choice input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: #91c52d; }

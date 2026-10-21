@@ -26,13 +26,19 @@ Calorie estimates use a versioned MET calculation from the [2024 Compendium](htt
 
 Serving counts use the existing JSON food-log records and do not require a database migration. The API validates the chosen portion against its owner and food, checks the total grams against the count, and calculates nutrition. Existing gram-only logs remain supported.
 
+## When a food is missing
+
+Search the database first. If **All foods** returns no match, tap **Estimate “curd rice” with AI**, then add optional amount/recipe details such as “one bowl” or “300–400 g, not sure.” Tap **Estimate meal** to generate a draft. Typing, database searches, and opening the form do not call AI.
+
+Text and photo estimates use the same editable review cards, Sure/Not sure portions, optional follow-up questions, and direct log confirmation. Check **Save to My foods for next time** to save the selected foods privately along with the log. They appear in All foods and Recent for ordinary logging without another AI call. Cached nutrition is marked as an estimate in search, serving details, and future log entries. It is not published into the shared reviewed catalog. New recipe variants can be saved separately.
+
 ## Photo meal logging
 
 Take or upload a photo to receive estimated foods, cooked portion ranges, calories, protein, carbs, and fat. Optional context can describe counts, recipes, labels, or an approximate amount. A short follow-up question can refine the estimate; answering is optional, and “not sure” is accepted. You can make up to two follow-up attempts, or edit the review cards yourself without another AI call.
 
 Choose **Sure** for one gram amount or **Not sure** for a range such as 300–400 g. Calories and macros recalculate immediately. **Edit nutrition · per 100 g** allows optional corrections; leaving a field blank keeps its estimate. Tap **Add to food log** to save all selected items together. For a range, the midpoint is logged and the range/certainty remains attached to the entry.
 
-Photo entries are labeled estimates and do not become reviewed catalog foods. The API validates the estimate and signs an account-bound draft valid for two hours. Confirmation verifies that draft, applies bounded user corrections, calculates totals, and saves atomically with retry protection. Uploaded bytes stay out of app storage; confirmed nutrition snapshots and provenance are retained. No new environment values or database migration are required. Builds and runtime checks were not run, following the owner's request.
+Photo entries are labeled estimates and do not become reviewed catalog foods. The API validates text or photo estimates and signs an account-bound draft valid for two hours. Confirmation verifies that draft, applies bounded user corrections, calculates totals, and saves atomically with retry protection. Uploaded bytes stay out of app storage; confirmed nutrition snapshots and provenance are retained. No new environment values or database migration are required. Builds and runtime checks were not run, following the owner's request.
 
 ## Run locally
 
