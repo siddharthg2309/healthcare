@@ -62,7 +62,6 @@ export function FoodEstimateLogger({ defaultMealType, defaultOccurredAt, unmatch
   const input = useRef<HTMLInputElement>(null);
   const pendingSave = useRef<{ fingerprint: string; id: string } | null>(null);
   const [textFoodName, setTextFoodName] = useState<string | null>(null);
-  const [saveToMyFoods, setSaveToMyFoods] = useState(false);
   const [image, setImage] = useState<FoodPhotoRecognitionRequest | null>(null);
   const [result, setResult] = useState<FoodPhotoRecognitionResponse | null>(null);
   const [items, setItems] = useState<ReviewItem[]>([]);
@@ -78,7 +77,7 @@ export function FoodEstimateLogger({ defaultMealType, defaultOccurredAt, unmatch
   const [notice, setNotice] = useState("");
 
   function resetReview() {
-    setTextFoodName(null); setSaveToMyFoods(false); setContext(""); setImage(null); setResult(null); setItems([]); setAnswer(""); setRefinements(0); setAnswers([]);
+    setTextFoodName(null); setContext(""); setImage(null); setResult(null); setItems([]); setAnswer(""); setRefinements(0); setAnswers([]);
     pendingSave.current = null; onReviewChange(false);
   }
 
@@ -189,14 +188,14 @@ export function FoodEstimateLogger({ defaultMealType, defaultOccurredAt, unmatch
     if (!result || !valid || busy || saving) return;
     setSaving(true); setError("");
     try {
-      const payload = { draftToken: result.draftToken, saveToMyFoods, mealType, occurredAt: new Date(occurredAt).toISOString(), items: values };
+      const payload = { draftToken: result.draftToken, mealType, occurredAt: new Date(occurredAt).toISOString(), items: values };
       const fingerprint = JSON.stringify(payload);
       const pending = pendingSave.current?.fingerprint === fingerprint ? pendingSave.current : { fingerprint, id: window.crypto.randomUUID() };
       pendingSave.current = pending;
       const request = confirmFoodPhotoRequestSchema.safeParse({ ...payload, requestId: pending.id });
       if (!request.success) throw new Error("Check the portions, date, and nutrition values.");
-      const response = await postJson<{ count: number }>("/v1/food-logs/photo", request.data);
-      resetReview(); setNotice(saveToMyFoods ? "Food added and saved to My foods." : `${response.count} ${response.count === 1 ? "food" : "foods"} added.`);
+      await postJson<{ count: number }>("/v1/food-logs/photo", request.data);
+      resetReview(); setNotice("Added to your log and My foods.");
       try { await onSaved(); } catch { setNotice("Food added. Refresh to update your totals."); }
     } catch (caught) { reportError(caught); }
     finally { setSaving(false); }
@@ -239,7 +238,7 @@ export function FoodEstimateLogger({ defaultMealType, defaultOccurredAt, unmatch
             </fieldset>
           </article>;
         })}
-        {items.length ? <><div className="photo-meal-total" aria-live="polite"><span>Estimated meal</span><strong>{valid ? number(totals.caloriesKcal) : "—"} kcal</strong>{valid && Math.round(minimumKcal) !== Math.round(maximumKcal) ? <small>{number(minimumKcal)}–{number(maximumKcal)} kcal range · midpoint logged</small> : null}</div><div className="photo-item-macros"><span>Protein {valid ? number(totals.proteinG) : "—"} g</span><span>Carbs {valid ? number(totals.carbohydrateG) : "—"} g</span><span>Fat {valid ? number(totals.fatG) : "—"} g</span></div><div className="form-grid"><label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as typeof mealType)}>{["breakfast", "lunch", "dinner", "snack"].map((meal) => <option key={meal} value={meal}>{meal[0]?.toUpperCase()}{meal.slice(1)}</option>)}</select></label><label className="field"><span>Date and time</span><input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label></div>{!valid ? <p className="form-error">Select a food and check the portion range and macros.</p> : null}<label className="estimate-save-choice"><input type="checkbox" checked={saveToMyFoods} onChange={(event) => setSaveToMyFoods(event.target.checked)} /><span>Save to My foods for next time</span></label><button className="button button-primary" type="submit" disabled={!valid || saving || busy}>{saving ? "Adding…" : "Add to food log"}</button></> : null}
+        {items.length ? <><div className="photo-meal-total" aria-live="polite"><span>Estimated meal</span><strong>{valid ? number(totals.caloriesKcal) : "—"} kcal</strong>{valid && Math.round(minimumKcal) !== Math.round(maximumKcal) ? <small>{number(minimumKcal)}–{number(maximumKcal)} kcal range · midpoint logged</small> : null}</div><div className="photo-item-macros"><span>Protein {valid ? number(totals.proteinG) : "—"} g</span><span>Carbs {valid ? number(totals.carbohydrateG) : "—"} g</span><span>Fat {valid ? number(totals.fatG) : "—"} g</span></div><div className="form-grid"><label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as typeof mealType)}>{["breakfast", "lunch", "dinner", "snack"].map((meal) => <option key={meal} value={meal}>{meal[0]?.toUpperCase()}{meal.slice(1)}</option>)}</select></label><label className="field"><span>Date and time</span><input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label></div>{!valid ? <p className="form-error">Select a food and check the portion range and macros.</p> : null}<button className="button button-primary" type="submit" disabled={!valid || saving || busy}>{saving ? "Adding…" : "Add to food log"}</button></> : null}
       </fieldset>
     </form> : null}
   </section>;

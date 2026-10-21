@@ -30,7 +30,7 @@ Serving counts use the existing JSON food-log records and do not require a datab
 
 Search the database first. If **All foods** returns no match, tap **Estimate “curd rice” with AI**, then add optional amount/recipe details such as “one bowl” or “300–400 g, not sure.” Tap **Estimate meal** to generate a draft. Typing, database searches, and opening the form do not call AI.
 
-Text and photo estimates use the same editable review cards, Sure/Not sure portions, optional follow-up questions, and direct log confirmation. Check **Save to My foods for next time** to save the selected foods privately along with the log. They appear in All foods and Recent for ordinary logging without another AI call. Cached nutrition is marked as an estimate in search, serving details, and future log entries. It is not published into the shared reviewed catalog. New recipe variants can be saved separately.
+Text and photo estimates use the same editable review cards, Sure/Not sure portions, optional follow-up questions, and direct log confirmation. Confirming the meal automatically saves the selected foods privately to **My foods** along with the log; there is no extra checkbox. They appear in All foods and Recent for ordinary logging without another AI call. Cached nutrition is marked as an estimate in search, serving details, and future log entries. It is not published into the shared reviewed catalog. New recipe variants can be saved separately.
 
 ## Photo meal logging
 

@@ -815,5 +815,3 @@ a { color: inherit; text-decoration: none; }
 
 .text-estimate-trigger { width: 100%; margin-bottom: 10px; white-space: normal; overflow-wrap: anywhere; }
 .text-estimate-setup { display: grid; gap: 14px; margin-top: 16px; }
-.estimate-save-choice { display: flex; gap: 10px; align-items: center; min-height: 48px; font-size: 14px; }
-.estimate-save-choice input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: #91c52d; }

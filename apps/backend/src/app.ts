@@ -979,18 +979,16 @@ app.post("/v1/food-logs/photo", bodyLimit({
     )).limit(1);
     if (!run || (run.inputSnapshot.inputType ?? "photo") !== draft.inputType) return { status: "draft_missing" as const, idempotent: false };
     for (const record of records) {
-      if (parsed.data.saveToMyFoods) {
-        await tx.insert(userFoods).values({
-          id: record.data.foodId, userId, name: record.data.foodName, category: "prepared_meal",
-          aliases: draft.inputType === "text" && draft.foodName && draft.estimate.items.length === 1
-            && draft.foodName.toLocaleLowerCase() !== record.data.foodName.toLocaleLowerCase() ? [draft.foodName] : [],
-          caloriesKcalPer100g: record.data.nutritionPer100g.caloriesKcal.toFixed(2),
-          proteinGPer100g: record.data.nutritionPer100g.proteinG.toFixed(2),
-          carbohydrateGPer100g: record.data.nutritionPer100g.carbohydrateG.toFixed(2),
-          fatGPer100g: record.data.nutritionPer100g.fatG.toFixed(2),
-          sourceNote: `${SAVED_AI_FOOD_PREFIX} ${draft.inputType}; ${draft.model}. Confirm recipe and portion before reuse.`,
-        });
-      }
+      await tx.insert(userFoods).values({
+        id: record.data.foodId, userId, name: record.data.foodName, category: "prepared_meal",
+        aliases: draft.inputType === "text" && draft.foodName && draft.estimate.items.length === 1
+          && draft.foodName.toLocaleLowerCase() !== record.data.foodName.toLocaleLowerCase() ? [draft.foodName] : [],
+        caloriesKcalPer100g: record.data.nutritionPer100g.caloriesKcal.toFixed(2),
+        proteinGPer100g: record.data.nutritionPer100g.proteinG.toFixed(2),
+        carbohydrateGPer100g: record.data.nutritionPer100g.carbohydrateG.toFixed(2),
+        fatGPer100g: record.data.nutritionPer100g.fatG.toFixed(2),
+        sourceNote: `${SAVED_AI_FOOD_PREFIX} ${draft.inputType}; ${draft.model}. Confirm recipe and portion before reuse.`,
+      });
       await tx.insert(userRecords).values({ userId, entity: "food_log", recordId: record.id, version: 1, data: record.data, deleted: false, serverUpdatedAt: new Date() });
       await appendSyncChange(tx, userId, "food_log", record.id, record.data);
     }

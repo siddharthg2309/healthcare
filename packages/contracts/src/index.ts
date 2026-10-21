@@ -207,7 +207,8 @@ export const confirmFoodPhotoRequestSchema = z.object({
   requestId: uuidSchema,
   draftToken: z.string().min(40).max(20000),
   occurredAt: isoDateTime,
-  saveToMyFoods: z.boolean().default(false),
+  // Accept the old checkbox field, but always save confirmed estimates for reuse.
+  saveToMyFoods: z.boolean().optional().transform(() => true),
   mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
   items: z.array(z.object({
     index: z.number().int().min(0).max(5),
