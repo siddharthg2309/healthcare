@@ -26,6 +26,12 @@ Calorie estimates use a versioned MET calculation from the [2024 Compendium](htt
 
 Serving counts use the existing JSON food-log records and do not require a database migration. The API validates the chosen portion against its owner and food, checks the total grams against the count, and calculates nutrition. Existing gram-only logs remain supported.
 
+## Food macro totals
+
+Home and Food show consumed protein, carbs, and fat from the same daily food-log totals, displayed to one decimal place. Home shows macro goals separately under **Goal**; these are targets, not consumed totals. Calorie totals use the same whole-kcal display rounding on both screens. Every food-log entry shows protein, carbs, and fat for its logged portion from the saved nutrition snapshot, including AI-estimated and recipe entries. Editing the logged quantity updates that snapshot through the existing API and refreshes the daily totals.
+
+This UI correction needs no environment changes, database migration, or model calls. Build, typecheck, browser checks, and runtime verification remain skipped at the owner's request.
+
 ## Cardio screenshots and workout calories
 
 Under **Activity → Walk / Cardio**, optionally upload a Strava screenshot or photograph a treadmill/machine display. Check the extracted minutes, activity type, distance, and reported calories; edit anything unclear and tap **Save reviewed activity**. Photos are read by the configured Google AI service and are not stored by this app. Manual logging remains available.

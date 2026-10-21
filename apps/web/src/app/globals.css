@@ -1002,3 +1002,11 @@ a { color: inherit; text-decoration: none; }
 .cardio-photo-import .activity-note-details p { font-size: 12px; line-height: 1.65; }
 .cardio-photo-import .text-button { min-height: 44px; font-size: 12px; text-align: left; }
 @media (max-width: 350px) { .cardio-photo-import .form-grid { grid-template-columns: 1fr; } }
+
+
+.macro-row .macro-target { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.food-entry-macros { flex: 1 0 100%; min-width: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 4px 0 0; padding-left: 38px; }
+.food-entry-macros > div { min-width: 0; padding: 8px; border-radius: 10px; background: var(--surface-soft); }
+.food-entry-macros dt { font-size: 11px; color: var(--muted); }
+.food-entry-macros dd { margin: 4px 0 0; font-size: 13px; font-weight: 650; color: var(--ink); overflow-wrap: anywhere; }
+@media (max-width: 350px) { .food-entry-macros { padding-left: 0; } }

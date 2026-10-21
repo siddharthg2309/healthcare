@@ -875,6 +875,11 @@ function FoodLogEntry({ item, onChanged }: { item: FoodLog; onChanged: () => Pro
       <span className="meal-badge">{item.data.mealType.slice(0, 1).toUpperCase()}</span>
       <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams, 2)} g{item.data.portionLabel ? ` (${item.data.portionCount && item.data.portionCount !== 1 ? `${item.data.portionCount} × ` : ""}${item.data.portionLabel})` : ""} · {formatClock(item.data.occurredAt)}</small>{estimate || item.data.nutritionProvenance === "ai_estimate" ? <small className="photo-log-estimate">Estimated{estimate && estimate.minimumGrams !== estimate.maximumGrams ? ` · ${formatNumber(estimate.minimumGrams)}–${formatNumber(estimate.maximumGrams)} g` : ""}{estimate?.certainty === "not_sure" ? " · not sure" : ""}</small> : null}</span>
       <strong>{formatNumber(item.data.nutritionTotal.caloriesKcal)}<small> kcal</small></strong>
+      <dl className="food-entry-macros" aria-label="Macros for this logged portion">
+        <div><dt>Protein</dt><dd>{formatNumber(item.data.nutritionTotal.proteinG, 1)} g</dd></div>
+        <div><dt>Carbs</dt><dd>{formatNumber(item.data.nutritionTotal.carbohydrateG, 1)} g</dd></div>
+        <div><dt>Fat</dt><dd>{formatNumber(item.data.nutritionTotal.fatG, 1)} g</dd></div>
+      </dl>
       <div className="entry-actions"><button type="button" className="quiet-button" onClick={() => { setError(""); setEditing((current) => !current); }} disabled={busy}>{editing ? "Close" : "Edit"}</button><button type="button" className="quiet-button entry-delete" onClick={() => void remove()} disabled={busy}>Delete</button></div>
     </div>
     {editing ? <form className="food-log-edit" onSubmit={(event) => void save(event)}>

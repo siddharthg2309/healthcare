@@ -309,10 +309,10 @@ function HomeView({ onWeeklyReview, onSaved, profile, overview, goal, measuremen
         </article>
         <article className="panel intake-panel">
           <div className="panel-heading"><div><h2>Food</h2></div><span className="panel-symbol">◉</span></div>
-          <div className="metric-main">{day?.foodTotals.caloriesKcal.toLocaleString("en-IN") ?? "—"}<small> / {kcal?.toLocaleString("en-IN") ?? "—"} kcal</small></div>
+          <div className="metric-main">{day?.foodTotals.caloriesKcal.toLocaleString("en-IN", { maximumFractionDigits: 0 }) ?? "—"}<small> / {kcal?.toLocaleString("en-IN") ?? "—"} kcal</small></div>
           <p className="muted-copy">{day ? day.foodDayComplete ? "Day complete" : day.foodLogs.length ? `${day.foodLogs.length} foods logged` : "No food logged yet" : "Unable to load today"}</p>
           {kcal ? <div className="intake-progress" role="progressbar" aria-label="Calories logged toward daily target" aria-valuenow={Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))}%` }} /></div> : null}
-          {goal.macrosGrams ? <div className="macro-mini"><Macro label="Protein" value={goal.macrosGrams.protein} color="green" /><Macro label="Carbs" value={goal.macrosGrams.carbohydrate} color="gold" /><Macro label="Fat" value={goal.macrosGrams.fat} color="blue" /></div> : null}
+          <div className="macro-mini" aria-label="Macros consumed today"><Macro label="Protein" value={day?.foodTotals.proteinG ?? null} target={goal.macrosGrams?.protein} color="green" /><Macro label="Carbs" value={day?.foodTotals.carbohydrateG ?? null} target={goal.macrosGrams?.carbohydrate} color="gold" /><Macro label="Fat" value={day?.foodTotals.fatG ?? null} target={goal.macrosGrams?.fat} color="blue" /></div>
         </article>
         <article className="panel movement-panel">
           <div className="panel-heading"><div><h2>Activity</h2></div><span className="panel-symbol">↗</span></div>
@@ -700,8 +700,9 @@ function progressSummary(goal: StoredGoal, latest: Measurement, timezone: string
   return `Latest weigh-in: ${latest.data.weightKg.toFixed(1)} kg on ${formatDate(date)}; target path that day: ${target.toFixed(1)} kg (${relation}).`;
 }
 
-function Macro({ label, value, color }: { label: string; value: number; color: string }) {
-  return <div className="macro-row"><span><i className={`macro-dot macro-${color}`} />{label}</span><strong>{value} g</strong></div>;
+function Macro({ label, value, target, color }: { label: string; value: number | null; target?: number; color: string }) {
+  const formatGrams = (grams: number) => new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 }).format(grams);
+  return <div className="macro-row"><span><i className={`macro-dot macro-${color}`} />{label}</span><strong>{value === null ? "—" : `${formatGrams(value)} g`}</strong>{target !== undefined ? <small className="macro-target">Goal {formatGrams(target)} g</small> : null}</div>;
 }
 
 function dayGreeting(): string {
