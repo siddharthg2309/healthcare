@@ -24,6 +24,7 @@ import {
   deleteFoodLogRequestSchema,
   exerciseProgressQuerySchema,
   foodPhotoRecognitionRequestSchema,
+  confirmFoodPhotoRequestSchema,
   setFoodFavoriteRequestSchema,
   foodDayStatusRequestSchema,
   foodLogRecordSchema,
@@ -63,6 +64,7 @@ import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
 import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
+import { buildPhotoFoodRecords, readFoodPhotoDraft, signFoodPhotoDraft } from "./services/food-photo-draft.js";
 import { buildActivityEnergyEstimate, createActivityEnergyEstimator } from "./services/activity-energy.js";
 import { hasAiOperationCapacity, lockAiUsageWindow } from "./services/ai-usage.js";
 import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
@@ -932,10 +934,10 @@ app.post("/v1/foods/recognize-photo", bodyLimit({
       status: "running",
       idempotencyKey: randomUUID(),
       inputHash: createHash("sha256").update(runId).digest("hex"),
-      inputSnapshot: { mimeType: parsed.data.mimeType, base64Characters: parsed.data.base64.length },
+      inputSnapshot: { mimeType: parsed.data.mimeType, base64Characters: parsed.data.base64.length, contextCharacters: parsed.data.context?.length ?? 0 },
       model: env.AI_MODEL,
-      promptVersion: "food-photo-v1",
-      schemaVersion: "food-photo-candidates-v1",
+      promptVersion: "food-photo-estimate-v2",
+      schemaVersion: "food-photo-estimate-v2",
     });
     return true;
   });
@@ -943,6 +945,7 @@ app.post("/v1/foods/recognize-photo", bodyLimit({
 
   try {
     const result = await recognizeFoodPhoto(parsed.data);
+    const draftToken = signFoodPhotoDraft(userId, runId, result.response);
     await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
       await tx.update(aiRuns).set({
@@ -953,7 +956,11 @@ app.post("/v1/foods/recognize-photo", bodyLimit({
         updatedAt: new Date(),
       }).where(and(eq(aiRuns.userId, userId), eq(aiRuns.id, runId)));
     });
-    return c.json(result.response);
+    return c.json({
+      ...result.response,
+      draftToken,
+      candidates: result.response.items.map((item) => ({ name: item.name, alternatives: [] })),
+    });
   } catch (error) {
     const code = error instanceof FoodVisionError ? error.code : "ai_provider_unavailable";
     await db.transaction(async (tx) => {
@@ -970,6 +977,50 @@ app.post("/v1/foods/recognize-photo", bodyLimit({
     if (error instanceof FoodVisionError) return c.json({ error: error.code }, error.status);
     return c.json({ error: "ai_provider_unavailable" }, 503);
   }
+});
+
+app.post("/v1/food-logs/photo", bodyLimit({
+  maxSize: 60000,
+  onError: (c) => c.json({ error: "payload_too_large" }, 413),
+}), async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "invalid_request" }, 400); }
+  const parsed = confirmFoodPhotoRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_photo_food_log" }, 400);
+  const userId = c.get("session").user.id;
+  const draft = readFoodPhotoDraft(parsed.data.draftToken, userId);
+  if (!draft) return c.json({ error: "photo_draft_unavailable" }, 409);
+  if (parsed.data.items.some((item) => !draft.estimate.items[item.index])) return c.json({ error: "invalid_photo_item" }, 400);
+  const records = buildPhotoFoodRecords(draft, parsed.data);
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"photo-log:" + userId + ":" + parsed.data.requestId}, 0))`);
+    const existing = await tx.select({ id: userRecords.recordId, data: userRecords.data, deleted: userRecords.deleted }).from(userRecords).where(and(
+      eq(userRecords.userId, userId), eq(userRecords.entity, "food_log"),
+      sql`${userRecords.data}->'photoEstimate'->>'requestId' = ${parsed.data.requestId}`,
+      sql`${userRecords.data}->>'foodId' = ${userRecords.recordId}::text`,
+    ));
+    if (existing.length) {
+      const same = existing.length === records.length && records.every((record) => {
+        const found = existing.find((row) => row.id === record.id);
+        const prior = foodLogRecordSchema.safeParse(found?.data);
+        return found && !found.deleted && prior.success && JSON.stringify(prior.data) === JSON.stringify(record.data);
+      });
+      return { status: same ? "saved" as const : "conflict" as const, idempotent: same };
+    }
+    const [run] = await tx.select({ id: aiRuns.id }).from(aiRuns).where(and(
+      eq(aiRuns.userId, userId), eq(aiRuns.id, draft.runId), eq(aiRuns.kind, "food_vision"), eq(aiRuns.status, "completed"),
+    )).limit(1);
+    if (!run) return { status: "draft_missing" as const, idempotent: false };
+    for (const record of records) {
+      await tx.insert(userRecords).values({ userId, entity: "food_log", recordId: record.id, version: 1, data: record.data, deleted: false, serverUpdatedAt: new Date() });
+      await appendSyncChange(tx, userId, "food_log", record.id, record.data);
+    }
+    return { status: "saved" as const, idempotent: false };
+  });
+  if (result.status === "conflict") return c.json({ error: "food_log_id_conflict" }, 409);
+  if (result.status === "draft_missing") return c.json({ error: "photo_draft_unavailable" }, 409);
+  return c.json({ count: records.length, idempotent: result.idempotent }, result.idempotent ? 200 : 201);
 });
 
 app.post("/v1/foods/custom", async (c) => {
@@ -1633,6 +1684,9 @@ app.patch("/v1/food-logs/:id", async (c) => {
     const factor = quantityGrams / 100;
     const data = foodLogRecordSchema.parse({
       ...prior.data,
+      ...(prior.data.photoEstimate && quantityChanged ? { photoEstimate: {
+        ...prior.data.photoEstimate, minimumGrams: parsed.data.quantityGrams, maximumGrams: parsed.data.quantityGrams, userAdjusted: true,
+      } } : {}),
       occurredAt: parsed.data.occurredAt ?? prior.data.occurredAt,
       mealType: parsed.data.mealType ?? prior.data.mealType,
       quantityGrams,

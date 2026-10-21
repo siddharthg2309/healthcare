@@ -1,0 +1,219 @@
+"use client";
+
+import { useRef, useState, type FormEvent } from "react";
+import { confirmFoodPhotoRequestSchema, foodPhotoRecognitionResponseSchema, photoNutritionSchema, type FoodPhotoRecognitionRequest, type FoodPhotoRecognitionResponse, type FoodLogRecord } from "@healthcare/contracts";
+import { ApiError, postJson } from "@/lib/api";
+import { AppIcon } from "./app-icon";
+
+type Nutrition = FoodPhotoRecognitionResponse["items"][number]["nutritionPer100g"];
+type ReviewItem = { index: number; included: boolean; name: string; minimum: string; maximum: string; certainty: "sure" | "not_sure"; nutrition: Record<keyof Nutrition, string> };
+const nutrientFields: Array<{ key: keyof Nutrition; label: string; unit: string }> = [
+  { key: "caloriesKcal", label: "Calories", unit: "kcal" }, { key: "proteinG", label: "Protein", unit: "g" },
+  { key: "carbohydrateG", label: "Carbs", unit: "g" }, { key: "fatG", label: "Fat", unit: "g" },
+];
+const number = (value: number) => Number.isFinite(value) ? new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 }).format(value) : "—";
+
+async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest> {
+  if (!file.type.startsWith("image/")) throw new Error("Choose an image file.");
+  if (file.size > 20_000_000) throw new Error("Choose a photo smaller than 20 MB.");
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    let maxEdge = 1440;
+    let quality = 0.82;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("This browser could not prepare the photo.");
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+      const compressed = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, "image/jpeg", quality);
+      });
+      if (!compressed) throw new Error("This browser could not prepare the photo.");
+      if (compressed.size <= 2_500_000) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => typeof reader.result === "string"
+            ? resolve(reader.result)
+            : reject(new Error("This browser could not read the photo."));
+          reader.onerror = () => reject(new Error("This browser could not read the photo."));
+          reader.readAsDataURL(compressed);
+        });
+        return { mimeType: "image/jpeg", base64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
+      }
+      maxEdge = Math.round(maxEdge * 0.78);
+      quality = Math.max(0.5, quality - 0.1);
+    }
+  } finally {
+    bitmap.close();
+  }
+  throw new Error("The photo is still too large after compression. Choose another photo.");
+}
+
+
+export function FoodPhotoLogger({ defaultMealType, defaultOccurredAt, onSaved, onReviewChange }: {
+  defaultMealType: FoodLogRecord["mealType"]; defaultOccurredAt: string;
+  onSaved: () => Promise<void>; onReviewChange: (open: boolean) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const pendingSave = useRef<{ fingerprint: string; id: string } | null>(null);
+  const [image, setImage] = useState<FoodPhotoRecognitionRequest | null>(null);
+  const [result, setResult] = useState<FoodPhotoRecognitionResponse | null>(null);
+  const [items, setItems] = useState<ReviewItem[]>([]);
+  const [context, setContext] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [refinements, setRefinements] = useState(0);
+  const [answers, setAnswers] = useState<string[]>([]);
+  const [mealType, setMealType] = useState(defaultMealType);
+  const [occurredAt, setOccurredAt] = useState(defaultOccurredAt);
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  function resetReview() {
+    setImage(null); setResult(null); setItems([]); setAnswer(""); setRefinements(0); setAnswers([]);
+    pendingSave.current = null; onReviewChange(false);
+  }
+
+  function update(index: number, change: Partial<ReviewItem>) {
+    setItems((current) => current.map((item) => item.index === index ? { ...item, ...change } : item));
+  }
+
+  async function analyze(photo: FoodPhotoRecognitionRequest, details: string) {
+    const response = await postJson<unknown>("/v1/foods/recognize-photo", { ...photo, context: details });
+    const parsed = foodPhotoRecognitionResponseSchema.safeParse(response);
+    if (!parsed.success) throw new Error("Photo estimates are not available in this deployment yet. Refresh after deployment.");
+    setResult(parsed.data);
+    setItems(parsed.data.items.map((item, index) => ({
+      index, included: true, name: item.name, minimum: String(item.minimumGrams), maximum: String(item.maximumGrams), certainty: "not_sure",
+      nutrition: { caloriesKcal: String(item.nutritionPer100g.caloriesKcal), proteinG: String(item.nutritionPer100g.proteinG), carbohydrateG: String(item.nutritionPer100g.carbohydrateG), fatG: String(item.nutritionPer100g.fatG) },
+    })));
+    setAnswer(""); pendingSave.current = null;
+    onReviewChange(true);
+  }
+
+  function reportError(caught: unknown) {
+    const messages: Record<string, string> = {
+      ai_not_configured: "Photo estimates are unavailable. Try manual entry.",
+      ai_authentication_failed: "The photo service needs its connection updated.",
+      ai_credits_exhausted: "The photo service has no available credits.",
+      ai_access_denied: "The photo service cannot process this image.",
+      ai_model_unavailable: "The photo model is unavailable.",
+      ai_request_rejected: "Try another photo or use manual entry.",
+      ai_timeout: "The photo took too long. Try again.",
+      ai_invalid_response: "Could not estimate this meal. Try another angle.",
+      ai_provider_unavailable: "Photo estimates are temporarily unavailable.",
+      ai_rate_limited: "Photo estimates are busy. Try again shortly.",
+      ai_daily_limit_reached: "Today’s AI limit is reached. You can still edit and save an existing estimate.",
+      photo_draft_unavailable: "This estimate expired. Take or upload the photo again.",
+      invalid_photo_food_log: "Check the portion range and nutrition values.",
+      food_log_id_conflict: "This meal was already saved with different details. Refresh your log.",
+    };
+    setError(caught instanceof ApiError ? messages[caught.code] ?? "Could not complete this meal." : caught instanceof Error ? caught.message : "Could not complete this meal.");
+  }
+
+  async function pick(file: File) {
+    setBusy(true); setError(""); setNotice(""); resetReview();
+    try {
+      const photo = await prepareFoodPhoto(file);
+      setImage(photo);
+      await analyze(photo, context);
+    } catch (caught) { reportError(caught); }
+    finally { setBusy(false); }
+  }
+
+  async function refine() {
+    if (!image || !answer.trim() || refinements >= 2 || busy || saving) return;
+    setBusy(true); setError("");
+    const corrections = items.flatMap((item) => {
+      const original = result?.items[item.index];
+      if (!original || !item.included) return [];
+      const nutrition = values.find((value) => value.index === item.index)?.nutritionPer100g;
+      const changedNutrition = nutrition && nutrientFields.some(({ key }) => nutrition[key] !== original.nutritionPer100g[key]);
+      const changedPortion = Number(item.minimum) !== original.minimumGrams || Number(item.maximum) !== original.maximumGrams || item.certainty === "sure";
+      return item.name !== original.name || changedPortion || changedNutrition ? [{
+        food: item.name, ...(changedPortion ? { minimumGrams: item.minimum, maximumGrams: item.maximum, certainty: item.certainty } : {}),
+        ...(changedNutrition ? { userNutritionPer100g: nutrition } : {}),
+      }] : [];
+    });
+    const details = JSON.stringify({ initialDetails: context, question: result?.question, previousAnswers: answers, answer: answer.trim(), userCorrections: corrections }).slice(0, 4000);
+    setRefinements((count) => count + 1);
+    try { await analyze(image, details); setAnswers((current) => [...current, `${result?.question ?? "Meal details"}: ${answer.trim()}`]); }
+    catch (caught) { reportError(caught); }
+    finally { setBusy(false); }
+  }
+
+  const values = items.filter((item) => item.included).map((item) => {
+    const original = result?.items[item.index];
+    const nutrition = Object.fromEntries(nutrientFields.map(({ key }) => [key, item.nutrition[key].trim() ? Number(item.nutrition[key]) : original?.nutritionPer100g[key] ?? 0])) as Nutrition;
+    return { index: item.index, name: item.name.trim(), minimumGrams: Number(item.minimum), maximumGrams: Number(item.maximum), certainty: item.certainty, nutritionPer100g: nutrition };
+  });
+  const valid = values.length > 0 && values.every((item) => item.name && item.name.length <= 100
+    && Number.isFinite(item.minimumGrams) && item.minimumGrams >= 1 && item.maximumGrams >= item.minimumGrams && item.maximumGrams <= 5000
+    && photoNutritionSchema.safeParse(item.nutritionPer100g).success);
+  const totals = values.reduce((total, item) => {
+    const grams = Math.round((item.minimumGrams + item.maximumGrams) / 2 * 100) / 100;
+    for (const { key } of nutrientFields) total[key] += item.nutritionPer100g[key] * grams / 100;
+    return total;
+  }, { caloriesKcal: 0, proteinG: 0, carbohydrateG: 0, fatG: 0 });
+  const minimumKcal = values.reduce((sum, item) => sum + item.nutritionPer100g.caloriesKcal * item.minimumGrams / 100, 0);
+  const maximumKcal = values.reduce((sum, item) => sum + item.nutritionPer100g.caloriesKcal * item.maximumGrams / 100, 0);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!result || !valid || busy || saving) return;
+    setSaving(true); setError("");
+    try {
+      const payload = { draftToken: result.draftToken, mealType, occurredAt: new Date(occurredAt).toISOString(), items: values };
+      const fingerprint = JSON.stringify(payload);
+      const pending = pendingSave.current?.fingerprint === fingerprint ? pendingSave.current : { fingerprint, id: window.crypto.randomUUID() };
+      pendingSave.current = pending;
+      const request = confirmFoodPhotoRequestSchema.safeParse({ ...payload, requestId: pending.id });
+      if (!request.success) throw new Error("Check the portions, date, and nutrition values.");
+      const response = await postJson<{ count: number }>("/v1/food-logs/photo", request.data);
+      resetReview(); setNotice(`${response.count} ${response.count === 1 ? "food" : "foods"} added.`);
+      try { await onSaved(); } catch { setNotice("Food added. Refresh to update your totals."); }
+    } catch (caught) { reportError(caught); }
+    finally { setSaving(false); }
+  }
+
+  return <section className="photo-lookup" aria-label="Log a meal from a photo">
+    <input ref={input} type="file" accept="image/*" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void pick(file); }} />
+    <button className="button button-secondary photo-pick-button" type="button" disabled={busy || saving} onClick={() => input.current?.click()}><AppIcon name="camera" size={20} />{busy ? "Estimating meal…" : result ? "Use another photo" : "Camera or photo"}</button>
+    {!result ? <details className="photo-context"><summary>Add a detail · optional</summary><label className="field"><span>Food, amount, or recipe</span><textarea value={context} onChange={(event) => setContext(event.target.value)} maxLength={600} placeholder="2 dosas, less oil. Around 300–400 g, not sure." /></label></details> : null}
+    {busy ? <p className="photo-status" role="status">Estimating portions and nutrition…</p> : null}
+    {error ? <p className="form-error" role="alert">{error}</p> : null}
+    {notice ? <p className="form-message" role="status">{notice}</p> : null}
+    {result ? <form className="photo-meal-review" onSubmit={(event) => void save(event)}>
+      <div className="photo-review-heading"><h3>Review your meal</h3><button type="button" className="quiet-button" disabled={busy || saving} onClick={() => { resetReview(); setError(""); }}>Cancel</button></div>
+      {refinements < 2 ? <details className="photo-question" open={Boolean(result.question) || !result.items.length}><summary>{result.question ? "Quick question" : "Refine estimate · optional"}</summary><label className="field"><span>{result.question ?? "Food, portion, or cooking details"}</span><input value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={400} placeholder="Your answer, or “not sure”" disabled={busy || saving} /></label><button type="button" className="text-button" onClick={() => void refine()} disabled={!answer.trim() || busy || saving}>Update estimate</button></details> : null}
+      {!result.items.length ? <p className="muted-copy">No meal identified. Add a detail or try another photo.</p> : null}
+      <fieldset disabled={busy || saving} className="photo-review-fields">
+        {items.map((item) => {
+          const value = values.find((candidate) => candidate.index === item.index);
+          const grams = value ? Math.round((value.minimumGrams + value.maximumGrams) / 2 * 100) / 100 : 0;
+          const calories = value ? value.nutritionPer100g.caloriesKcal * grams / 100 : 0;
+          return <article key={item.index} className={`photo-meal-item${item.included ? "" : " photo-meal-item-excluded"}`}>
+            <div className="photo-item-heading"><label className="photo-include"><input type="checkbox" checked={item.included} onChange={(event) => update(item.index, { included: event.target.checked })} aria-label={`Include ${item.name}`} /><strong>{result.items[item.index]?.confidence === "low" ? "Rough estimate" : "Estimated"}</strong></label><span>{Number.isFinite(calories) ? number(calories) : "—"} kcal</span></div>
+            <fieldset className="photo-item-fields" disabled={!item.included}>
+            <label className="field"><span>Food</span><input value={item.name} maxLength={100} onChange={(event) => update(item.index, { name: event.target.value })} /></label>
+            <div className="photo-certainty" role="group" aria-label={`Portion certainty for ${item.name}`}>{(["sure", "not_sure"] as const).map((certainty) => <button key={certainty} type="button" aria-pressed={item.certainty === certainty} onClick={() => {
+              const midpoint = String(Math.round((Number(item.minimum) + Number(item.maximum)) / 2));
+              update(item.index, { certainty, ...(certainty === "sure" && Number.isFinite(Number(midpoint)) ? { minimum: midpoint, maximum: midpoint } : {}) });
+            }}>{certainty === "sure" ? "Sure" : "Not sure"}</button>)}</div>
+            <div className="form-grid"><label className="field"><span>{item.certainty === "sure" ? "Amount (g)" : "From (g)"}</span><input type="number" min="1" max="5000" step="any" inputMode="decimal" value={item.minimum} onChange={(event) => update(item.index, { minimum: event.target.value, ...(item.certainty === "sure" ? { maximum: event.target.value } : {}) })} /></label>{item.certainty === "not_sure" ? <label className="field"><span>To (g)</span><input type="number" min="1" max="5000" step="any" inputMode="decimal" value={item.maximum} onChange={(event) => update(item.index, { maximum: event.target.value })} /></label> : null}</div>
+            {value ? <div className="photo-item-macros"><span>Protein {number(value.nutritionPer100g.proteinG * grams / 100)} g</span><span>Carbs {number(value.nutritionPer100g.carbohydrateG * grams / 100)} g</span><span>Fat {number(value.nutritionPer100g.fatG * grams / 100)} g</span></div> : null}
+            <details><summary>Edit nutrition · per 100 g</summary><div className="form-grid">{nutrientFields.map(({ key, label, unit }) => <label key={key} className="field"><span>{label} ({unit})</span><input type="number" min="0" max={key === "caloriesKcal" ? 1000 : 100} step="any" inputMode="decimal" value={item.nutrition[key]} onChange={(event) => update(item.index, { nutrition: { ...item.nutrition, [key]: event.target.value } })} /></label>)}</div></details>
+            </fieldset>
+          </article>;
+        })}
+        {items.length ? <><div className="photo-meal-total" aria-live="polite"><span>Estimated meal</span><strong>{valid ? number(totals.caloriesKcal) : "—"} kcal</strong>{valid && Math.round(minimumKcal) !== Math.round(maximumKcal) ? <small>{number(minimumKcal)}–{number(maximumKcal)} kcal range · midpoint logged</small> : null}</div><div className="photo-item-macros"><span>Protein {valid ? number(totals.proteinG) : "—"} g</span><span>Carbs {valid ? number(totals.carbohydrateG) : "—"} g</span><span>Fat {valid ? number(totals.fatG) : "—"} g</span></div><div className="form-grid"><label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as typeof mealType)}>{["breakfast", "lunch", "dinner", "snack"].map((meal) => <option key={meal} value={meal}>{meal[0]?.toUpperCase()}{meal.slice(1)}</option>)}</select></label><label className="field"><span>Date and time</span><input type="datetime-local" required value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} /></label></div>{!valid ? <p className="form-error">Select a food and check the portion range and macros.</p> : null}<button className="button button-primary" type="submit" disabled={!valid || saving || busy}>{saving ? "Adding…" : "Add to food log"}</button></> : null}
+      </fieldset>
+    </form> : null}
+  </section>;
+}

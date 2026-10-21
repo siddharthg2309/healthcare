@@ -2,22 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
-  FoodPhotoRecognitionRequest,
-  FoodPhotoRecognitionResponse,
   CopyFoodLogsRequest,
   FoodPreferences,
+  FoodLogRecord,
   ActivityLogRecord,
   ActivityEnergyKind,
 } from "@healthcare/contracts";
 import { activityEnergyOptions, defaultActivityEnergyKind, estimateActivityEnergy, exerciseCatalog, findExerciseById, selectActivityWeight, summarizeActivityEnergy } from "@healthcare/domain";
 import type { WorkoutPlanSession, WorkoutPlanVersion } from "@healthcare/contracts";
 import {
-  ApiError,
   postJson,
   requestJson,
 } from "@/lib/api";
 import { MealPlansPanel } from "./meal-plans-panel";
-import { AppIcon } from "./app-icon";
+import { FoodPhotoLogger } from "./food-photo-logger";
 import { WorkoutPlansPanel } from "./workout-plans-panel";
 
 export type FoodOption = {
@@ -50,23 +48,7 @@ export type FoodOption = {
 type FoodPortion = { id: string; label: string; grams: number; isDefault: boolean };
 type PortionState = { key: string | null; portions: FoodPortion[]; loading: boolean; error: string };
 
-export type FoodLog = {
-  id: string;
-  version: number;
-  data: {
-    foodId: string;
-    foodSource: "shared_catalog" | "personal";
-    foodName: string;
-    category: string;
-    occurredAt: string;
-    mealType: "breakfast" | "lunch" | "dinner" | "snack";
-    quantityGrams: number;
-    portionCount?: number | null;
-    portionLabel?: string | null;
-    nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
-    nutritionTotal: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
-  };
-};
+export type FoodLog = { id: string; version: number; data: FoodLogRecord };
 
 export type ActivityLog = {
   id: string;
@@ -136,50 +118,9 @@ function formatNumber(value: number, digits = 0): string {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: digits }).format(value);
 }
 
-async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest> {
-  if (!file.type.startsWith("image/")) throw new Error("Choose an image file.");
-  if (file.size > 20_000_000) throw new Error("Choose a photo smaller than 20 MB.");
-
-  const bitmap = await createImageBitmap(file);
-  try {
-    let maxEdge = 1440;
-    let quality = 0.82;
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("This browser could not prepare the photo.");
-      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-
-      const compressed = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob(resolve, "image/jpeg", quality);
-      });
-      if (!compressed) throw new Error("This browser could not prepare the photo.");
-      if (compressed.size <= 2_500_000) {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => typeof reader.result === "string"
-            ? resolve(reader.result)
-            : reject(new Error("This browser could not read the photo."));
-          reader.onerror = () => reject(new Error("This browser could not read the photo."));
-          reader.readAsDataURL(compressed);
-        });
-        return { mimeType: "image/jpeg", base64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
-      }
-      maxEdge = Math.round(maxEdge * 0.78);
-      quality = Math.max(0.5, quality - 0.1);
-    }
-  } finally {
-    bitmap.close();
-  }
-  throw new Error("The photo is still too large after compression. Choose another photo.");
-}
 
 export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTrackingProps) {
   const [foodView, setFoodView] = useState<"log" | "plan">("log");
-  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const foodDialogRef = useRef<HTMLDialogElement | null>(null);
   const pendingFoodLog = useRef<{ signature: string; id: string } | null>(null);
   const [servingCount, setServingCount] = useState("1");
@@ -205,9 +146,7 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
   const [showCustomFood, setShowCustomFood] = useState(false);
   const [showRecipe, setShowRecipe] = useState(false);
   const [recipeToEdit, setRecipeToEdit] = useState<FoodOption | null>(null);
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const [photoError, setPhotoError] = useState("");
-  const [photoResult, setPhotoResult] = useState<FoodPhotoRecognitionResponse | null>(null);
+  const [photoReviewActive, setPhotoReviewActive] = useState(false);
   const selectedFoodId = selectedFood?.id ?? null;
   const selectedFoodSource = selectedFood?.source ?? null;
   const selectedFoodKey = selectedFoodId && selectedFoodSource ? `${selectedFoodSource}:${selectedFoodId}` : null;
@@ -253,36 +192,6 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
     });
     return () => controller.abort();
   }, [selectedFoodId, selectedFoodSource]);
-
-  async function recognizePhoto(file: File) {
-    setPhotoBusy(true);
-    setPhotoError("");
-    setPhotoResult(null);
-    try {
-      const image = await prepareFoodPhoto(file);
-      const result = await postJson<FoodPhotoRecognitionResponse>("/v1/foods/recognize-photo", image);
-      setPhotoResult(result);
-    } catch (caught) {
-      const messages: Record<string, string> = {
-        ai_not_configured: "Photo search is unavailable. Search by name for now.",
-        ai_credits_exhausted: "Photo search is paused. The app’s AI account needs more credits.",
-        ai_authentication_failed: "Photo search needs its AI connection updated. Search by name for now.",
-        ai_access_denied: "The AI account cannot process this photo. Search by name for now.",
-        ai_model_unavailable: "The photo model is unavailable. Search by name for now.",
-        ai_request_rejected: "The photo could not be processed. Try another photo or search by name.",
-        ai_timeout: "Photo search took too long. Try again.",
-        ai_invalid_response: "Could not read this photo. Try another angle or search by name.",
-        ai_provider_unavailable: "Photo search is temporarily unavailable. Try again later.",
-        ai_rate_limited: "Photo search is busy. Try again shortly.",
-        ai_daily_limit_reached: "You’ve reached today’s AI limit. Search by name or try again later.",
-      };
-      setPhotoError(caught instanceof ApiError
-        ? messages[caught.code] ?? "Could not recognize this photo. Try again."
-        : caught instanceof Error ? caught.message : "Could not recognize this photo.");
-    } finally {
-      setPhotoBusy(false);
-    }
-  }
 
   const count = Number(servingCount);
   const quantityGrams = Math.round(Number(quantity) * count * 100) / 100;
@@ -475,61 +384,18 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
       {foodView === "log" ? <section className="tracking-grid">
         <div className="panel food-entry-panel">
           <div className="panel-heading"><h2>Add food</h2></div>
-          <label className="field food-search-field" htmlFor="food-search"><span className="sr-only">Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); selectFood(null); }} placeholder="Search dosa, rice, paneer…" autoComplete="off" /></label>
+          {!photoReviewActive ? <><label className="field food-search-field" htmlFor="food-search"><span className="sr-only">Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); selectFood(null); }} placeholder="Search dosa, rice, paneer…" autoComplete="off" /></label>
           <div className="food-search-filters" role="group" aria-label="Filter food search results">
             {(["all", "favorites", "recent"] as const).map((filter) => <button type="button" key={filter} aria-pressed={foodFilter === filter} className={foodFilter === filter ? "food-filter-active" : ""} onClick={() => setFoodFilter(filter)}>
               {filter === "all" ? "All foods" : filter === "favorites" ? "Favorites" : "Recent"}
             </button>)}
           </div>
-          <section className="photo-lookup" aria-label="Add food from a photo">
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              hidden
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = "";
-                if (file) void recognizePhoto(file);
-              }}
-            />
-            <button
-              className="button button-secondary photo-pick-button"
-              type="button"
-              disabled={photoBusy}
-              onClick={() => photoInputRef.current?.click()}
-            >
-              <AppIcon name="camera" size={20} />{photoBusy ? "Checking photo…" : "Camera or photo"}
-            </button>
-            {photoBusy ? <p className="photo-status" role="status">Looking for visible foods…</p> : null}
-            {photoError ? <p className="form-error" role="alert">{photoError}</p> : null}
-            {photoResult ? <div className="photo-suggestions" aria-live="polite">
-              {photoResult.candidates.length ? photoResult.candidates.map((candidate) => (
-                <div className="photo-candidate" key={candidate.name}>
-                  <div className="photo-candidate-choices">
-                    {[candidate.name, ...candidate.alternatives].map((name, index) => (
-                      <button
-                        type="button"
-                        key={name}
-                        className={index === 0 ? "photo-candidate-primary" : ""}
-                        onClick={() => {
-                          setQuery(name);
-                          selectFood(null);
-                          setMessage("");
-                        }}
-                      >
-                        {name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )) : <div className="empty-inline"><strong>No clear food match</strong><span>Search the catalog by name or try another photo.</span></div>}
-            </div> : null}
-          </section>
-          {loading ? <p className="muted-copy">Searching your foods…</p> : null}
+          </> : null}
+          <FoodPhotoLogger defaultMealType={mealType} defaultOccurredAt={occurredAt} onSaved={onSaved} onReviewChange={setPhotoReviewActive} />
+          {!photoReviewActive && loading ? <p className="muted-copy">Searching your foods…</p> : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
           {favoriteError ? <p className="form-error" role="alert">{favoriteError}</p> : null}
-          {!loading && foods.length ? <div className="food-results" role="list" aria-label="Food search results">
+          {!photoReviewActive && !loading && foods.length ? <div className="food-results" role="list" aria-label="Food search results">
             {foods.map((food) => {
               const key = `${food.source}:${food.id}`;
               const selected = selectedFood?.id === food.id && selectedFood.source === food.source;
@@ -544,14 +410,15 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
               </div>;
             })}
           </div> : null}
-          {!loading && !foods.length && !error ? <div className="empty-inline"><strong>{foodFilter === "favorites" ? "No favorites match" : foodFilter === "recent" ? "No recent foods match" : "No match yet"}</strong><span>{foodFilter === "favorites" ? "Star foods from All foods to keep them here." : foodFilter === "recent" ? "Foods you log will appear here for quick access." : "Add it as a personal food from its nutrition label or recipe."}</span></div> : null}
-          <div className="food-create-actions">
+          {!photoReviewActive && !loading && !foods.length && !error ? <div className="empty-inline"><strong>{foodFilter === "favorites" ? "No favorites match" : foodFilter === "recent" ? "No recent foods match" : "No match yet"}</strong><span>{foodFilter === "favorites" ? "Star foods from All foods to keep them here." : foodFilter === "recent" ? "Foods you log will appear here for quick access." : "Add it as a personal food from its nutrition label or recipe."}</span></div> : null}
+          {!photoReviewActive ? <><div className="food-create-actions">
             <button type="button" className="text-button add-custom-trigger" onClick={() => { setShowCustomFood((current) => !current); setShowRecipe(false); }}>{showCustomFood ? "Close personal food form" : "＋ Add a personal food"}</button>
             <button type="button" className="text-button add-custom-trigger" onClick={() => { const next = !showRecipe; setShowRecipe(next); setRecipeToEdit(null); setShowCustomFood(false); }}>{showRecipe ? "Close recipe builder" : "＋ Build a recipe"}</button>
           </div>
           {showCustomFood ? <CustomFoodForm onCreated={customFoodCreated} onCancel={() => setShowCustomFood(false)} /> : null}
           {showRecipe ? <RecipeComposer key={recipeToEdit?.id ?? "new-recipe"} initialRecipe={recipeToEdit ?? undefined} onCreated={recipeCreated} onCancel={() => { setShowRecipe(false); setRecipeToEdit(null); }} /> : null}
 
+          </> : null}
           {selectedFood ? <dialog className="food-detail-sheet" ref={foodDialogRef} aria-labelledby="food-detail-title" onCancel={(event) => { event.preventDefault(); selectFood(null); }} onClick={(event) => { if (event.target === event.currentTarget) selectFood(null); }}>
             <form className="selected-food-form" onSubmit={(event) => void saveFood(event)}>
               <div className="sheet-handle" aria-hidden="true" />
@@ -993,7 +860,7 @@ function FoodLogEntry({ item, onChanged }: { item: FoodLog; onChanged: () => Pro
   return <div className="food-log-entry">
     <div className="daily-entry">
       <span className="meal-badge">{item.data.mealType.slice(0, 1).toUpperCase()}</span>
-      <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams, 2)} g{item.data.portionLabel ? ` (${item.data.portionCount && item.data.portionCount !== 1 ? `${item.data.portionCount} × ` : ""}${item.data.portionLabel})` : ""} · {formatClock(item.data.occurredAt)}</small></span>
+      <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams, 2)} g{item.data.portionLabel ? ` (${item.data.portionCount && item.data.portionCount !== 1 ? `${item.data.portionCount} × ` : ""}${item.data.portionLabel})` : ""} · {formatClock(item.data.occurredAt)}</small>{item.data.photoEstimate ? <small className="photo-log-estimate">Estimated{item.data.photoEstimate.minimumGrams !== item.data.photoEstimate.maximumGrams ? ` · ${formatNumber(item.data.photoEstimate.minimumGrams)}–${formatNumber(item.data.photoEstimate.maximumGrams)} g` : ""}{item.data.photoEstimate.certainty === "not_sure" ? " · not sure" : ""}</small> : null}</span>
       <strong>{formatNumber(item.data.nutritionTotal.caloriesKcal)}<small> kcal</small></strong>
       <div className="entry-actions"><button type="button" className="quiet-button" onClick={() => { setError(""); setEditing((current) => !current); }} disabled={busy}>{editing ? "Close" : "Edit"}</button><button type="button" className="quiet-button entry-delete" onClick={() => void remove()} disabled={busy}>Delete</button></div>
     </div>

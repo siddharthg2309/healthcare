@@ -166,15 +166,52 @@ export const copyFoodLogsRequestSchema = z.object({
 export const foodPhotoRecognitionRequestSchema = z.object({
   mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
   base64: z.string().min(128).max(3_333_336).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  context: z.string().trim().max(4000).optional(),
 }).strict();
 
-export const foodPhotoRecognitionResponseSchema = z.object({
+export const photoNutritionSchema = z.object({
+  caloriesKcal: z.number().finite().min(0).max(1000),
+  proteinG: z.number().finite().min(0).max(100),
+  carbohydrateG: z.number().finite().min(0).max(100),
+  fatG: z.number().finite().min(0).max(100),
+}).strict().refine((value) => value.proteinG + value.carbohydrateG + value.fatG <= 105, "Check macros per 100 g.");
+
+export const foodPhotoEstimateSchema = z.object({
+  items: z.array(z.object({
+    name: z.string().trim().min(1).max(100),
+    minimumGrams: z.number().finite().min(1).max(5000),
+    maximumGrams: z.number().finite().min(1).max(5000),
+    confidence: z.enum(["high", "medium", "low"]),
+    nutritionPer100g: photoNutritionSchema,
+  }).strict().refine((item) => item.minimumGrams <= item.maximumGrams, "Check the portion range.")).max(6),
+  question: z.string().trim().min(1).max(240).nullable(),
+  note: z.string().trim().max(240).nullable(),
+}).strict();
+
+export const foodPhotoRecognitionResponseSchema = foodPhotoEstimateSchema.extend({
+  draftToken: z.string().min(40).max(20000),
+  // Older open clients can still read the previous candidate response.
   candidates: z.array(z.object({
     name: z.string().trim().min(1).max(100),
     alternatives: z.array(z.string().trim().min(1).max(100)).max(3),
   }).strict()).max(6),
-  note: z.string().trim().max(240).nullable(),
 }).strict();
+
+export const confirmFoodPhotoRequestSchema = z.object({
+  requestId: uuidSchema,
+  draftToken: z.string().min(40).max(20000),
+  occurredAt: isoDateTime,
+  mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+  items: z.array(z.object({
+    index: z.number().int().min(0).max(5),
+    name: z.string().trim().min(1).max(100),
+    minimumGrams: z.number().finite().min(1).max(5000),
+    maximumGrams: z.number().finite().min(1).max(5000),
+    certainty: z.enum(["sure", "not_sure"]),
+    nutritionPer100g: photoNutritionSchema.optional(),
+  }).strict().refine((item) => item.minimumGrams <= item.maximumGrams, "Check the portion range.")
+    .refine((item) => item.certainty !== "sure" || item.minimumGrams === item.maximumGrams, "Enter one amount when sure.")).min(1).max(6),
+}).strict().refine((value) => new Set(value.items.map((item) => item.index)).size === value.items.length, "Duplicate photo items.");
 
 export const updateFoodLogRequestSchema = z.object({
   baseVersion: z.number().int().positive(),
@@ -247,7 +284,7 @@ export const nutritionSnapshotSchema = z.object({
 
 export const foodLogRecordSchema = z.object({
   foodId: uuidSchema,
-  foodSource: z.enum(["shared_catalog", "personal"]),
+  foodSource: z.enum(["shared_catalog", "personal", "photo_estimate"]),
   foodName: z.string().min(1).max(120),
   category: z.string().min(1).max(48),
   occurredAt: isoDateTime,
@@ -258,6 +295,17 @@ export const foodLogRecordSchema = z.object({
   portionCount: z.number().min(0.5).max(50).multipleOf(0.5).nullable().optional(),
   nutritionPer100g: nutritionSnapshotSchema,
   nutritionTotal: nutritionSnapshotSchema,
+  photoEstimate: z.object({
+    runId: uuidSchema,
+    model: z.string().min(1).max(100),
+    minimumGrams: z.number().finite().min(1).max(5000),
+    maximumGrams: z.number().finite().min(1).max(5000),
+    certainty: z.enum(["sure", "not_sure"]),
+    confidence: z.enum(["high", "medium", "low"]),
+    userAdjusted: z.boolean(),
+    requestId: uuidSchema,
+    itemIndex: z.number().int().min(0).max(5),
+  }).strict().optional(),
 }).strict();
 
 const workoutSetSchema = z.object({
@@ -787,6 +835,8 @@ export type CreateFoodLogRequest = z.infer<typeof createFoodLogRequestSchema>;
 export type CopyFoodLogsRequest = z.infer<typeof copyFoodLogsRequestSchema>;
 export type FoodPhotoRecognitionRequest = z.infer<typeof foodPhotoRecognitionRequestSchema>;
 export type FoodPhotoRecognitionResponse = z.infer<typeof foodPhotoRecognitionResponseSchema>;
+export type FoodPhotoEstimate = z.infer<typeof foodPhotoEstimateSchema>;
+export type ConfirmFoodPhotoRequest = z.infer<typeof confirmFoodPhotoRequestSchema>;
 export type UpdateFoodLogRequest = z.infer<typeof updateFoodLogRequestSchema>;
 export type FoodDayStatusRequest = z.infer<typeof foodDayStatusRequestSchema>;
 export type CreateCustomFoodRequest = z.infer<typeof createCustomFoodRequestSchema>;

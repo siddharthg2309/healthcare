@@ -142,7 +142,7 @@ Use four labeled bottom tabs: **Home, Food, Activity, Progress**. A visible add 
 | Home | Greeting, goal summary, compact hero graph, today's food totals, activity, next reminder |
 | Food | Day selector, meals, calories/macros, manual search and photo actions |
 | Food search | Search, favorites, recents, portion selector, source/preparation labels |
-| Photo review | Recognized candidates, uncertain items, manual search fallback, quantity confirmation |
+| Photo review | Editable foods, portion ranges, calories/macros, optional clarification, direct log confirmation |
 | Meal plan | Week overview, meal details, swaps, nutritional totals, approve/edit controls |
 | Activity | Today's workout, walking/cardio entries, steps and source, manual log controls |
 | Workout session | Exercises, sets/reps/load, rest timer, completion notes |
@@ -249,17 +249,16 @@ Examples such as home-cooked dal should have the user's recipe version instead o
 
 ### 5.5 Photo-assisted logging
 
-1. The person takes a photo or selects one through the Android picker.
-2. The app resizes/compresses it, corrects orientation, and removes unnecessary location metadata.
-3. Upload through a short-lived authenticated upload authorization to private object storage.
-4. A single Gemini vision operation returns visible food candidates, alternatives, and uncertainty notes.
-5. Match those labels to the stored catalog using normal search.
-6. The person confirms or changes each match and enters the quantity.
-7. Compute nutrition from confirmed catalog versions and quantities; save normally.
+Decision 0008 replaces name-only recognition with reviewed nutrition estimates:
 
-For mixed plates, show multiple selectable items. For hidden ingredients or uncertain dishes, ask for confirmation. Model-reported confidence is an uncalibrated hint, not permission to auto-log. Offer manual logging when photo upload/model recognition fails or no suitable match exists.
+1. Take or select a photo and optionally add food/recipe/count/portion details.
+2. Compress to at most 2.5 MB, then send it directly through the authenticated API to Gemini. App storage does not retain uploaded bytes.
+3. Return up to six estimated foods with a cooked gram range, confidence, and calories/protein/carbs/fat per 100 g. A useful clarification question is optional. Never claim that an image establishes exact nutrition or allergen safety.
+4. Review editable food names and select **Sure** (one amount) or **Not sure** (a range). Optional macro corrections are labeled per 100 g. The person can answer the clarification, including “not sure,” and request up to two refinements. Manual editing and confirmation do not use a model.
+5. Show computed per-item and meal nutrition immediately. For a gram range, the midpoint determines the logged amount; retain the range and uncertainty in the saved entry.
+6. One **Add to food log** action validates a signed, account-bound draft, applies user corrections, recomputes nutrition, and saves selected items atomically and idempotently. Do not require another catalog search.
 
-Default photo retention: delete temporary recognition photos after a short documented period, proposed as seven days, unless the person explicitly chooses to keep a photo with the log. Delete object files as well as database references. A saved log remains valid after its temporary photo is removed.
+Photo-derived nutrition is an estimate, never a reviewed catalog fact. Store it under `photo_estimate` in account-owned food-log JSON with model/run provenance, confidence, range, certainty, and correction status. Keep normal catalog logging and recipes available separately. No new storage or database migration is needed for this path. Raw images and free-text clarification context are not stored in the app database. Optional future photo retention would require a separate implemented consent/storage policy.
 
 ## 6. Workout and activity tracking
 
@@ -363,7 +362,7 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 | Contracts/domain | Shared Zod contracts and pure deterministic TypeScript services | Validate input/output independently of the model |
 | AI orchestration | Two bounded LangGraph workflows for meal and workout plans | Persisted state, explicit branches, bounded repair, and user approval |
 | Model access | Server adapter to Google AI Studio → Gemini 3.1 Flash-Lite | Multimodal model stays replaceable and its key never reaches the browser |
-| Food photos | Browser file picker plus private object storage when implemented | User confirms food and portion; the vision result only suggests candidates |
+| Food photos | Browser file picker plus private object storage when implemented | User reviews estimated food, portions, and nutrition before logging |
 | Calendar | Optional Google Calendar API through web OAuth | Cross-device schedule sync with explicit consent |
 | PWA cache | Service worker caches only the static shell and safe public assets | Avoids caching private health responses or authentication data |
 
@@ -456,7 +455,7 @@ Return a run ID only after the job is durably stored. The UI polls status while 
 | Operation | Model call? | Trigger and boundary |
 | --- | --- | --- |
 | Manual food search/log | No | Catalog lookup and numeric calculation |
-| Food photo recognition | Yes | Explicit photo submission; output candidates only |
+| Food photo recognition | Yes | Explicit photo submission; bounded nutrition estimate and optional user-requested clarification |
 | Nutrition target proposal | No | Reviewed deterministic calculation policy |
 | Weekly meal plan | Yes | User requests a new plan or an explicit revision |
 | Meal substitution | Sometimes | Prefer a valid catalog substitution; model only for a requested more involved revision |
@@ -473,11 +472,11 @@ Return a run ID only after the job is durably stored. The UI polls status while 
 
 Decision 0007 replaces the original MiniMax/OpenRouter route with Google AI Studio. A shared server-only adapter calls Google's [compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai) with `GEMINI_API_KEY` and defaults to `gemini-3.1-flash-lite`. The model supports [image input and structured output](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite). No OpenRouter key is required. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` remain separate OAuth credentials.
 
-The adapter uses minimal reasoning effort, bounded output, and the existing operation-specific JSON Schemas. Each caller validates the result. Vision identifies names only; catalog nutrition stays deterministic. The two LangGraph workflows retain their candidate retrieval, deterministic validation, one repair maximum, Postgres checkpoints, and explicit draft approval. No autonomous tools or new provider retries are introduced.
+The adapter uses minimal reasoning effort, bounded output, and the existing operation-specific JSON Schemas. Each caller validates the result. Vision estimates foods, portions, and per-100-g nutrition for explicit review. The server validates densities and computes log totals; catalog nutrition remains a separate source. The two LangGraph workflows retain their candidate retrieval, deterministic validation, one repair maximum, Postgres checkpoints, and explicit draft approval. No autonomous tools or new provider retries are introduced.
 
 Current token ceilings and request timeouts:
 
-- Photo recognition: 2,048 output tokens, including thinking; 30 seconds.
+- Photo recognition: 4,096 output tokens, including thinking; 30 seconds.
 - Weekly meal plan: 6,000 output tokens; 20 seconds per model request.
 - Workout plan: 4,500 output tokens; 20 seconds per model request.
 
@@ -988,19 +987,13 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 **Deliverables:** Complete manual tracking MVP.
 
-### Phase 7 — Food photo recognition
+### Phase 7 — Photo meal estimates
 
-**Current status:** The authenticated API sends a browser-compressed image to the configured Gemini model and validates a bounded list of food-name candidates. The PWA lets the person search those names in the catalog, choose a food, enter the amount, and save through the existing nutrition calculation. Photo files are not stored by the app. Each request is counted in the shared per-account rolling 24-hour AI quota; token counts and provider-reported USD cost are recorded without retaining the image. Live provider checks and Android Chrome verification remain outstanding.
+**Current status:** Implemented reviewed nutrition estimation under Decision 0008. Gemini returns up to six food/portion/nutrition estimates and an optional clarification question. Phone review cards allow exact or approximate quantities, food/name/nutrition corrections, item exclusion, and one-step logging. Two user-initiated refinements are allowed per photo in the UI; all inferences count toward the rolling AI quota. Signed, account-bound two-hour drafts and completed-run ownership checks prevent client substitution of model output. Bounded user overrides remain explicitly unverified estimates. Confirmation computes totals and atomically saves selected items with retry protection. Photo bytes and clarification text are not stored. No new environment variables or migration are needed. Build, typecheck, browser checks, and live inference remain unrun at the owner's request.
 
-- Keep browser image processing bounded to a 2.5 MB JPEG, PNG, or WebP payload.
-- Send the image through the authenticated server API; keep the Gemini key server-only and do not persist the photo.
-- Return food names and alternatives only; never infer portion size or nutrition from the image.
-- Match candidate labels to the app catalog and let the person confirm food and quantity.
-- Keep the manual catalog-search path available when recognition is disabled or fails.
+**Deliverable:** Photo → review/refine → confirm → food log, without a required catalog lookup. The user can accept an approximation instead of supplying exact grams or macros.
 
-**Deliverables:** Photo-assisted logging using the same catalog-based nutrition calculation path.
-
-**Exit criteria:** A photo never establishes exact portions or calories; uncertain/mixed dishes can be corrected.
+**Exit criteria:** Confirmed entries contribute to food totals, retain estimate provenance/ranges, support normal quantity edits and meal copying, and remain distinct from reviewed catalog values. Real-device/provider verification is still outstanding.
 
 ### Phase 8 — Meal-planning LangGraph workflow
 
@@ -1173,7 +1166,7 @@ Review measured trend, data coverage, target adherence on complete days, and com
 
 | Situation | User experience |
 | --- | --- |
-| Photo identified the wrong food | Select another candidate or search manually |
+| Photo estimate needs correction | Edit the food/portion/macros, answer the optional clarification, or use manual entry |
 | No nutrition entry exists | Create a private sourced entry/recipe or request catalog review |
 | Meal/workout generation fails | Existing active plan remains available; show an actionable reason |
 | Phone has no Health Connect path | Enter steps/workouts manually; the PWA does not claim native sync |
@@ -1302,3 +1295,7 @@ Photo recognition and both planners now use the shared Google AI Studio adapter 
 - Previously saved walk/cardio/strength entries without a calorie snapshot receive an estimate in the daily response. The backend uses the same weight selection and MET calculation as new saves, loading owned profile/measurements once per request. It performs no writes on GET. Untagged legacy activities use the existing category default (general aerobics for cardio); a user can edit the cardio type. Persisted snapshots remain preferred. Response metadata distinguishes saved and calculated estimates.
 - Calculated legacy estimates can change when historical measurements or fallback profile weight changes; editing and saving creates a version with a persisted snapshot. Calories remain separate from food intake/allowance and measured progress.
 - No migration or environment change is required. Builds, typecheck, browser checks, and live verification remain skipped at the owner's request.
+
+### 21 October 2026 — Reviewed photo meal estimates
+
+Decision 0008 supersedes the initial name-only vision scope. See sections 5.5 and Phase 7 for implemented behavior. This update adds no migrations or credentials. Checks were skipped as requested; deployment and live photo behavior remain unverified.

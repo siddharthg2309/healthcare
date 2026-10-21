@@ -786,3 +786,29 @@ a { color: inherit; text-decoration: none; }
 .activity-entry-totals small { font-size: 12px; font-weight: 400; color: var(--muted); }
 
 .activity-calorie-missing { max-width: 100px; color: var(--muted); font-size: 12px; }
+
+/* Photo meals are editable estimates, reviewed before logging. */
+.photo-meal-review { display: grid; gap: 16px; margin-top: 16px; }
+.photo-review-heading, .photo-item-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.photo-review-heading h3 { margin: 0; font-size: 18px; letter-spacing: -.03em; }
+.photo-review-fields, .photo-item-fields { display: grid; gap: 14px; min-width: 0; padding: 0; margin: 0; border: 0; }
+.photo-meal-item { display: grid; gap: 12px; border: 1px solid var(--line, #e4e8df); border-radius: 18px; padding: 14px; background: white; }
+.photo-meal-item-excluded { background: #f5f6f2; }
+.photo-meal-item-excluded .photo-item-fields { opacity: .5; }
+.photo-item-heading { font-size: 14px; }
+.photo-include { display: inline-flex; align-items: center; gap: 8px; }
+.photo-include input { width: 21px; height: 21px; accent-color: #91c52d; }
+.photo-include strong { font-size: 12px; font-weight: 500; color: var(--muted); }
+.photo-certainty { display: flex; gap: 8px; }
+.photo-certainty button { min-height: 44px; flex: 1; border: 1px solid #dce3d4; border-radius: 12px; background: #fafbf8; color: #425336; font: inherit; font-size: 14px; }
+.photo-certainty button[aria-pressed="true"] { border-color: #9ccf40; background: #eaf6ce; color: #243419; font-weight: 600; }
+.photo-item-macros { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: #54604b; }
+.photo-meal-item summary, .photo-context summary, .photo-question summary { cursor: pointer; font-size: 13px; padding-block: 9px; color: #54604b; }
+.photo-question { padding: 12px; border-radius: 14px; background: #f0f6e7; }
+.photo-question .field > span { line-height: 1.5; }
+.photo-context { margin-top: 8px; }
+.photo-meal-total { display: grid; gap: 5px; border-radius: 16px; padding: 16px; background: #eaf6ce; }
+.photo-meal-total > span { font-size: 13px; color: #465b31; }
+.photo-meal-total strong { font-size: 28px; letter-spacing: -.04em; }
+.photo-meal-total small { color: #465b31; font-size: 12px; line-height: 1.5; }
+.photo-log-estimate { color: #617940 !important; }
