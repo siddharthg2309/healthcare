@@ -167,7 +167,7 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
     let active = true;
     if (new URLSearchParams(window.location.search).get("auth") === "google-error") {
       window.setTimeout(() => {
-        if (active) setError("Could not complete Google sign-in. New accounts need an invitation for that verified Google email.");
+        if (active) setError("Could not complete Google sign-in. Use a verified Google account and try again.");
       }, 0);
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
     }
@@ -239,7 +239,7 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
       <section className="auth-card" aria-labelledby="auth-title">
         <span className="eyebrow">PRIVATE BY ACCOUNT</span>
         <h2 id="auth-title">{mode === "sign_up" ? "Create your account" : "Welcome back"}</h2>
-        <p>{mode === "sign_up" ? "New accounts need an invitation for the email you use." : "Each account is private. Sign in with your email or Google."}</p>
+        <p>{mode === "sign_up" ? "Email and password sign-up requires an invitation." : "Each account is private. Sign in with your email or Google."}</p>
         {googleAvailable ? <>
           <button className="button button-google button-wide" type="button" disabled={busy} onClick={() => void continueWithGoogle()}>
             <span className="google-mark" aria-hidden="true">G</span>
@@ -258,7 +258,7 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
         <button className="text-button" onClick={() => { setMode(mode === "sign_up" ? "sign_in" : "sign_up"); setError(""); }}>
           {mode === "sign_up" ? "Already have an account? Sign in" : "Have an invitation? Create an account"}
         </button>
-        <small className="auth-footnote">{googleAvailable ? "Google sign-up requires an active invitation for that verified Google email." : "Health data is personal. Never use someone else’s account."}</small>
+        <small className="auth-footnote">{googleAvailable ? "Any verified Google account can sign up. Email and password sign-up requires an invitation." : "Health data is personal. Never use someone else’s account."}</small>
       </section>
     </main>
   );

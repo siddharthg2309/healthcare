@@ -68,7 +68,7 @@ Migration `0010_account_privacy.sql` forces row-level security on personal food,
 
 ### Friend access
 
-The app uses invitation-based signup. Create a one-time code for each friend with the CLI while the local root `.env` points at the same production Neon database:
+Email/password sign-up uses invitations; any verified Google account can create an account. Create a one-time code for each friend with the CLI while the local root `.env` points at the same production Neon database:
 
 ```bash
 npm run invite:create -- --email friend@example.com
@@ -78,7 +78,7 @@ Share the code and app URL privately. Never send a friend `DATABASE_URL`, `AUTH_
 
 ## Install the PWA on Android (no APK required)
 
-After the Vercel and Neon setup above, open the deployed HTTPS app URL in Chrome on the Android phone. In Chrome's menu, choose **Add to Home screen** or **Install app** (wording can vary by Chrome version), then launch Goal Health from the new home-screen icon. Share the app URL and each person's invitation privately.
+After the Vercel and Neon setup above, open the deployed HTTPS app URL in Chrome on the Android phone. In Chrome's menu, choose **Add to Home screen** or **Install app** (wording can vary by Chrome version), then launch Goal Health from the new home-screen icon. Share the app URL; share email/password invitation codes privately.
 
 This install path uses the Next.js PWA directly. It does not need an Expo account, EAS, a native build, or a Play Store listing. After the first deployment, pushing a web change to the Vercel-connected branch redeploys the app automatically. The one-time Vercel configuration and Neon migration are still required; your laptop does not host the live app.
 
@@ -103,7 +103,7 @@ Choose this only if you want a separate Android package. The APK is an Expo WebV
    npm run build:apk
    ```
 
-5. Let EAS manage Android signing credentials. Download the APK from the completed build and share it only with invited friends. Recipients may need to allow installation from the browser or file app that downloaded it.
+5. Let EAS manage Android signing credentials. Download the APK from the completed build and share it with intended users; any verified Google account can sign up. Recipients may need to allow installation from the browser or file app that downloaded it.
 
 The repo ignores `.apk` files and signing material. The APK uses the deployed app URL at runtime. A Vercel web deployment updates the content for existing installs; changes to the wrapper, app identifier, or native permissions require another APK build. EAS internal-build URLs are bearer links, so do not post them publicly.
 
@@ -116,21 +116,21 @@ For local Android development, copy `apps/mobile/.env.example` to `apps/mobile/.
 | Food photo suggestions and meal/workout plan generation | `OPENROUTER_API_KEY`; optional `AI_MODEL` (defaults to `minimax/minimax-m3`); optional `AI_USER_DAILY_OPERATION_LIMIT` (defaults to `10`) | Add the OpenRouter key to Vercel as a server-only Production variable to enable AI. Manual tracking works without it. The operation limit applies per account across AI features; the model and image/output size limits are enforced in server code. |
 | Durable background AI jobs | `JOB_DISPATCH_SECRET` | Configure only when a separate authenticated worker/dispatcher is deployed. Generate with `openssl rand -hex 32`. |
 | Private food-photo storage | `STORAGE_PROVIDER`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ACCESS_KEY_ID`, `STORAGE_SECRET_ACCESS_KEY`, `STORAGE_FORCE_PATH_STYLE`, `UPLOAD_MAX_BYTES` | Configure after selecting a private S3-compatible storage provider. Keep credentials server-only; use short-lived upload permissions and retention cleanup. |
-| Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional. Enables Google login and invite-gated account creation. Keep both values server-side. |
+| Google sign-in | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional. Enables sign-in and account creation for verified Google accounts. Keep both values server-side. |
 | Google Calendar connection and workout sync | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `TOKEN_ENCRYPTION_KEY` | Optional. Reuses the Google OAuth client above and additionally needs the Calendar API, its exact redirect URI, and the token-encryption key. Keep all four values server-side. |
 | Curated catalog imports | `USDA_API_KEY` | Optional; needed only for individual USDA search/import commands. The bulk FNDDS seed reads a locally downloaded public dataset and does not need this key. Neither is needed by the deployed app; do not add the key to Vercel. |
 | Email verification/password recovery | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Add after choosing an email provider and implementing those email flows. |
 
-The LangGraph checkpoint store uses `DATABASE_URL`; it does not need a separate database URL. Leave unused integration values empty. The backend limits each account to 10 AI operations in a rolling 24-hour window across food-photo recognition and both planners. Configure `AI_USER_DAILY_OPERATION_LIMIT` in the server environment to change that cap (1–100; default 10). AI run rows retain status, token counts, and OpenRouter-reported cost in micro-USD without storing uploaded photo bytes. This is a per-account request cap. For a shared hard dollar ceiling across everyone using this key, configure the OpenRouter key spending limit and choose its daily, weekly, or monthly reset in OpenRouter; see the [OpenRouter spend-controls guide](https://openrouter.ai/blog/tutorials/team-spend-controls-setup/). Set and verify that cap before inviting friends. Meal-plan drafts support catalog food swaps and portion edits; saving recalculates nutrition and revalidates plan ranges on the server. Plans use only published foods with reviewed safety metadata when diet/allergen requirements apply, and unsupported restrictions fail closed. The catalog may not yet have enough reviewed options for a useful plan. These tags do not guarantee allergy safety or prevent cross-contamination, so users must verify current labels and recipes.
+The LangGraph checkpoint store uses `DATABASE_URL`; it does not need a separate database URL. Leave unused integration values empty. The backend limits each account to 10 AI operations in a rolling 24-hour window across food-photo recognition and both planners. Configure `AI_USER_DAILY_OPERATION_LIMIT` in the server environment to change that cap (1–100; default 10). AI run rows retain status, token counts, and OpenRouter-reported cost in micro-USD without storing uploaded photo bytes. This is a per-account request cap. For a shared hard dollar ceiling across everyone using this key, configure the OpenRouter key spending limit and choose its daily, weekly, or monthly reset in OpenRouter; see the [OpenRouter spend-controls guide](https://openrouter.ai/blog/tutorials/team-spend-controls-setup/). Set and verify that cap before sharing the open sign-up link. Meal-plan drafts support catalog food swaps and portion edits; saving recalculates nutrition and revalidates plan ranges on the server. Plans use only published foods with reviewed safety metadata when diet/allergen requirements apply, and unsupported restrictions fail closed. The catalog may not yet have enough reviewed options for a useful plan. These tags do not guarantee allergy safety or prevent cross-contamination, so users must verify current labels and recipes.
 
 ### Optional Google sign-in setup
 
-Google sign-in is enabled only when both OAuth client values are set. New accounts remain invitation-only: the Google account must have a verified email with an active invitation issued to that same email. Email/password signup still requires the one-time invitation code. Existing email/password accounts can continue using their password; Better Auth requires the local email to be verified before it will automatically link a Google identity.
+Google sign-in is enabled only when both OAuth client values are set. Any Google account with a verified email can create an account; Google sign-up does not require an app invitation. Email/password sign-up still requires a one-time invitation code. Existing email/password accounts can continue using their password; Better Auth requires the local email to be verified before it will automatically link a Google identity.
 
-1. In Google Cloud Console, configure the OAuth consent screen. If the app is in Testing status, add the owner and friends as test users.
+1. In Google Auth Platform, set the audience to **External**. To allow any Google account, set the publishing status to **In production**; Testing status can limit access to listed test users.
 2. Create or select an OAuth client for a web application. Add this exact authorized redirect URI for local use: `http://localhost:3000/api/auth/callback/google`. For Vercel, also add `https://YOUR-APP-DOMAIN/api/auth/callback/google` using the deployed domain.
 3. Put the client ID and client secret in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the ignored local `.env` or Vercel's server-only environment settings. Set the production `AUTH_BASE_URL` to the same deployed origin and redeploy. Do not add a `NEXT_PUBLIC_` prefix.
-4. Create an email-bound invitation with `npm run invite:create -- --email friend@example.com`. The friend signs in with the exact invited Google email. Share the app link privately; never share the server credentials.
+4. No app invitation is needed for Google sign-up. Use `npm run invite:create -- --email friend@example.com` only for email/password accounts. Never share server credentials.
 
 No Calendar API, `GOOGLE_REDIRECT_URI`, or `TOKEN_ENCRYPTION_KEY` is needed for sign-in alone.
 

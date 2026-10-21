@@ -2,7 +2,7 @@
 
 ## Scope and agreed direction
 
-- This is an Android-first health and fitness app for the owner and invited friends. The Next.js PWA is the product UI and the private Android APK is a thin Expo WebView shell around it.
+- This is an Android-first health and fitness app with account creation through any verified Google account; email/password sign-up remains invitation-based. The Next.js PWA is the product UI and the private Android APK is a thin Expo WebView shell around it.
 - The source of the product and phased implementation scope is `docs/IMPLEMENTATION_PLAN.md`.
 - Use Next.js App Router, React, and TypeScript; deploy the UI and same-origin API on Vercel, with Neon Postgres for cloud storage.
 - Deploy the Next.js app and API to Vercel with Neon Postgres. Build the Android shell as an internally distributed APK with EAS; do not publish to an app store.

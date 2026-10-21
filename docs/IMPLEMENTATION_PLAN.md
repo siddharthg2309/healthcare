@@ -6,7 +6,7 @@
 
 **Audience:** The owner and developers implementing the app.
 
-**Distribution:** The primary Android experience is the installable HTTPS PWA hosted on Vercel. A thin private APK wrapper remains an optional install path for the owner and invited friends.
+**Distribution:** The primary Android experience is the installable HTTPS PWA hosted on Vercel. A thin private APK wrapper remains an optional install path. Any verified Google account can sign up; email/password accounts require invitations.
 
 **Status:** Active implementation plan. The Next.js PWA is the shared product UI and the simplest Android install path. A thin Expo WebView APK can be built with EAS as an optional package. See Decisions 0005 and 0006.
 
@@ -46,7 +46,7 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 | Area | Decision |
 | --- | --- |
 | Main platform | Android phones |
-| Audience | Owner and invited friends, with separate private accounts |
+| Audience | Users with verified Google accounts, with separate private accounts; email/password signup remains invite-based |
 | Distribution | Deploy the PWA to Vercel and install it from Android Chrome; optional private EAS-built APK; no Play Store listing |
 | Cloud database | Neon Postgres |
 | AI model | MiniMax M3; the selected `minimax/minimax-m3` identifier is an OpenRouter route |
@@ -62,7 +62,7 @@ The app should work comfortably for Indian meals, household portions, mixed dish
 - Next.js App Router, React, TypeScript, and a responsive PWA provide the product UI.
 - Android Chrome installs the Next.js PWA from its stable HTTPS Vercel origin; `apps/mobile` is an optional Expo WebView wrapper that EAS can build as a private APK.
 - One Vercel project hosts both Next.js pages and same-origin API routes. Next Route Handlers forward `/api/*` and `/v1/*` to the modular Hono API.
-- Neon Postgres is the cloud source of truth. Better Auth handles invite-gated accounts and sessions.
+- Neon Postgres is the cloud source of truth. Better Auth allows sign-up with any verified Google account and requires invitations for email/password sign-up.
 - Keep OpenRouter credentials and all trusted provider calls in server routes/workers, never in browser code.
 - Add private object storage only when photo recognition is implemented; keep photos private and short-lived by default.
 - Use browser storage for install metadata and safe UI preferences. Cloud logging requires a network connection; do not promise robust offline writes until an encrypted, account-scoped PWA data/outbox design is implemented.
@@ -79,7 +79,7 @@ The small audience does not mean the backend runs on a laptop. Vercel serves the
 
 | Feature group | Included behavior |
 | --- | --- |
-| Accounts | Invite-gated email/password and Google sign-in, login, logout, session renewal, account recovery |
+| Accounts | Verified Google sign-up, invite-gated email/password sign-up, login, logout, session renewal, account recovery |
 | Profile | Measurements, goal, food preferences, allergies, activity habits, equipment, schedule, units, timezone |
 | Food catalog | Search, aliases, common portions, source information, favorites, recent foods, custom foods and recipes |
 | Food logging | Manual food/quantity entry, photo-assisted identification, multiple foods per meal, editing and deletion |
@@ -94,7 +94,7 @@ The small audience does not mean the backend runs on a laptop. Vercel serves the
 | Calendar | Opt-in synchronization of approved schedule items to an app-created Google calendar |
 | Offline | Read cached static shell; core logging requires connection in the first release unless an explicit offline queue is implemented |
 | Privacy | Each person sees their own records; export and deletion controls |
-| Distribution | Vercel HTTPS URL, invite process, add-to-home-screen guide, documented web release process |
+| Distribution | Vercel HTTPS URL, open Google sign-up, email/password invite process, add-to-home-screen guide, documented web release process |
 
 Hydration is an optional simple log and reminder, not a requirement for calorie tracking. Heart rate is not a launch requirement because the app cannot assume the phone or a wearable supplies it. Friends do not automatically see one another's health data.
 
@@ -359,7 +359,7 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 | Browser data | Same-origin requests; React state for temporary view state | Avoids a second API URL or secrets in the browser bundle |
 | API | Next Route Handlers forwarding into the Hono modular API | Reuses server-side contracts and domain modules within the same deployment |
 | Database | Neon Postgres + Drizzle ORM/migrations | Cloud source of truth, relational constraints, and versioned schema |
-| Authentication | Better Auth on the server with invite-gated email/password and optional Google OAuth accounts | Keeps session validation and database credentials server-side |
+| Authentication | Better Auth on the server with open verified Google sign-up and invite-gated email/password accounts | Keeps session validation and database credentials server-side |
 | Contracts/domain | Shared Zod contracts and pure deterministic TypeScript services | Validate input/output independently of the model |
 | AI orchestration | Two bounded LangGraph workflows for meal and workout plans | Persisted state, explicit branches, bounded repair, and user approval |
 | Model access | Server adapter to OpenRouter → MiniMax M3 | Multimodal model stays replaceable and its key never reaches the browser |
@@ -883,7 +883,7 @@ Calendar creation and reminders are deterministic side effects of an approved pl
 
 ### 15.1 Account and data boundaries
 
-Require an invitation at signup and enforce access at the backend. A private URL is not authentication. Validate sessions, resource ownership, nested references, file access, AI run ownership, and integration ownership on every relevant request.
+Allow any Google account with a verified email to create an account; require an email-bound invitation for email/password sign-up. A private URL is not authentication. Validate sessions, resource ownership, nested references, file access, AI run ownership, and integration ownership on every relevant request.
 
 Use HTTPS, private file access, managed password handling, secure same-origin session cookies, and encrypted Google refresh credentials with a server-held encryption key. Keep database passwords, OpenRouter keys, storage signing credentials, and OAuth secrets in server environment variables. Never expose them as NEXT_PUBLIC values.
 
@@ -922,7 +922,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 0 — Confirm the web deployment path
 
-- Confirm the Vercel project domain, Neon region/database, and invitation-only access.
+- Confirm the Vercel project domain, Neon region/database, open Google sign-up, and invited email/password access.
 - For this npm workspace monorepo, set the Vercel Framework Preset to Next.js and Root Directory to `apps/web`; enable **Include source files outside of the Root Directory in the Build Step** so the app can use the backend and shared packages at the repository root.
 - Confirm the root environment names and ensure the ignored local environment file stays out of Git.
 - Verify that the PWA manifest, service worker, same-origin API routes, and auth origins match the selected domain.
@@ -947,14 +947,14 @@ The sequence delivers tracking and the signature progress graph before AI featur
 ### Phase 2 — Neon, authentication, invitations, and schema
 
 - Provision Neon Postgres and apply reviewed Drizzle/auth migrations from a trusted local checkout.
-- Verify Better Auth email/password and Google signup/sign-in, cookie session, sign-out, and invite enforcement for both methods.
+- Verify Better Auth email/password invitation enforcement and open Google sign-up/sign-in, cookie session, sign-out, and account isolation.
 - Check access isolation with separate accounts and ensure every private query is owner-scoped.
 - Deploy the same Next.js/Hono application to Vercel; do not create a separate API deployment.
-- Create a friend invitation through the owner CLI.
+- Create an email/password invitation through the owner CLI.
 
-**Current status:** Better Auth, application-schema, and LangGraph migrations have been applied to the configured Neon database. A read-only catalog check confirmed the expected core tables. Optional Google OAuth sign-in is wired to verified, email-bound invitations and appears only when both Google credentials are configured. Vercel deployment, signup/invitation-flow checks, OAuth callback verification, and two-account isolation remain to be completed.
+**Current status:** Better Auth, application-schema, and LangGraph migrations have been applied to the configured Neon database. Google OAuth is configured and its callback reaches the deployed app; the current source allows any verified Google email to create a private account. Email/password sign-up remains invitation-based. The Vercel redeployment of open Google sign-up, signup-flow checks, and two-account isolation remain to be completed.
 
-**Deliverables:** Hosted login and invitation-backed accounts.
+**Deliverables:** Hosted login, open Google sign-up, and invitation-backed email/password accounts.
 
 ### Phase 3 — Onboarding and accepted goal engine
 
@@ -1053,7 +1053,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 - Configure production Vercel environment variables, define a Neon backup policy, and rehearse a restore. Apply future schema changes from the trusted checkout with reviewed migrations.
 - Verify login, invitations, two-user isolation, browser and APK behavior, error handling, deletion/export, and restore procedures.
 - Check accessibility, privacy/cache behavior, upload retention, provider limits, and actual AI cost before enabling each model workflow.
-- Share the HTTPS link privately and invite a small friend group.
+- Share the HTTPS link with intended users; any verified Google account can sign up.
 
 **Deliverables:** Stable Vercel PWA, owner runbook, friend onboarding instructions, and an optional privately distributable Android APK.
 
@@ -1115,7 +1115,7 @@ The web app uses relative API routes at the same origin. The optional Android sh
 | AUTH_BASE_URL | Better Auth is enabled; set to the public app origin |
 | AUTH_TRUSTED_ORIGINS | Set to the exact deployed app origin |
 | OPENROUTER_API_KEY | Only when server-side photo recognition/planning is enabled |
-| GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET | Optional; enable invite-gated Google sign-in and register `/api/auth/callback/google` in Google Cloud |
+| GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET | Optional; enable open sign-up for verified Google accounts and register `/api/auth/callback/google` in Google Cloud |
 | GOOGLE_REDIRECT_URI and TOKEN_ENCRYPTION_KEY | Optional; required only for Google Calendar sync |
 | Storage and worker variables | Only after private object storage or a separate job worker is deployed |
 
@@ -1145,9 +1145,9 @@ The repo ignores APK files and EAS signing material. Share the APK/build link pr
 
 ### 17.4 Share and update
 
-1. Share the HTTPS URL with invited friends; on Android, they open it in Chrome and choose Add to Home screen or Install app.
+1. Share the HTTPS URL with the people who will use the app; any verified Google account can sign up. On Android, they open it in Chrome and choose Add to Home screen or Install app.
 2. If you created the optional APK, share it from the private EAS build. Friends may need to allow installs from the app they used to download it.
-3. Friends create an account using their private email-bound invitation.
+3. Friends can sign up with any verified Google account. Email/password sign-up requires an email-bound invitation.
 4. Push reviewed source changes to the connected deployment branch; Vercel builds and deploys the updated web app. Existing APK shells load it on the next launch.
 5. Build a new APK only for native shell/configuration changes, then share the new build privately. Keep Neon data and backups independent of either deployment.
 
@@ -1163,7 +1163,7 @@ The first manual-tracking release needs only the deployed Next.js project and Ne
 
 ### 18.1 First use
 
-Open the deployed HTTPS app URL in Android Chrome and choose Add to Home screen, or install the optional APK shared by the owner. Sign up using the invitation tied to the account email, choose units, enter the profile and goal, and review the calculated targets. The Progress view shows the accepted plan; measured history starts with the first confirmed weigh-in.
+Open the deployed HTTPS app URL in Android Chrome and choose Add to Home screen, or install the optional APK shared by the owner. Sign up with Google, or use an email-bound invitation for email/password. Then choose units, enter the profile and goal, and review the calculated targets. The Progress view shows the accepted plan; measured history starts with the first confirmed weigh-in.
 
 The PWA and optional APK use the same deployed app and account.
 
@@ -1212,14 +1212,14 @@ This is the planned validation strategy; it is not evidence that these checks ha
 | Activity | Repeated records, overlapping manual activities, source changes, multi-device edits, manual step entry |
 | Reminders | Browser permission denial, in-app fallback, quiet hours, timezone behavior, no cross-account reminders |
 | Calendar | Repeat delivery, plan edits, token expiry, disconnected state, external event changes |
-| Release | Vercel build/deployment, Neon connectivity, invitation onboarding, no bundled server secrets, friend account isolation |
+| Release | Vercel build/deployment, Neon connectivity, open Google signup, email/password invitation onboarding, no bundled server secrets, account isolation |
 | Recovery/privacy | Export, account deletion including assets/checkpoints, photo cleanup, backup restore, redacted operational logs |
 
 Automate pure domain calculations, authorization integration cases, and retry/recovery invariants. Use focused UI checks plus real Android WebView/APK acceptance for login, food photo picker, navigation/back behavior, and cookie persistence. Health Connect permission checks are required only if a native bridge is later implemented.
 
 ### 19.2 Definition of the first complete private release
 
-- An invited friend can open the HTTPS link, create a private account, and optionally add the PWA to their Android home screen.
+- A user can open the HTTPS link, create a private account with Google, and optionally add the PWA to their Android home screen.
 - Onboarding creates an accepted versioned goal and usable planned trajectory.
 - Manual food logging produces catalog-derived calories and macros; photo suggestions are optional and user-confirmed.
 - Actual measurements and the goal path are distinguishable and readable on a phone.
@@ -1229,7 +1229,7 @@ Automate pure domain calculations, authorization integration cases, and retry/re
 - Manual activity/steps work without claiming direct Health Connect access.
 - Reminders and Calendar follow explicit choices and fail without breaking core tracking.
 - Secrets stay server-side; export/deletion and recovery behavior are documented.
-- The app works from the deployed domain with the developer's laptop off. An invited friend can install and use the private Android APK or open the browser URL.
+- The app works from the deployed domain with the developer's laptop off. A user can install and use the Android APK or open the browser URL and create a private Google account.
 
 ### 19.3 Future backlog
 

@@ -2,7 +2,6 @@ import { betterAuth } from "better-auth";
 import { pool } from "@healthcare/database";
 import { env, trustedOrigins } from "../env.js";
 import { cleanupBeforeAccountDeletion } from "../services/account-privacy.js";
-import { redeemReservedInvitationForEmail, reserveInvitationForEmail } from "./invitations.js";
 
 export const auth = betterAuth({
   database: pool,
@@ -38,36 +37,10 @@ export const auth = betterAuth({
           errorDescription: "Use a Google account with a verified email address.",
         };
       }
-
-      if (source.action === "create-user") {
-        try {
-          const invitationId = await reserveInvitationForEmail(email);
-          if (!invitationId) {
-            return {
-              error: "invitation_required",
-              errorDescription: "This Google email does not have an active invitation.",
-            };
-          }
-        } catch {
-          return {
-            error: "invitation_unavailable",
-            errorDescription: "Could not validate the invitation. Please try again.",
-          };
-        }
-      }
     },
     deleteUser: {
       enabled: true,
       beforeDelete: async (user) => cleanupBeforeAccountDeletion(user.id),
-    },
-  },
-  databaseHooks: {
-    user: {
-      create: {
-        after: async (user) => {
-          await redeemReservedInvitationForEmail(user.email, user.id);
-        },
-      },
     },
   },
 });
