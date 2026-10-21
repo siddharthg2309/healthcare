@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { exerciseProgressResponseSchema, goalSchema, profileSchema, type ExerciseProgressResponse, type GoalRecord, type Profile } from "@healthcare/contracts";
+import { exerciseProgressResponseSchema, goalSchema, profileSchema, weeklyProgressReviewResponseSchema, type ExerciseProgressResponse, type GoalRecord, type Profile, type WeeklyProgressReviewResponse } from "@healthcare/contracts";
 import { exerciseCatalog } from "@healthcare/domain";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { ActivityTrackingView, FoodTrackingView, type DaySummary } from "@/components/tracking-views";
@@ -384,6 +384,7 @@ function ProgressView({ goal, goalVersions, measurements, timezone, unitSystem, 
         <p className="chart-caption">The target line is a schedule, not a prediction. Day-to-day body weight can vary.</p>
       </section>
       <ExerciseProgressPanel unitSystem={unitSystem} />
+      <WeeklyProgressReviewPanel />
       <section className="progress-lower-grid">
         <form className="panel weigh-in-form" onSubmit={(event) => void submit(event)}>
           <div className="panel-heading"><div><span className="eyebrow">KEEP THE GRAPH CURRENT</span><h2>Add a weigh-in</h2></div></div>
@@ -397,6 +398,92 @@ function ProgressView({ goal, goalVersions, measurements, timezone, unitSystem, 
       </section>
     </>
   );
+}
+
+function WeeklyProgressReviewPanel() {
+  const [review, setReview] = useState<WeeklyProgressReviewResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [reloadVersion, setReloadVersion] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError("");
+      void requestJson<unknown>("/v1/progress/weekly-review")
+        .then((body) => {
+          const parsed = weeklyProgressReviewResponseSchema.safeParse(body);
+          if (!active) return;
+          if (!parsed.success) {
+            setReview(null);
+            setError("The weekly review could not be read. Try again.");
+            return;
+          }
+          setReview(parsed.data);
+        })
+        .catch((reason: unknown) => {
+          if (active) {
+            setReview(null);
+            setError(friendlyError(reason));
+          }
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [reloadVersion]);
+
+  return (
+    <section className="panel weekly-review-panel" aria-labelledby="weekly-review-heading">
+      <div className="panel-heading">
+        <div><span className="eyebrow">SEVEN-DAY SUMMARY</span><h2 id="weekly-review-heading">Your week in view</h2></div>
+        {review ? <span className="date-chip">{formatDate(review.startDate)} — {formatDate(review.endDate)}</span> : null}
+      </div>
+      <p className="weekly-review-intro">Averages use days you marked complete. Unlogged food and missing weigh-ins stay unknown.</p>
+      {loading ? <p className="muted-copy" role="status">Loading your weekly summary…</p> : null}
+      {!loading && error ? <div className="weekly-review-error" role="alert"><p>{error}</p><button className="text-button" type="button" onClick={() => setReloadVersion((version) => version + 1)}>Try again</button></div> : null}
+      {!loading && !error && review ? <>
+        <div className="weekly-review-metrics">
+          <article className="weekly-review-stat"><span>Complete food days</span><strong>{review.summary.completeFoodDays} / 7</strong><small>{review.summary.foodDaysWithLogs} day{review.summary.foodDaysWithLogs === 1 ? "" : "s"} with food entries</small></article>
+          <article className="weekly-review-stat"><span>Average calories</span><strong>{formatReviewNumber(review.summary.averageCaloriesOnCompleteDaysKcal)} <small>kcal</small></strong><small>{review.dailyTargets.caloriesKcal === null ? "No current target" : `Current target ${formatReviewNumber(review.dailyTargets.caloriesKcal)} kcal`}</small></article>
+          <article className="weekly-review-stat"><span>Average protein</span><strong>{formatReviewNumber(review.summary.averageProteinOnCompleteDaysG)} <small>g</small></strong><small>{review.dailyTargets.proteinG === null ? "No current target" : `Current target ${formatReviewNumber(review.dailyTargets.proteinG)} g`}</small></article>
+          <article className="weekly-review-stat"><span>Activity</span><strong>{review.summary.workoutSessions} <small>sessions</small></strong><small>{review.summary.workoutDays} days with walks or workouts</small></article>
+        </div>
+        <div className="weekly-review-highlights">
+          <p><strong>Steps:</strong> {review.summary.averageStepsOnLoggedDays === null ? "No step totals logged" : `${formatReviewNumber(review.summary.averageStepsOnLoggedDays)} average across ${review.summary.stepDays} logged day${review.summary.stepDays === 1 ? "" : "s"}`}</p>
+          <p><strong>Weigh-ins:</strong> {review.summary.weighInDays} measured day{review.summary.weighInDays === 1 ? "" : "s"}{review.summary.recordedWeightChangeKg === null ? "" : ` · ${review.summary.recordedWeightChangeKg > 0 ? "+" : ""}${review.summary.recordedWeightChangeKg.toFixed(1)} kg between ${formatDate(review.summary.firstWeighInDate ?? review.startDate)} and ${formatDate(review.summary.lastWeighInDate ?? review.endDate)}`}</p>
+          {review.summary.latestPlanComparison ? <p><strong>Latest measurement:</strong> {review.summary.latestPlanComparison.measuredWeightKg.toFixed(1)} kg on {formatDate(review.summary.latestPlanComparison.date)}; target path {review.summary.latestPlanComparison.plannedWeightKg.toFixed(1)} kg ({Math.abs(review.summary.latestPlanComparison.differenceKg).toFixed(1)} kg {review.summary.latestPlanComparison.differenceKg > 0 ? "above" : review.summary.latestPlanComparison.differenceKg < 0 ? "below" : "on"} the path).</p> : null}
+        </div>
+        <div className="weekly-review-days" aria-label="Daily summary for the last seven days">
+          {review.days.map((day) => {
+            const foodText = day.foodDayComplete
+              ? `${formatReviewNumber(day.caloriesLoggedKcal)} kcal · complete`
+              : day.foodLogCount > 0
+                ? `${formatReviewNumber(day.caloriesLoggedKcal)} kcal logged · incomplete`
+                : "Food not marked complete";
+            const activityText = [
+              `${day.workoutSessions} session${day.workoutSessions === 1 ? "" : "s"}`,
+              day.steps === null ? "steps not logged" : `${formatReviewNumber(day.steps)} steps`,
+              day.measurementWeightKg === null ? "no weigh-in" : `${day.measurementWeightKg.toFixed(1)} kg`,
+            ].join(" · ");
+            return <article className="weekly-review-day" key={day.date}><div><strong>{formatDate(day.date)}</strong><span>{foodText}</span></div><small>{activityText}</small></article>;
+          })}
+        </div>
+        <p className="weekly-review-readiness"><strong>Trend estimate readiness:</strong> {review.trendReadiness.eligible
+          ? `${review.trendReadiness.measurementDays} measured days over ${review.trendReadiness.spanDays} days in the last 28 days meet the minimum data threshold. No arrival date is calculated.`
+          : `${review.trendReadiness.measurementDays} measured days over ${review.trendReadiness.spanDays} days in the last 28 days; a later estimate would require at least 6 measured days spanning 14 days.`}</p>
+      </> : null}
+    </section>
+  );
+}
+
+function formatReviewNumber(value: number | null): string {
+  return value === null ? "—" : new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(value);
 }
 
 type ExerciseRange = "30d" | "90d" | "365d";

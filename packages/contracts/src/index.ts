@@ -390,6 +390,60 @@ export const exerciseProgressResponseSchema = z.object({
   points: z.array(exerciseProgressPointSchema).max(366),
 }).strict();
 
+const weeklyProgressDaySchema = z.object({
+  date: z.string().date(),
+  foodLogCount: z.number().int().min(0),
+  foodDayComplete: z.boolean(),
+  caloriesLoggedKcal: z.number().finite().min(0).nullable(),
+  proteinLoggedG: z.number().finite().min(0).nullable(),
+  workoutSessions: z.number().int().min(0),
+  steps: z.number().int().min(0).nullable(),
+  measurementWeightKg: z.number().finite().min(25).max(400).nullable(),
+  plannedWeightKg: z.number().finite().min(25).max(400).nullable(),
+}).strict();
+
+export const weeklyProgressReviewResponseSchema = z.object({
+  timezone: z.string().min(1).max(80),
+  startDate: z.string().date(),
+  endDate: z.string().date(),
+  dailyTargets: z.object({
+    caloriesKcal: z.number().int().min(800).max(5000).nullable(),
+    proteinG: z.number().finite().min(0).max(500).nullable(),
+  }).strict(),
+  days: z.array(weeklyProgressDaySchema).length(7),
+  summary: z.object({
+    completeFoodDays: z.number().int().min(0).max(7),
+    foodDaysWithLogs: z.number().int().min(0).max(7),
+    averageCaloriesOnCompleteDaysKcal: z.number().finite().min(0).nullable(),
+    averageProteinOnCompleteDaysG: z.number().finite().min(0).nullable(),
+    workoutDays: z.number().int().min(0).max(7),
+    workoutSessions: z.number().int().min(0),
+    stepDays: z.number().int().min(0).max(7),
+    averageStepsOnLoggedDays: z.number().finite().min(0).nullable(),
+    weighInDays: z.number().int().min(0).max(7),
+    firstWeighInDate: z.string().date().nullable(),
+    lastWeighInDate: z.string().date().nullable(),
+    recordedWeightChangeKg: z.number().finite().nullable(),
+    latestPlanComparison: z.object({
+      date: z.string().date(),
+      measuredWeightKg: z.number().finite().min(25).max(400),
+      plannedWeightKg: z.number().finite().min(25).max(400),
+      differenceKg: z.number().finite(),
+    }).strict().nullable(),
+  }).strict(),
+  trendReadiness: z.object({
+    eligible: z.boolean(),
+    measurementDays: z.number().int().min(0).max(28),
+    spanDays: z.number().int().min(0).max(27),
+    firstMeasurementDate: z.string().date().nullable(),
+    lastMeasurementDate: z.string().date().nullable(),
+    windowStartDate: z.string().date(),
+    windowEndDate: z.string().date(),
+    requiredMeasurementDays: z.literal(6),
+    requiredSpanDays: z.literal(14),
+  }).strict(),
+}).strict();
+
 const workoutPlanExerciseSchema = z.object({
   exerciseId: z.string().trim().min(1).max(80),
   sets: z.number().int().min(1).max(20),
@@ -695,6 +749,7 @@ export type WorkoutExercise = z.infer<typeof workoutExerciseSchema>;
 export type WorkoutSet = z.infer<typeof workoutSetSchema>;
 export type ExerciseProgressQuery = z.infer<typeof exerciseProgressQuerySchema>;
 export type ExerciseProgressResponse = z.infer<typeof exerciseProgressResponseSchema>;
+export type WeeklyProgressReviewResponse = z.infer<typeof weeklyProgressReviewResponseSchema>;
 export type WorkoutPlanData = z.infer<typeof workoutPlanDataSchema>;
 export type WorkoutPlanSession = WorkoutPlanData["sessions"][number];
 export type WorkoutPlanVersion = z.infer<typeof workoutPlanVersionSchema>;

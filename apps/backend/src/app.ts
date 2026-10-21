@@ -26,6 +26,7 @@ import {
   setFoodFavoriteRequestSchema,
   foodDayStatusRequestSchema,
   foodLogRecordSchema,
+  weeklyProgressReviewResponseSchema,
   goalProposalRequestSchema,
   goalSchema,
   mealPlanDataSchema,
@@ -42,6 +43,8 @@ import {
   updateFoodLogRequestSchema,
   updateFoodRecipeRequestSchema,
   workoutPlanDataSchema,
+  type GoalRecord,
+  type WeeklyProgressReviewResponse,
   type WorkoutPlanData,
 } from "@healthcare/contracts";
 import {
@@ -248,6 +251,28 @@ function localDateTimeAtTargetInZone(value: string, targetDate: string, timezone
 
 function shiftLocalDate(value: string, days: number): string {
   return new Date(Date.parse(`${value}T00:00:00.000Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function goalWeightAt(goal: GoalRecord, date: string): number {
+  const points = goal.trajectory;
+  const before = [...points].reverse().find((point) => point.date <= date);
+  const after = points.find((point) => point.date >= date);
+  if (!before) return points[0]?.targetWeightKg ?? goal.startWeightKg;
+  if (!after || after.date === before.date) return before.targetWeightKg;
+  const elapsed = Date.parse(`${date}T00:00:00.000Z`) - Date.parse(`${before.date}T00:00:00.000Z`);
+  const span = Date.parse(`${after.date}T00:00:00.000Z`) - Date.parse(`${before.date}T00:00:00.000Z`);
+  return before.targetWeightKg + (after.targetWeightKg - before.targetWeightKg) * (span > 0 ? elapsed / span : 0);
+}
+
+function median(values: number[]): number | null {
+  if (!values.length) return null;
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2 ? ordered[middle] ?? null : ((ordered[middle - 1] ?? 0) + (ordered[middle] ?? 0)) / 2;
+}
+
+function daySpan(firstDate: string, lastDate: string): number {
+  return Math.max(0, Math.round((Date.parse(`${lastDate}T00:00:00.000Z`) - Date.parse(`${firstDate}T00:00:00.000Z`)) / 86_400_000));
 }
 
 function isUuid(value: string): boolean {
@@ -1881,6 +1906,198 @@ app.get("/v1/days/:date", async (c) => {
     .reduce((total, item) => total + (item.data.steps ?? 0), 0);
   const workoutsCompleted = activityLogs.filter((item) => ["strength", "cardio", "walk"].includes(item.data.activityType)).length;
   return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted, foodDayComplete: result.foodDayComplete });
+});
+
+app.get("/v1/progress/weekly-review", async (c) => {
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [profileRecord] = await tx.select({ data: userProfiles.data }).from(userProfiles)
+      .where(eq(userProfiles.userId, userId)).limit(1);
+    const parsedProfile = profileSchema.safeParse(profileRecord?.data);
+    let timezone = parsedProfile.success ? parsedProfile.data.timezone : "UTC";
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    } catch {
+      timezone = "UTC";
+    }
+    const endDate = localDateInZone(new Date().toISOString(), timezone);
+    const startDate = shiftLocalDate(endDate, -6);
+    const trendStartDate = shiftLocalDate(endDate, -27);
+    const rangeQueryStart = shiftLocalDate(startDate, -2);
+    const rangeQueryEnd = shiftLocalDate(endDate, 2);
+    const trendQueryStart = shiftLocalDate(trendStartDate, -2);
+    const goalRows = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "goal"),
+      eq(userRecords.deleted, false),
+    )).orderBy(desc(userRecords.serverUpdatedAt)).limit(100);
+    const foodRows = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "food_log"),
+      eq(userRecords.deleted, false),
+      sql`left(${userRecords.data}->>'occurredAt', 10) >= ${rangeQueryStart}`,
+      sql`left(${userRecords.data}->>'occurredAt', 10) <= ${rangeQueryEnd}`,
+    ));
+    const activityRows = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "activity_log"),
+      eq(userRecords.deleted, false),
+      sql`left(${userRecords.data}->>'occurredAt', 10) >= ${rangeQueryStart}`,
+      sql`left(${userRecords.data}->>'occurredAt', 10) <= ${rangeQueryEnd}`,
+    ));
+    const measurementRows = await tx.select({ data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "body_measurement"),
+      eq(userRecords.deleted, false),
+      sql`left(${userRecords.data}->>'measuredAt', 10) >= ${trendQueryStart}`,
+      sql`left(${userRecords.data}->>'measuredAt', 10) <= ${rangeQueryEnd}`,
+    ));
+    const dayDates = Array.from({ length: 7 }, (_, index) => shiftLocalDate(startDate, index));
+    const statusRows = await tx.select({ localDate: foodDayStatuses.localDate, complete: foodDayStatuses.complete })
+      .from(foodDayStatuses).where(and(
+        eq(foodDayStatuses.userId, userId),
+        inArray(foodDayStatuses.localDate, dayDates),
+      ));
+    return { timezone, startDate, endDate, dayDates, goalRows, foodRows, activityRows, measurementRows, statusRows };
+  });
+
+  const goals = result.goalRows.flatMap((row) => {
+    const parsed = goalSchema.safeParse(row.data);
+    return parsed.success ? [parsed.data] : [];
+  }).sort((left, right) => right.goalVersion - left.goalVersion);
+  const currentGoal = goals[0] ?? null;
+  const foodByDate = new Map<string, { count: number; calories: number; protein: number }>();
+  for (const row of result.foodRows) {
+    const parsed = foodLogRecordSchema.safeParse(row.data);
+    if (!parsed.success) continue;
+    const date = localDateInZone(parsed.data.occurredAt, result.timezone);
+    if (date < result.startDate || date > result.endDate) continue;
+    const totals = foodByDate.get(date) ?? { count: 0, calories: 0, protein: 0 };
+    totals.count += 1;
+    totals.calories += parsed.data.nutritionTotal.caloriesKcal;
+    totals.protein += parsed.data.nutritionTotal.proteinG;
+    foodByDate.set(date, totals);
+  }
+
+  const activityByDate = new Map<string, { workoutSessions: number; hasSteps: boolean; steps: number }>();
+  for (const row of result.activityRows) {
+    const parsed = activityLogRecordSchema.safeParse(row.data);
+    if (!parsed.success) continue;
+    const date = localDateInZone(parsed.data.occurredAt, result.timezone);
+    if (date < result.startDate || date > result.endDate) continue;
+    const totals = activityByDate.get(date) ?? { workoutSessions: 0, hasSteps: false, steps: 0 };
+    if (["walk", "cardio", "strength"].includes(parsed.data.activityType)) totals.workoutSessions += 1;
+    if (parsed.data.activityType === "steps" && parsed.data.steps !== null) {
+      totals.hasSteps = true;
+      totals.steps += parsed.data.steps;
+    }
+    activityByDate.set(date, totals);
+  }
+
+  const measurementRecordSchema = createMeasurementRequestSchema.omit({ measurementId: true });
+  const measurementValuesByDate = new Map<string, number[]>();
+  const recentMeasurementDates = new Set<string>();
+  for (const row of result.measurementRows) {
+    const parsed = measurementRecordSchema.safeParse(row.data);
+    if (!parsed.success) continue;
+    const date = localDateInZone(parsed.data.measuredAt, result.timezone);
+    if (date >= result.startDate && date <= result.endDate) {
+      const values = measurementValuesByDate.get(date) ?? [];
+      values.push(parsed.data.weightKg);
+      measurementValuesByDate.set(date, values);
+    }
+    if (date >= shiftLocalDate(result.endDate, -27) && date <= result.endDate) recentMeasurementDates.add(date);
+  }
+  const dailyWeightByDate = new Map([...measurementValuesByDate.entries()].flatMap(([date, values]) => {
+    const value = median(values);
+    return value === null ? [] : [[date, value] as const];
+  }));
+  const completeFoodDates = new Set(result.statusRows.filter((row) => row.complete).map((row) => row.localDate));
+  const days: WeeklyProgressReviewResponse["days"] = result.dayDates.map((date) => {
+    const food = foodByDate.get(date);
+    const activity = activityByDate.get(date);
+    const complete = completeFoodDates.has(date);
+    return {
+      date,
+      foodLogCount: food?.count ?? 0,
+      foodDayComplete: complete,
+      caloriesLoggedKcal: food?.count || complete ? roundNutrition(food?.calories ?? 0) : null,
+      proteinLoggedG: food?.count || complete ? roundNutrition(food?.protein ?? 0) : null,
+      workoutSessions: activity?.workoutSessions ?? 0,
+      steps: activity?.hasSteps ? activity.steps : null,
+      measurementWeightKg: dailyWeightByDate.get(date) ?? null,
+      plannedWeightKg: currentGoal && date >= currentGoal.startDate && date <= currentGoal.targetDate
+        ? goalWeightAt(currentGoal, date)
+        : null,
+    };
+  });
+  const completeDays = days.filter((day) => day.foodDayComplete);
+  const workoutDays = days.filter((day) => day.workoutSessions > 0);
+  const stepDays = days.filter((day) => day.steps !== null);
+  const weighedDays = [...dailyWeightByDate.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const firstWeighIn = weighedDays[0] ?? null;
+  const lastWeighIn = weighedDays.at(-1) ?? null;
+  const trendDates = [...recentMeasurementDates].sort();
+  const trendFirstDate = trendDates[0] ?? null;
+  const trendLastDate = trendDates.at(-1) ?? null;
+  const trendSpanDays = trendFirstDate && trendLastDate ? daySpan(trendFirstDate, trendLastDate) : 0;
+  const latestPlanComparison = lastWeighIn && currentGoal
+    && lastWeighIn[0] >= currentGoal.startDate && lastWeighIn[0] <= currentGoal.targetDate
+    ? {
+        date: lastWeighIn[0],
+        measuredWeightKg: lastWeighIn[1],
+        plannedWeightKg: goalWeightAt(currentGoal, lastWeighIn[0]),
+        differenceKg: roundNutrition(lastWeighIn[1] - goalWeightAt(currentGoal, lastWeighIn[0])),
+      }
+    : null;
+  const response: WeeklyProgressReviewResponse = {
+    timezone: result.timezone,
+    startDate: result.startDate,
+    endDate: result.endDate,
+    dailyTargets: {
+      caloriesKcal: currentGoal?.dailyCaloriesKcal ?? null,
+      proteinG: currentGoal?.macrosGrams?.protein ?? null,
+    },
+    days,
+    summary: {
+      completeFoodDays: completeDays.length,
+      foodDaysWithLogs: days.filter((day) => day.foodLogCount > 0).length,
+      averageCaloriesOnCompleteDaysKcal: completeDays.length
+        ? roundNutrition(completeDays.reduce((total, day) => total + (day.caloriesLoggedKcal ?? 0), 0) / completeDays.length)
+        : null,
+      averageProteinOnCompleteDaysG: completeDays.length
+        ? roundNutrition(completeDays.reduce((total, day) => total + (day.proteinLoggedG ?? 0), 0) / completeDays.length)
+        : null,
+      workoutDays: workoutDays.length,
+      workoutSessions: days.reduce((total, day) => total + day.workoutSessions, 0),
+      stepDays: stepDays.length,
+      averageStepsOnLoggedDays: stepDays.length
+        ? roundNutrition(stepDays.reduce((total, day) => total + (day.steps ?? 0), 0) / stepDays.length)
+        : null,
+      weighInDays: weighedDays.length,
+      firstWeighInDate: firstWeighIn?.[0] ?? null,
+      lastWeighInDate: lastWeighIn?.[0] ?? null,
+      recordedWeightChangeKg: firstWeighIn && lastWeighIn && firstWeighIn[0] !== lastWeighIn[0]
+        ? roundNutrition(lastWeighIn[1] - firstWeighIn[1])
+        : null,
+      latestPlanComparison,
+    },
+    trendReadiness: {
+      eligible: recentMeasurementDates.size >= 6 && trendSpanDays >= 14,
+      measurementDays: recentMeasurementDates.size,
+      spanDays: trendSpanDays,
+      firstMeasurementDate: trendFirstDate,
+      lastMeasurementDate: trendLastDate,
+      windowStartDate: shiftLocalDate(result.endDate, -27),
+      windowEndDate: result.endDate,
+      requiredMeasurementDays: 6,
+      requiredSpanDays: 14,
+    },
+  };
+  const validated = weeklyProgressReviewResponseSchema.safeParse(response);
+  if (!validated.success) return c.json({ error: "weekly_progress_review_unavailable" }, 500);
+  return c.json(validated.data);
 });
 
 app.put("/v1/days/:date/food-status", async (c) => {

@@ -977,9 +977,9 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 5 — Signature progress graph and daily dashboard
 
-**Current status:** The dashboard and Progress page render the accepted target trajectory beside timezone-aware weigh-ins, with a rolling average over up to three recorded weigh-in days, 30/90-day and full-goal ranges, a target-date marker, accepted goal-version annotations, and a written comparison summary. Home now labels food-log completeness and manual activity sources; the full weekly review and forecast gating remain outstanding.
+**Current status:** The dashboard and Progress page render the accepted target trajectory beside timezone-aware weigh-ins, with a rolling average over up to three recorded weigh-in days, 30/90-day and full-goal ranges, a target-date marker, accepted goal-version annotations, and a written comparison summary. An authenticated seven-day review now summarizes complete food days, calories and protein on complete days, walks/workouts, logged steps, daily median weigh-ins, and the latest measured-versus-planned comparison. Incomplete food days and absent records remain unknown, and averages exclude incomplete food days. The API reports trend-estimate eligibility only after at least six distinct measurement days spanning fourteen days within the latest 28 days; it does not generate an arrival date. Typecheck and lint pass; live API and Android browser verification remain outstanding.
 
-- Add accessible textual summaries and a weekly review payload. Gate forecasts until sufficient measurements exist.
+- Add accessible textual summaries and a weekly review payload. Gate forecasts until sufficient measurements exist. **Implemented in code; live verification remains.**
 
 **Deliverables:** Home and Progress views backed by real data.
 
