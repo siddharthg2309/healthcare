@@ -949,7 +949,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 - Deploy the same Next.js/Hono application to Vercel; do not create a separate API deployment.
 - Create a friend invitation through the owner CLI.
 
-**Current status:** Auth, API, migrations, and environment placeholders are scaffolded locally. Live Neon migration, Vercel deployment, and two-account isolation remain to be completed.
+**Current status:** Better Auth, application-schema, and LangGraph migrations have been applied to the configured Neon database. A read-only catalog check confirmed the expected core tables. Vercel deployment, signup/invitation-flow checks, and two-account isolation remain to be completed.
 
 **Deliverables:** Hosted login and invitation-backed accounts.
 
@@ -1045,9 +1045,9 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 11 — Production hardening and private release
 
-**Current status: in progress.** The app now has an owner-scoped JSON export, password-confirmed account deletion, LangGraph checkpoint cleanup, and a migration that forces row-level security on personal food, day-status, plan, and AI-run tables. That migration also adds account-delete cascades. Authenticated API responses use `Cache-Control: private, no-store`. Production Neon application of the migration, two-account isolation checks, backup/restore exercise, live OAuth/provider verification, OpenRouter shared-key spend-limit setup/verification, Vercel deployment, EAS project linking, and Android APK installation checks remain outstanding. A configurable per-account rolling 24-hour quota plus per-call token and provider-reported cost accounting now cover food vision and both planners.
+**Current status: in progress.** The app now has an owner-scoped JSON export, password-confirmed account deletion, LangGraph checkpoint cleanup, and a migration that forces row-level security on personal food, day-status, plan, and AI-run tables. That migration also adds account-delete cascades. Authenticated API responses use `Cache-Control: private, no-store`. On 21 October 2026, Better Auth, Drizzle application, and LangGraph migrations were applied to the configured Neon database. Read-only checks confirmed the core tables and verified that `user_foods`, `food_day_statuses`, `plans`, and `ai_runs` have forced row-level security with one owner policy each. Two-account isolation checks, a backup/restore exercise, live OAuth/provider verification, OpenRouter shared-key spend-limit setup/verification, Vercel deployment, EAS project linking, and Android APK installation checks remain outstanding. A configurable per-account rolling 24-hour quota plus per-call token and provider-reported cost accounting now cover food vision and both planners.
 
-- Configure production Vercel environment variables and reviewed Neon migrations/backups.
+- Configure production Vercel environment variables, define a Neon backup policy, and rehearse a restore. Apply future schema changes from the trusted checkout with reviewed migrations.
 - Verify login, invitations, two-user isolation, browser and APK behavior, error handling, deletion/export, and restore procedures.
 - Check accessibility, privacy/cache behavior, upload retention, provider limits, and actual AI cost before enabling each model workflow.
 - Share the HTTPS link privately and invite a small friend group.

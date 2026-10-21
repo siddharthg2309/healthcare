@@ -9,6 +9,10 @@ const optionalText = z.preprocess(
   (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
   z.string().trim().min(1).optional(),
 );
+const optionalSecret = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().min(32).optional(),
+);
 const optionalUrl = z.preprocess(
   (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
   z.string().url().optional(),
@@ -25,7 +29,7 @@ const environmentSchema = z.object({
   AUTH_SECRET: z.string().min(32),
   AUTH_BASE_URL: z.string().url(),
   AUTH_TRUSTED_ORIGINS: z.string().optional(),
-  JOB_DISPATCH_SECRET: z.string().min(32).optional(),
+  JOB_DISPATCH_SECRET: optionalSecret,
   OPENROUTER_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default("minimax/minimax-m3"),
   AI_USER_DAILY_OPERATION_LIMIT: z.coerce.number().int().min(1).max(100).default(10),
