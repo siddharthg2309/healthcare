@@ -38,6 +38,11 @@ export interface FoodSafetyRequirements {
   unsupportedRestrictions: string[];
 }
 
+export interface WeeklyFoodPreferences {
+  pattern: "no_preference" | "vegetarian" | "non_vegetarian" | "mixed";
+  vegetarianWeekdays: readonly number[];
+}
+
 function normalize(value: string): string {
   return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -125,6 +130,30 @@ export function deriveFoodSafetyRequirements(
     avoidAllergens: [...avoidAllergens].sort(),
     unsupportedRestrictions,
   };
+}
+
+export function isVegetarianOnlyDay(preferences: WeeklyFoodPreferences, date: string): boolean {
+  if (preferences.pattern === "vegetarian") return true;
+  if (preferences.pattern !== "mixed") return false;
+  const parsed = Date.parse(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed)) return false;
+  return preferences.vegetarianWeekdays.includes(new Date(parsed).getUTCDay());
+}
+
+export function deriveMealPlanFoodSafetyRequirements(
+  dietaryPreferences: readonly string[],
+  restrictions: readonly string[],
+  foodPreferences: WeeklyFoodPreferences,
+  date?: string,
+): FoodSafetyRequirements {
+  const requirements = deriveFoodSafetyRequirements(dietaryPreferences, restrictions);
+  const vegetarianOnly = date === undefined
+    ? foodPreferences.pattern === "vegetarian"
+    : isVegetarianOnlyDay(foodPreferences, date);
+  if (vegetarianOnly && !requirements.dietaryTags.includes("vegetarian")) {
+    requirements.dietaryTags = [...requirements.dietaryTags, "vegetarian"].sort();
+  }
+  return requirements;
 }
 
 export function isFoodAllowedByReviewedMetadata(

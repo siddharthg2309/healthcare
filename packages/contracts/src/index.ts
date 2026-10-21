@@ -2,6 +2,20 @@ import { z } from "zod";
 
 const uuidSchema = z.string().uuid();
 const isoDateTime = z.string().datetime({ offset: true });
+const foodPreferencesSchema = z.object({
+  pattern: z.enum(["no_preference", "vegetarian", "non_vegetarian", "mixed"]).default("no_preference"),
+  vegetarianWeekdays: z.array(z.number().int().min(0).max(6)).max(7).default([]),
+}).strict().superRefine((preferences, context) => {
+  if (new Set(preferences.vegetarianWeekdays).size !== preferences.vegetarianWeekdays.length) {
+    context.addIssue({ code: "custom", path: ["vegetarianWeekdays"], message: "Select each vegetarian weekday only once." });
+  }
+  if (preferences.pattern === "mixed" && (preferences.vegetarianWeekdays.length < 1 || preferences.vegetarianWeekdays.length > 6)) {
+    context.addIssue({ code: "custom", path: ["vegetarianWeekdays"], message: "Choose one to six vegetarian days for a mixed week." });
+  }
+  if (preferences.pattern !== "mixed" && preferences.vegetarianWeekdays.length > 0) {
+    context.addIssue({ code: "custom", path: ["vegetarianWeekdays"], message: "Vegetarian weekdays are only used for a mixed weekly pattern." });
+  }
+});
 
 export const profileSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
@@ -12,6 +26,7 @@ export const profileSchema = z.object({
   energyEquation: z.enum(["mifflin_female", "mifflin_male", "manual", "not_provided"]),
   activityLevel: z.enum(["sedentary", "light", "moderate", "active", "very_active"]),
   timezone: z.string().min(1).max(80),
+  foodPreferences: foodPreferencesSchema.default({ pattern: "no_preference", vegetarianWeekdays: [] }),
   dietaryPreferences: z.array(z.string().trim().min(1).max(48)).max(30),
   restrictions: z.array(z.string().trim().min(1).max(80)).max(50),
   equipment: z.array(z.string().trim().min(1).max(80)).max(50),
@@ -739,6 +754,7 @@ export const syncPullQuerySchema = z.object({
 }).strict();
 
 export type Profile = z.infer<typeof profileSchema>;
+export type FoodPreferences = z.infer<typeof foodPreferencesSchema>;
 export type ReminderPreferences = z.infer<typeof reminderPreferencesResponseSchema>;
 export type DeleteAccountRequest = z.infer<typeof deleteAccountRequestSchema>;
 export type SetFoodFavoriteRequest = z.infer<typeof setFoodFavoriteRequestSchema>;

@@ -17,6 +17,8 @@ type Draft = {
   energyEquation: Profile["energyEquation"];
   activityLevel: Profile["activityLevel"];
   timezone: string;
+  foodPattern: Profile["foodPreferences"]["pattern"];
+  vegetarianWeekdays: number[];
   dietaryPreferences: string;
   restrictions: string;
   equipment: string[];
@@ -49,6 +51,16 @@ function splitList(value: string, max: number): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, max);
 }
 
+const weekdayOptions = [
+  { value: 1, label: "Monday", shortLabel: "Mon" },
+  { value: 2, label: "Tuesday", shortLabel: "Tue" },
+  { value: 3, label: "Wednesday", shortLabel: "Wed" },
+  { value: 4, label: "Thursday", shortLabel: "Thu" },
+  { value: 5, label: "Friday", shortLabel: "Fri" },
+  { value: 6, label: "Saturday", shortLabel: "Sat" },
+  { value: 0, label: "Sunday", shortLabel: "Sun" },
+];
+
 function errorMessage(error: unknown): string {
   if (error instanceof ApiError && Array.isArray(error.details.reasons)) {
     return (error.details.reasons as string[]).join(" ");
@@ -72,6 +84,8 @@ export function OnboardingWizard({
     energyEquation: "not_provided",
     activityLevel: "light",
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    foodPattern: "no_preference",
+    vegetarianWeekdays: [],
     dietaryPreferences: "",
     restrictions: "",
     equipment: [],
@@ -114,6 +128,10 @@ export function OnboardingWizard({
       energyEquation: draft.energyEquation,
       activityLevel: draft.activityLevel,
       timezone: draft.timezone,
+      foodPreferences: {
+        pattern: draft.foodPattern,
+        vegetarianWeekdays: draft.foodPattern === "mixed" ? draft.vegetarianWeekdays : [],
+      },
       dietaryPreferences: splitList(draft.dietaryPreferences, 30),
       restrictions: splitList(draft.restrictions, 50),
       equipment: draft.homeEnabled ? draft.equipment : [],
@@ -127,7 +145,9 @@ export function OnboardingWizard({
       clinicianDirectedDiet: draft.clinicianDirectedDiet,
     });
     if (!parsed.success) {
-      setError("Check your name, age, measurements, and that gym plus home days total no more than seven.");
+      setError(draft.foodPattern === "mixed" && (draft.vegetarianWeekdays.length < 1 || draft.vegetarianWeekdays.length > 6)
+        ? "Choose one to six vegetarian weekdays for a mixed food plan."
+        : "Check your details and that gym plus home workout days total no more than seven.");
       return;
     }
     setProfile(parsed.data);
@@ -253,7 +273,45 @@ export function OnboardingWizard({
                 <small>If none are selected, home sessions use bodyweight exercises.</small>
               </fieldset> : null}
               <Field label="Movements you need to avoid" value={draft.movementLimitations} onChange={(value) => update("movementLimitations", value)} placeholder="Optional; comma-separated" />
-              <Field label="Food preferences" value={draft.dietaryPreferences} onChange={(value) => update("dietaryPreferences", value)} placeholder="Vegetarian, South Indian" />
+              <fieldset className="field food-pattern-field">
+                <legend>Food pattern</legend>
+                <div className="food-pattern-options" role="radiogroup" aria-label="Weekly food pattern">
+                  {([
+                    ["no_preference", "No preference"],
+                    ["vegetarian", "Vegetarian"],
+                    ["non_vegetarian", "Non-vegetarian"],
+                    ["mixed", "Mixed by weekday"],
+                  ] as const).map(([value, label]) => (
+                    <label className={draft.foodPattern === value ? "food-pattern-choice food-pattern-choice-selected" : "food-pattern-choice"} key={value}>
+                      <input type="radio" name="food-pattern" value={value} checked={draft.foodPattern === value} onChange={() => {
+                        update("foodPattern", value);
+                        if (value !== "mixed") update("vegetarianWeekdays", []);
+                      }} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                {draft.foodPattern === "mixed" ? (
+                  <fieldset className="field vegetarian-days-field">
+                    <legend>Which days should be vegetarian?</legend>
+                    <div className="vegetarian-day-options">
+                      {weekdayOptions.map((day) => (
+                        <label className="toggle-row" key={day.value}>
+                          <input type="checkbox" checked={draft.vegetarianWeekdays.includes(day.value)} onChange={(event) => update("vegetarianWeekdays", event.target.checked ? [...draft.vegetarianWeekdays, day.value] : draft.vegetarianWeekdays.filter((weekday) => weekday !== day.value))} />
+                          <span aria-label={day.label}>{day.shortLabel}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <small>Choose one to six days. The planner will use vegetarian foods on those days and non-vegetarian dishes on the remaining days when the catalog supports them.</small>
+                  </fieldset>
+                ) : draft.foodPattern === "vegetarian" ? (
+                  <small className="food-pattern-note">Every day will use reviewed vegetarian-tagged foods.</small>
+                ) : draft.foodPattern === "non_vegetarian" ? (
+                  <small className="food-pattern-note">Meat, fish, or eggs may be included on any day.</small>
+                ) : <small className="food-pattern-note">All foods are available unless you set other restrictions.</small>}
+              </fieldset>
+              <Field label="Cuisine and other preferences" value={draft.dietaryPreferences} onChange={(value) => update("dietaryPreferences", value)} placeholder="South Indian, high protein" />
+              <p className="field-note">Set vegetarian and non-vegetarian days above. Use this field for cuisine and meal style.</p>
               <Field label="Allergies or foods to avoid" value={draft.restrictions} onChange={(value) => update("restrictions", value)} placeholder="Peanuts, shellfish" />
             </div>
             <p className="field-note">Workout suggestions use your experience, available equipment, and preferred session length. If you list a movement limitation, use a reviewed template until that limitation can be safely reviewed.</p>

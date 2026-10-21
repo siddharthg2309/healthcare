@@ -131,7 +131,7 @@ export function DashboardApp() {
 
         <div className="content-wrap">
           {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} /> : null}
-          {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} onSaved={reloadData} /> : null}
+          {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} foodPreferences={profile.foodPreferences} onSaved={reloadData} /> : null}
           {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} unitSystem={profile.unitSystem} equipment={profile.equipment} gymWorkoutDays={profile.gymWorkoutDays ?? 0} homeWorkoutDays={profile.homeWorkoutDays ?? profile.availableWorkoutDays} onSaved={reloadData} /> : null}
           {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} unitSystem={profile.unitSystem} onMeasurementAdded={reloadData} /> : null}
           {tab === "settings" ? <SettingsView userId={session.user.id} onAccountDeleted={refetch} /> : null}

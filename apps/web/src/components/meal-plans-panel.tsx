@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   mealPlanVersionSchema,
   mealPlansResponseSchema,
+  type FoodPreferences,
   type MealPlanVersion,
 } from "@healthcare/contracts";
+import { isVegetarianOnlyDay } from "@healthcare/domain";
 import { ApiError, postJson, requestJson } from "@/lib/api";
 
 const mealLabels: Record<string, string> = {
@@ -39,6 +41,7 @@ function mealPlanError(error: unknown): string {
       meal_planning_not_available_for_this_profile: "Meal planning is not available for this profile. Food logging remains available.",
       meal_plan_food_metadata_required: "The catalog needs more reviewed tags for your saved food preferences or restrictions before it can build this plan.",
       meal_plan_food_not_available: "That food no longer matches your saved dietary filters. Choose another reviewed catalog food.",
+      meal_plan_vegetarian_day_food_required: "This day is set as vegetarian. Choose a reviewed vegetarian catalog food instead.",
       meal_plan_catalog_coverage_insufficient: "The reviewed catalog needs more foods before it can build a useful week. Add more reviewed entries and try again.",
       meal_plan_edit_invalid: "This change puts a day outside the plan's nutrition range. Try a different food or adjust its portion.",
       meal_plan_version_conflict: "Another session saved a newer draft. Your unsaved edits are still on screen; reload the saved version before continuing.",
@@ -102,7 +105,7 @@ function recalculateDay(day: MealPlanDay, meals: MealPlanMeal[]): MealPlanDay {
   };
 }
 
-export function MealPlansPanel({ startDate }: { startDate: string }) {
+export function MealPlansPanel({ startDate, foodPreferences }: { startDate: string; foodPreferences: FoodPreferences }) {
   const [plans, setPlans] = useState<MealPlanVersion[]>([]);
   const [draft, setDraft] = useState<MealPlanVersion | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,6 +125,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
   const activePlan = useMemo(() => plans.find((plan) => plan.status === "active") ?? null, [plans]);
   const visiblePlan = draft ?? activePlan;
   const selectedDay = visiblePlan?.data.days.find((day) => day.date === selectedDate) ?? visiblePlan?.data.days[0] ?? null;
+  const swapDate = swapTarget ? visiblePlan?.data.days[swapTarget.dayIndex]?.date : undefined;
   const history = plans.filter((plan) => plan.status === "superseded" || plan.status === "archived");
   const availableSwapResults = swapResults.filter((food) => food.source === "personal" || food.reviewed);
 
@@ -132,6 +136,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
       setSwapBusy(true);
       setSwapError("");
       const query = new URLSearchParams({ query: swapQuery.trim(), purpose: "meal_plan" });
+      if (swapDate) query.set("date", swapDate);
       void requestJson<{ foods: SwapFoodOption[] }>(`/v1/foods?${query.toString()}`, { signal: controller.signal })
         .then((response) => {
           if (!controller.signal.aborted) setSwapResults(response.foods);
@@ -149,7 +154,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [swapQuery, swapTarget]);
+  }, [swapQuery, swapTarget, swapDate]);
 
   async function loadPlans() {
     const response = await requestJson<unknown>("/v1/meal-plans", { cache: "no-store" });
@@ -393,7 +398,11 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
 
         {selectedDay ? <div className="meal-plan-day-view">
           <div className="meal-day-summary">
-            <div><span className="eyebrow">{dateLabel(selectedDay.date, { weekday: "long", month: "long", day: "numeric" })}</span><strong>{Math.round(selectedDay.totals.caloriesKcal).toLocaleString("en-IN")} <small>/ {visiblePlan.data.dailyCalorieTargetKcal.toLocaleString("en-IN")} kcal</small></strong></div>
+            <div>
+              <span className="eyebrow">{dateLabel(selectedDay.date, { weekday: "long", month: "long", day: "numeric" })}</span>
+              {isVegetarianOnlyDay(foodPreferences, selectedDay.date) ? <span className="diet-day-badge">Vegetarian day</span> : null}
+              <strong>{Math.round(selectedDay.totals.caloriesKcal).toLocaleString("en-IN")} <small>/ {visiblePlan.data.dailyCalorieTargetKcal.toLocaleString("en-IN")} kcal</small></strong>
+            </div>
             <div className="meal-day-macros"><span>Protein <b>{round(selectedDay.totals.proteinG)}{visiblePlan.data.macroTargetsGrams ? ` / ${round(visiblePlan.data.macroTargetsGrams.proteinG)}` : ""}g</b></span><span>Carbs <b>{round(selectedDay.totals.carbohydrateG)}{visiblePlan.data.macroTargetsGrams ? ` / ${round(visiblePlan.data.macroTargetsGrams.carbohydrateG)}` : ""}g</b></span><span>Fat <b>{round(selectedDay.totals.fatG)}{visiblePlan.data.macroTargetsGrams ? ` / ${round(visiblePlan.data.macroTargetsGrams.fatG)}` : ""}g</b></span></div>
           </div>
           <div className="meal-plan-meals">

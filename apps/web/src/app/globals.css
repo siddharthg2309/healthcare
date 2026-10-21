@@ -396,6 +396,16 @@ a { color: inherit; text-decoration: none; }
 .form-grid { display: grid; grid-template-columns: 1fr; gap: 11px; }
 .toggle-row { display: flex; align-items: center; gap: 9px; min-height: 35px; color: var(--ink); font-size: 11px; }
 .toggle-row input, .acknowledgment input { width: 17px; height: 17px; accent-color: var(--green); }
+.food-pattern-field, .vegetarian-days-field { min-width: 0; margin: 0; padding: 0; border: 0; }
+.food-pattern-field legend, .vegetarian-days-field legend { padding: 0; color: var(--ink); font-size: 10px; font-weight: 600; }
+.food-pattern-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.food-pattern-choice { min-height: 42px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; }
+.food-pattern-choice-selected { border-color: var(--lime-strong); background: var(--lime-pale); color: var(--green); }
+.food-pattern-choice input { width: 15px; height: 15px; accent-color: var(--green); }
+.food-pattern-note, .vegetarian-days-field > small { color: var(--muted); font-size: 9px; font-weight: 400; line-height: 1.5; }
+.vegetarian-days-field { display: grid; gap: 8px; margin-top: 4px; }
+.vegetarian-day-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 8px; }
+.vegetarian-day-options .toggle-row { gap: 5px; font-size: 10px; }
 .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 4px; border-radius: 15px; background: var(--surface-soft); }
 .segment { min-height: 36px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-size: 10px; font-weight: 600; cursor: pointer; }
 .segment-selected { background: var(--surface); color: var(--green); box-shadow: 0 2px 8px rgba(20, 40, 16, .07); }
@@ -440,6 +450,7 @@ a { color: inherit; text-decoration: none; }
 .meal-plan-day-view { display: grid; gap: 12px; }
 .meal-day-summary { display: grid; gap: 12px; padding: 14px; border-radius: 17px; background: var(--surface-soft); }
 .meal-day-summary > div:first-child { display: grid; gap: 5px; }
+.diet-day-badge { width: fit-content; padding: 4px 8px; border-radius: 999px; background: var(--lime-pale); color: var(--green); font-size: 8px; font-weight: 700; }
 .meal-day-summary > div:first-child > strong { font-size: 24px; line-height: 1.1; letter-spacing: -.05em; }
 .meal-day-summary > div:first-child > strong small { color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: 0; }
 .meal-day-macros { display: flex; flex-wrap: wrap; gap: 7px; }

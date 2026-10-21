@@ -5,9 +5,10 @@ import type {
   FoodPhotoRecognitionRequest,
   FoodPhotoRecognitionResponse,
   CopyFoodLogsRequest,
+  FoodPreferences,
   WorkoutExercise,
 } from "@healthcare/contracts";
-import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
+import { exerciseCatalog, findExerciseById, isVegetarianOnlyDay, workoutTemplates } from "@healthcare/domain";
 import type { WorkoutPlanSession, WorkoutPlanVersion } from "@healthcare/contracts";
 import {
   ApiError,
@@ -103,7 +104,7 @@ function emptyDaySummary(date: string, timezone: string): DaySummary {
   };
 }
 
-type Props = { day: DaySummary; onSaved: () => Promise<void> };
+type Props = { day: DaySummary; foodPreferences: FoodPreferences; onSaved: () => Promise<void> };
 
 const meals = ["breakfast", "lunch", "dinner", "snack"] as const;
 const categories = ["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"] as const;
@@ -184,7 +185,7 @@ async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest
   throw new Error("The photo is still too large after compression. Choose another photo.");
 }
 
-export function FoodTrackingView({ day, onSaved }: Props) {
+export function FoodTrackingView({ day, foodPreferences, onSaved }: Props) {
   const [foodView, setFoodView] = useState<"log" | "plan">("log");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
@@ -445,7 +446,7 @@ export function FoodTrackingView({ day, onSaved }: Props) {
         <button type="button" role="tab" aria-selected={foodView === "log"} className={foodView === "log" ? "food-section-tab food-section-tab-active" : "food-section-tab"} onClick={() => setFoodView("log")}>Food log</button>
         <button type="button" role="tab" aria-selected={foodView === "plan"} className={foodView === "plan" ? "food-section-tab food-section-tab-active" : "food-section-tab"} onClick={() => setFoodView("plan")}>Meal plan</button>
       </div>
-      {foodView === "plan" ? <MealPlansPanel startDate={day.date} /> : null}
+      {foodView === "plan" ? <MealPlansPanel startDate={day.date} foodPreferences={foodPreferences} /> : null}
       {foodView === "log" ? <section className="tracking-grid">
         <div className="panel food-entry-panel">
           <div className="panel-heading"><div><span className="eyebrow">ADD A FOOD</span><h2>Search your catalog</h2></div><span className="panel-symbol">◉</span></div>

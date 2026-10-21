@@ -50,7 +50,7 @@ import {
 } from "@healthcare/contracts";
 import {
   buildGoalProposal,
-  deriveFoodSafetyRequirements,
+  deriveMealPlanFoodSafetyRequirements,
   findExerciseById,
   isFoodAllowedByReviewedMetadata,
   type FoodSafetyMetadata,
@@ -637,11 +637,15 @@ app.get("/v1/foods", async (c) => {
   const query = params.get("query")?.trim() ?? "";
   const view = params.get("view") ?? "all";
   const purpose = params.get("purpose") ?? "logging";
+  const selectedMealDate = params.get("date");
   if (view !== "all" && view !== "favorites" && view !== "recent") {
     return c.json({ error: "invalid_food_search_view" }, 400);
   }
   if (purpose !== "logging" && purpose !== "meal_plan") return c.json({ error: "invalid_food_search_purpose" }, 400);
   const mealPlanPurpose = purpose === "meal_plan";
+  if (mealPlanPurpose && selectedMealDate !== null && !isLocalDate(selectedMealDate)) {
+    return c.json({ error: "invalid_meal_plan_date" }, 400);
+  }
   const favoritesOnly = view === "favorites";
   const recentOnly = view === "recent";
   if (query.length > 80) return c.json({ error: "search_query_too_long" }, 400);
@@ -654,7 +658,14 @@ app.get("/v1/foods", async (c) => {
       const [profileRow] = await tx.select({ data: userProfiles.data }).from(userProfiles)
         .where(eq(userProfiles.userId, userId)).limit(1);
       const profile = profileSchema.safeParse(profileRow?.data);
-      if (profile.success) safetyRequirements = deriveFoodSafetyRequirements(profile.data.dietaryPreferences, profile.data.restrictions);
+      if (profile.success) {
+        safetyRequirements = deriveMealPlanFoodSafetyRequirements(
+          profile.data.dietaryPreferences,
+          profile.data.restrictions,
+          profile.data.foodPreferences,
+          selectedMealDate ?? undefined,
+        );
+      }
     }
     const favorites = await tx.select({ foodId: foodFavorites.foodId, foodSource: foodFavorites.foodSource })
       .from(foodFavorites).where(eq(foodFavorites.userId, userId));
@@ -2328,7 +2339,7 @@ app.patch("/v1/meal-plans/:id", async (c) => {
     data = await recalculateMealPlanEdit(userId, parsed.data, currentData.data.dailyCalorieTargetKcal, currentData.data.macroTargetsGrams);
   } catch (error) {
     const code = error instanceof Error ? error.message : "meal_plan_edit_invalid";
-    return c.json({ error: ["meal_plan_foods_required", "meal_plan_food_not_available", "meal_plan_edit_invalid", "meal_plan_food_metadata_required"].includes(code) ? code : "meal_plan_edit_invalid" }, 422);
+    return c.json({ error: ["meal_plan_foods_required", "meal_plan_food_not_available", "meal_plan_edit_invalid", "meal_plan_food_metadata_required", "meal_plan_vegetarian_day_food_required"].includes(code) ? code : "meal_plan_edit_invalid" }, 422);
   }
   const [saved] = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
