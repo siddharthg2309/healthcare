@@ -338,6 +338,11 @@ a { color: inherit; text-decoration: none; }
 .auth-card { width: min(100%, 410px); justify-self: center; padding: 22px 18px; border: 1px solid var(--line); border-radius: 25px; background: var(--surface); box-shadow: var(--shadow); }
 .auth-card h2 { margin: 7px 0 4px; font-size: 23px; letter-spacing: -.05em; }
 .auth-card > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.button-google { justify-content: center; margin-top: 17px; border-color: var(--line); border-radius: 13px; background: var(--surface); color: var(--ink); }
+.button-google:hover:not(:disabled) { border-color: var(--green); }
+.google-mark { background: conic-gradient(from -45deg, #4285f4 0 25%, #34a853 25% 50%, #fbbc05 50% 75%, #ea4335 75%); background-clip: text; color: transparent; font-size: 17px; font-weight: 800; -webkit-background-clip: text; }
+.auth-divider { display: flex; align-items: center; gap: 10px; margin-top: 15px; color: var(--faint); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.auth-divider::before, .auth-divider::after { height: 1px; flex: 1; background: var(--line); content: ""; }
 .auth-form { display: grid; gap: 13px; margin-top: 19px; }
 .auth-footnote { display: block; margin-top: 18px; color: var(--faint); font-size: 9px; line-height: 1.55; text-align: center; }
 .field { min-width: 0; display: grid; gap: 6px; color: var(--ink); font-size: 10px; font-weight: 600; }

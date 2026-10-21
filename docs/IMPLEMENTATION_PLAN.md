@@ -79,7 +79,7 @@ The small audience does not mean the backend runs on a laptop. Vercel serves the
 
 | Feature group | Included behavior |
 | --- | --- |
-| Accounts | Invite-based signup, login, logout, session renewal, account recovery |
+| Accounts | Invite-gated email/password and Google sign-in, login, logout, session renewal, account recovery |
 | Profile | Measurements, goal, food preferences, allergies, activity habits, equipment, schedule, units, timezone |
 | Food catalog | Search, aliases, common portions, source information, favorites, recent foods, custom foods and recipes |
 | Food logging | Manual food/quantity entry, photo-assisted identification, multiple foods per meal, editing and deletion |
@@ -359,7 +359,7 @@ The weekly review should prioritize measured change, coverage of logs and weigh-
 | Browser data | Same-origin requests; React state for temporary view state | Avoids a second API URL or secrets in the browser bundle |
 | API | Next Route Handlers forwarding into the Hono modular API | Reuses server-side contracts and domain modules within the same deployment |
 | Database | Neon Postgres + Drizzle ORM/migrations | Cloud source of truth, relational constraints, and versioned schema |
-| Authentication | Better Auth on the server with invite-gated email/password accounts | Keeps session validation and database credentials server-side |
+| Authentication | Better Auth on the server with invite-gated email/password and optional Google OAuth accounts | Keeps session validation and database credentials server-side |
 | Contracts/domain | Shared Zod contracts and pure deterministic TypeScript services | Validate input/output independently of the model |
 | AI orchestration | Two bounded LangGraph workflows for meal and workout plans | Persisted state, explicit branches, bounded repair, and user approval |
 | Model access | Server adapter to OpenRouter → MiniMax M3 | Multimodal model stays replaceable and its key never reaches the browser |
@@ -944,12 +944,12 @@ The sequence delivers tracking and the signature progress graph before AI featur
 ### Phase 2 — Neon, authentication, invitations, and schema
 
 - Provision Neon Postgres and apply reviewed Drizzle/auth migrations from a trusted local checkout.
-- Verify Better Auth email/password signup, sign-in, cookie session, sign-out, and invite-code enforcement.
+- Verify Better Auth email/password and Google signup/sign-in, cookie session, sign-out, and invite enforcement for both methods.
 - Check access isolation with separate accounts and ensure every private query is owner-scoped.
 - Deploy the same Next.js/Hono application to Vercel; do not create a separate API deployment.
 - Create a friend invitation through the owner CLI.
 
-**Current status:** Better Auth, application-schema, and LangGraph migrations have been applied to the configured Neon database. A read-only catalog check confirmed the expected core tables. Vercel deployment, signup/invitation-flow checks, and two-account isolation remain to be completed.
+**Current status:** Better Auth, application-schema, and LangGraph migrations have been applied to the configured Neon database. A read-only catalog check confirmed the expected core tables. Optional Google OAuth sign-in is wired to verified, email-bound invitations and appears only when both Google credentials are configured. Vercel deployment, signup/invitation-flow checks, OAuth callback verification, and two-account isolation remain to be completed.
 
 **Deliverables:** Hosted login and invitation-backed accounts.
 
@@ -1112,7 +1112,9 @@ The web app uses relative API routes at the same origin. The optional Android sh
 | AUTH_BASE_URL | Better Auth is enabled; set to the public app origin |
 | AUTH_TRUSTED_ORIGINS | Set to the exact deployed app origin |
 | OPENROUTER_API_KEY | Only when server-side photo recognition/planning is enabled |
-| Storage/OAuth/worker variables | Only after those integrations are implemented and deployed |
+| GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET | Optional; enable invite-gated Google sign-in and register `/api/auth/callback/google` in Google Cloud |
+| GOOGLE_REDIRECT_URI and TOKEN_ENCRYPTION_KEY | Optional; required only for Google Calendar sync |
+| Storage and worker variables | Only after private object storage or a separate job worker is deployed |
 
 Do not add database URLs, auth keys, OpenRouter credentials, private storage keys, or token-encryption keys as NEXT_PUBLIC or EXPO_PUBLIC values. Vercel environment variables are set in project settings, not committed into the repository.
 

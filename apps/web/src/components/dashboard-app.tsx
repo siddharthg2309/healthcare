@@ -161,6 +161,25 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [googleAvailable, setGoogleAvailable] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (new URLSearchParams(window.location.search).get("auth") === "google-error") {
+      window.setTimeout(() => {
+        if (active) setError("Could not complete Google sign-in. New accounts need an invitation for that verified Google email.");
+      }, 0);
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash}`);
+    }
+    void requestJson<{ google: boolean }>("/v1/auth/providers")
+      .then((providers) => {
+        if (active) setGoogleAvailable(providers.google);
+      })
+      .catch(() => {
+        if (active) setGoogleAvailable(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -185,6 +204,27 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
     }
   }
 
+  async function continueWithGoogle() {
+    setError("");
+    setBusy(true);
+    try {
+      const result = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
+        errorCallbackURL: "/?auth=google-error",
+      });
+      if (result.error) {
+        setError(result.error.message || "Could not continue with Google. Try again.");
+        return;
+      }
+      if (result.data?.url) window.location.assign(result.data.url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not continue with Google. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main className="auth-page">
       <div className="auth-marketing">
@@ -199,7 +239,14 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
       <section className="auth-card" aria-labelledby="auth-title">
         <span className="eyebrow">PRIVATE BY ACCOUNT</span>
         <h2 id="auth-title">{mode === "sign_up" ? "Create your account" : "Welcome back"}</h2>
-        <p>Each invited friend gets a separate, private account.</p>
+        <p>{mode === "sign_up" ? "New accounts need an invitation for the email you use." : "Each account is private. Sign in with your email or Google."}</p>
+        {googleAvailable ? <>
+          <button className="button button-google button-wide" type="button" disabled={busy} onClick={() => void continueWithGoogle()}>
+            <span className="google-mark" aria-hidden="true">G</span>
+            <span>{busy ? "Opening Google…" : "Continue with Google"}</span>
+          </button>
+          <div className="auth-divider" aria-hidden="true"><span>or use email</span></div>
+        </> : null}
         <form onSubmit={(event) => void submit(event)} className="auth-form">
           {mode === "sign_up" ? <Field label="Name" value={name} onChange={setName} autoComplete="name" /> : null}
           <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
@@ -211,7 +258,7 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
         <button className="text-button" onClick={() => { setMode(mode === "sign_up" ? "sign_in" : "sign_up"); setError(""); }}>
           {mode === "sign_up" ? "Already have an account? Sign in" : "Have an invitation? Create an account"}
         </button>
-        <small className="auth-footnote">Health data is personal. Never use someone else’s account.</small>
+        <small className="auth-footnote">{googleAvailable ? "Google sign-up requires an active invitation for that verified Google email." : "Health data is personal. Never use someone else’s account."}</small>
       </section>
     </main>
   );

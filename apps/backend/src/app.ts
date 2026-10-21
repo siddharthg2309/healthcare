@@ -133,6 +133,11 @@ app.all("/api/auth/sign-up/email", async (c) => {
 
 app.all("/api/auth/*", (c) => auth.handler(c.req.raw));
 
+app.get("/v1/auth/providers", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json({ google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) });
+});
+
 const requireSession = createMiddleware<BackendEnv>(async (c, next) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) return c.json({ error: "unauthorized" }, 401);
