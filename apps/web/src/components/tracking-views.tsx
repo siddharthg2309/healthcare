@@ -8,7 +8,7 @@ import type {
   FoodPreferences,
   WorkoutExercise,
 } from "@healthcare/contracts";
-import { exerciseCatalog, findExerciseById, isVegetarianOnlyDay, workoutTemplates } from "@healthcare/domain";
+import { exerciseCatalog, findExerciseById, workoutTemplates } from "@healthcare/domain";
 import type { WorkoutPlanSession, WorkoutPlanVersion } from "@healthcare/contracts";
 import {
   ApiError,
@@ -16,6 +16,7 @@ import {
   requestJson,
 } from "@/lib/api";
 import { MealPlansPanel } from "./meal-plans-panel";
+import { AppIcon } from "./app-icon";
 import { WorkoutPlansPanel } from "./workout-plans-panel";
 
 export type FoodOption = {
@@ -59,6 +60,7 @@ export type FoodLog = {
     occurredAt: string;
     mealType: "breakfast" | "lunch" | "dinner" | "snack";
     quantityGrams: number;
+    portionCount?: number | null;
     portionLabel?: string | null;
     nutritionPer100g: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
     nutritionTotal: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
@@ -141,10 +143,6 @@ function formatNumber(value: number, digits = 0): string {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: digits }).format(value);
 }
 
-function foodLabel(food: FoodOption): string {
-  return food.source === "personal" ? "Your food" : food.reviewed ? "Reviewed catalog" : "Catalog entry";
-}
-
 async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest> {
   if (!file.type.startsWith("image/")) throw new Error("Choose an image file.");
   if (file.size > 20_000_000) throw new Error("Choose a photo smaller than 20 MB.");
@@ -189,6 +187,9 @@ async function prepareFoodPhoto(file: File): Promise<FoodPhotoRecognitionRequest
 export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTrackingProps) {
   const [foodView, setFoodView] = useState<"log" | "plan">("log");
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const foodDialogRef = useRef<HTMLDialogElement | null>(null);
+  const pendingFoodLog = useRef<{ signature: string; id: string } | null>(null);
+  const [servingCount, setServingCount] = useState("1");
   const [query, setQuery] = useState("");
   const [foodFilter, setFoodFilter] = useState<"all" | "favorites" | "recent">("all");
   const [searchRevision, setSearchRevision] = useState(0);
@@ -270,7 +271,7 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
       setPhotoResult(result);
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "ai_not_configured") {
-        setPhotoError("Photo suggestions need the OpenRouter key in the server environment.");
+        setPhotoError("Photo search is unavailable. Search by name for now.");
       } else if (caught instanceof ApiError && caught.code === "ai_rate_limited") {
         setPhotoError("The AI service is busy. Try again shortly or search by name.");
       } else if (caught instanceof ApiError && caught.code === "ai_daily_limit_reached") {
@@ -283,7 +284,23 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
     }
   }
 
-  const quantityGrams = Number(quantity);
+  const count = Number(servingCount);
+  const quantityGrams = Math.round(Number(quantity) * count * 100) / 100;
+  const validAmount = Number.isFinite(count) && count >= 0.5 && count <= 50 && count * 2 === Math.round(count * 2) && quantityGrams > 0 && quantityGrams <= 5000;
+
+  useEffect(() => {
+    if (!selectedFoodKey) return;
+    const dialog = foodDialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [selectedFoodKey]);
+
+  function changeCount(amount: number) {
+    const current = Number.isFinite(count) && count > 0 ? count : 1;
+    setServingCount(String(Math.min(50, Math.max(0.5, current + amount))));
+  }
   const preview = useMemo(() => {
     if (!selectedFood || !Number.isFinite(quantityGrams) || quantityGrams <= 0) return null;
     const factor = quantityGrams / 100;
@@ -297,20 +314,27 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
 
   async function saveFood(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedFood || !preview) return;
+    if (!selectedFood || !preview || !validAmount) return;
     setBusy(true);
     setError("");
     setMessage("");
     try {
-      await postJson("/v1/food-logs", {
-        logId: globalThis.crypto.randomUUID(),
+      const data = {
         foodId: selectedFood.id,
         portionId: selectedPortionId,
+        ...(selectedPortionId ? { portionCount: count } : {}),
         occurredAt: new Date(occurredAt).toISOString(),
         mealType,
         quantityGrams,
-      });
-      setMessage("Food entry saved.");
+      };
+      const signature = JSON.stringify(data);
+      const pending = pendingFoodLog.current?.signature === signature
+        ? pendingFoodLog.current
+        : { signature, id: globalThis.crypto.randomUUID() };
+      pendingFoodLog.current = pending;
+      await postJson("/v1/food-logs", { ...data, logId: pending.id });
+      pendingFoodLog.current = null;
+      setMessage("Added to your food log.");
       selectFood(null);
       setQuantity("100");
       setSearchRevision((current) => current + 1);
@@ -332,19 +356,19 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
   }
 
   function customFoodCreated(food: FoodOption) {
-    selectCreatedFood(food, "Personal food saved. Check the source values before logging.");
+    selectCreatedFood(food, "Food saved.");
   }
 
   function recipeCreated(food: FoodOption) {
-    selectCreatedFood(food, food.recipeVersion && food.recipeVersion > 1
-      ? `Recipe updated as version ${food.recipeVersion}; earlier versions remain available.`
-      : "Recipe saved with nutrition calculated from its ingredients and finished weight.");
+    selectCreatedFood(food, "Recipe saved.");
     setRecipeToEdit(null);
   }
 
   function selectFood(food: FoodOption | null) {
     setSelectedFood(food);
     setSelectedPortionId(null);
+    setQuantity("100");
+    setServingCount("1");
     setPortionLabel("");
   }
 
@@ -440,7 +464,7 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
   return (
     <>
       <div className="page-heading">
-        <div><span className="eyebrow">FOOD TRACKING</span><h1>{foodView === "log" ? "Log what you ate" : "Plan your week"}</h1><p>{foodView === "log" ? "Choose a food, enter its weight, and review the nutrition before saving." : "Build a week around your accepted target, then review it before approval."}</p></div>
+        <div><h1>{foodView === "log" ? "Food" : "Meal plan"}</h1></div>
         <span className="date-chip">{day.date}</span>
       </div>
       <div className="food-section-switch" role="tablist" aria-label="Food tools">
@@ -450,18 +474,14 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
       {foodView === "plan" ? <MealPlansPanel startDate={day.date} foodPreferences={foodPreferences} /> : null}
       {foodView === "log" ? <section className="tracking-grid">
         <div className="panel food-entry-panel">
-          <div className="panel-heading"><div><span className="eyebrow">ADD A FOOD</span><h2>Search your catalog</h2></div><span className="panel-symbol">◉</span></div>
-          <label className="field" htmlFor="food-search"><span>Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); selectFood(null); }} placeholder="Try dosa, rice, paneer…" autoComplete="off" /></label>
+          <div className="panel-heading"><h2>Add food</h2></div>
+          <label className="field food-search-field" htmlFor="food-search"><span className="sr-only">Food name</span><input id="food-search" value={query} onChange={(event) => { setQuery(event.target.value); selectFood(null); }} placeholder="Search dosa, rice, paneer…" autoComplete="off" /></label>
           <div className="food-search-filters" role="group" aria-label="Filter food search results">
             {(["all", "favorites", "recent"] as const).map((filter) => <button type="button" key={filter} aria-pressed={foodFilter === filter} className={foodFilter === filter ? "food-filter-active" : ""} onClick={() => setFoodFilter(filter)}>
               {filter === "all" ? "All foods" : filter === "favorites" ? "Favorites" : "Recent"}
             </button>)}
           </div>
-          <section className="photo-lookup" aria-labelledby="photo-lookup-title">
-            <div className="photo-lookup-copy">
-              <strong id="photo-lookup-title">Identify food from a photo</strong>
-              <span>Get name suggestions, then choose a catalog entry and enter the amount.</span>
-            </div>
+          <section className="photo-lookup" aria-label="Add food from a photo">
             <input
               ref={photoInputRef}
               type="file"
@@ -479,16 +499,13 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
               disabled={photoBusy}
               onClick={() => photoInputRef.current?.click()}
             >
-              {photoBusy ? "Checking photo…" : "Take or choose a photo"}
+              <AppIcon name="camera" size={20} />{photoBusy ? "Checking photo…" : "Camera or photo"}
             </button>
-            <p className="source-note">The photo is sent to the AI provider for food-name suggestions. It is not added to your food log.</p>
             {photoBusy ? <p className="photo-status" role="status">Looking for visible foods…</p> : null}
             {photoError ? <p className="form-error" role="alert">{photoError}</p> : null}
             {photoResult ? <div className="photo-suggestions" aria-live="polite">
-              {photoResult.note ? <p className="source-note">{photoResult.note}</p> : null}
               {photoResult.candidates.length ? photoResult.candidates.map((candidate) => (
                 <div className="photo-candidate" key={candidate.name}>
-                  <span className="eyebrow">SUGGESTED NAME</span>
                   <div className="photo-candidate-choices">
                     {[candidate.name, ...candidate.alternatives].map((name, index) => (
                       <button
@@ -507,7 +524,6 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
                   </div>
                 </div>
               )) : <div className="empty-inline"><strong>No clear food match</strong><span>Search the catalog by name or try another photo.</span></div>}
-              <p className="source-note">Photo suggestions do not estimate quantity or nutrition. Confirm the food and amount before saving.</p>
             </div> : null}
           </section>
           {loading ? <p className="muted-copy">Searching your foods…</p> : null}
@@ -519,7 +535,7 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
               const selected = selectedFood?.id === food.id && selectedFood.source === food.source;
               return <div className={selected ? "food-result food-result-selected" : "food-result"} role="listitem" key={key}>
                 <button type="button" className="food-result-select" aria-pressed={selected} onClick={() => { selectFood(food); setMessage(""); }}>
-                  <span className="food-result-main"><strong>{food.name}</strong><small>{food.category.replaceAll("_", " ")} · {foodLabel(food)}{food.aliases.length ? ` · ${food.aliases.join(", ")}` : ""}</small></span>
+                  <span className="food-result-main"><strong>{food.name}</strong><small>{food.source === "personal" ? "My food" : food.category === "beverage" ? "Drink" : "Food"}</small></span>
                   <span className="food-result-kcal">{formatNumber(food.caloriesKcalPer100g)}<small> kcal / 100 g</small></span>
                 </button>
                 <button type="button" className="food-favorite-toggle" aria-pressed={food.isFavorite} aria-label={food.isFavorite ? `Remove ${food.name} from favorites` : `Add ${food.name} to favorites`} disabled={favoriteBusy[key]} onClick={() => void toggleFavorite(food)}>
@@ -536,38 +552,37 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
           {showCustomFood ? <CustomFoodForm onCreated={customFoodCreated} onCancel={() => setShowCustomFood(false)} /> : null}
           {showRecipe ? <RecipeComposer key={recipeToEdit?.id ?? "new-recipe"} initialRecipe={recipeToEdit ?? undefined} onCreated={recipeCreated} onCancel={() => { setShowRecipe(false); setRecipeToEdit(null); }} /> : null}
 
-          {selectedFood ? <form className="selected-food-form" onSubmit={(event) => void saveFood(event)}>
-            <div className="selected-food-heading"><div><span className="eyebrow">SELECTED FOOD</span><strong>{selectedFood.name}</strong></div><button type="button" className="quiet-button" onClick={() => selectFood(null)}>Change</button></div>
-            <p className="source-note">{selectedFood.reviewed ? "Reviewed" : "Not reviewed"} · {selectedFood.sourceNote}{selectedFood.aliases.length ? ` · Also called ${selectedFood.aliases.join(", ")}` : ""}</p>
-            {selectedFood.recipe ? <details className="recipe-details">
-              <summary>Recipe · {selectedFood.recipeVersion ? `version ${selectedFood.recipeVersion} · ` : ""}{selectedFood.recipe.ingredients.length} ingredients · {formatNumber(selectedFood.recipe.yieldGrams)} g finished</summary>
-              <ul>{selectedFood.recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.foodSource}:${ingredient.foodId}:${index}`}><span>{ingredient.foodName}</span><strong>{formatNumber(ingredient.quantityGrams)} g</strong></li>)}</ul>
-              {selectedFood.recipe.instructions?.length ? <ol className="recipe-instructions">{selectedFood.recipe.instructions.map((instruction, index) => <li key={`${index}:${instruction}`}>{instruction}</li>)}</ol> : <p className="source-note">No cooking instructions saved.</p>}
-              <RecipeHistoryPanel key={`${selectedFood.id}:${selectedFood.recipeVersion ?? 1}`} foodId={selectedFood.id} />
-              <button type="button" className="button button-secondary recipe-edit-button" onClick={() => { setRecipeToEdit(selectedFood); setShowRecipe(true); setShowCustomFood(false); }}>Edit recipe</button>
-            </details> : null}
-            <div className="form-grid">
-              <label className="field"><span>Quantity (grams)</span><input type="number" min="1" max="5000" step="1" value={quantity} onChange={(event) => { setQuantity(event.target.value); setSelectedPortionId(null); }} required /></label>
-              <label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as (typeof meals)[number])}>{meals.map((meal) => <option key={meal} value={meal}>{meal[0].toUpperCase() + meal.slice(1)}</option>)}</select></label>
-              <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
-            </div>
-            {portions.length ? <div className="food-portion-list" role="group" aria-label="Serving sizes and saved portions">
-              {portions.map((portion) => <div className="food-portion-chip" key={portion.id}>
-                <button type="button" aria-pressed={selectedPortionId === portion.id} onClick={() => { setQuantity(String(portion.grams)); setSelectedPortionId(portion.id); }}>{portion.label}<small>{portion.grams} g</small></button>
-                {!portion.isDefault ? <button type="button" className="food-portion-remove" aria-label={`Remove ${portion.label} portion`} disabled={portionBusy} onClick={() => void deletePortion(portion)}>×</button> : null}
-              </div>)}
-            </div> : null}
-            {portionLoading ? <p className="muted-copy">Loading your saved portions…</p> : null}
-            <div className="food-portion-save">
-              <label className="field"><span>Save this gram amount as a portion</span><input value={portionLabel} onChange={(event) => setPortionLabel(event.target.value)} maxLength={40} placeholder="1 katori, 1 medium roti…" /></label>
-              <button type="button" className="button button-secondary" disabled={portionBusy || savedPortionCount >= 20 || !portionLabel.trim()} onClick={() => void savePortion()}>{portionBusy ? "Saving…" : `Save ${quantity || "this amount"} g`}</button>
-            </div>
-            {portionError ? <p className="form-error" role="alert">{portionError}</p> : null}
-            {preview ? <div className="nutrition-preview"><strong>{formatNumber(preview.calories)} kcal</strong><span>Protein {formatNumber(preview.protein, 1)} g</span><span>Carbs {formatNumber(preview.carbs, 1)} g</span><span>Fat {formatNumber(preview.fat, 1)} g</span></div> : null}
-            {message ? <p className="form-message" role="status">{message}</p> : null}
-            <button className="button button-primary" type="submit" disabled={busy || !preview}>{busy ? "Saving…" : "Add to food log"}</button>
-          </form> : message ? <p className="form-message" role="status">{message}</p> : null}
-          <p className="source-note">Nutrition is calculated from the food’s per-100 g values and the quantity you enter. Household portions can vary.</p>
+          {selectedFood ? <dialog className="food-detail-sheet" ref={foodDialogRef} aria-labelledby="food-detail-title" onCancel={(event) => { event.preventDefault(); selectFood(null); }} onClick={(event) => { if (event.target === event.currentTarget) selectFood(null); }}>
+            <form className="selected-food-form" onSubmit={(event) => void saveFood(event)}>
+              <div className="sheet-handle" aria-hidden="true" />
+              <div className="selected-food-heading"><div><h2 id="food-detail-title">{selectedFood.name}</h2></div><button type="button" className="sheet-close" aria-label="Close food details" onClick={() => selectFood(null)}>×</button></div>
+              <fieldset className="serving-options"><legend>Serving size</legend>
+                <div className="food-portion-list">
+                  <button className="portion-choice" type="button" aria-pressed={!selectedPortionId && Number(quantity) === 100} onClick={() => { setQuantity("100"); setSelectedPortionId(null); }}>100 g</button>
+                  {portions.map((portion) => <div className="food-portion-chip" key={portion.id}>
+                    <button type="button" aria-pressed={selectedPortionId === portion.id} onClick={() => { setQuantity(String(portion.grams)); setSelectedPortionId(portion.id); }}>{portion.label}<small>{formatNumber(portion.grams)} g</small></button>
+                    {!portion.isDefault ? <button type="button" className="food-portion-remove" aria-label={`Remove ${portion.label} portion`} disabled={portionBusy} onClick={() => void deletePortion(portion)}>×</button> : null}
+                  </div>)}
+                </div>
+              </fieldset>
+              {portionLoading ? <p className="muted-copy" role="status">Loading sizes…</p> : null}
+              <div className="serving-counter"><div><label htmlFor="serving-count">Quantity</label><span>{formatNumber(quantityGrams, 2)} g total</span></div>
+                <div className="count-stepper"><button type="button" aria-label="Remove one serving" disabled={count <= 1} onClick={() => changeCount(-1)}>−</button><input id="serving-count" aria-label="Number of servings" type="number" inputMode="decimal" min="0.5" max="50" step="0.5" value={servingCount} onChange={(event) => setServingCount(event.target.value)} required /><button type="button" aria-label="Add one serving" disabled={count >= 50} onClick={() => changeCount(1)}>+</button></div>
+                <button className="count-add-two" type="button" disabled={count >= 50} onClick={() => changeCount(2)}>+2</button>
+              </div>
+              {preview ? <div className="nutrition-preview" aria-live="polite"><strong>{formatNumber(preview.calories)} <small>kcal</small></strong><span><b>{formatNumber(preview.protein, 1)} g</b> Protein</span><span><b>{formatNumber(preview.carbs, 1)} g</b> Carbs</span><span><b>{formatNumber(preview.fat, 1)} g</b> Fat</span></div> : null}
+              <div className="meal-choice" role="group" aria-label="Meal">{meals.map((meal) => <button type="button" key={meal} aria-pressed={mealType === meal} onClick={() => setMealType(meal)}>{meal[0].toUpperCase() + meal.slice(1)}</button>)}</div>
+              <details className="food-more-options"><summary>Custom amount & time</summary><div className="form-grid">
+                <label className="field"><span>Grams per serving</span><input type="number" inputMode="decimal" min="0.01" max="5000" step="any" value={quantity} onChange={(event) => { setQuantity(event.target.value); setSelectedPortionId(null); }} required /></label>
+                <label className="field"><span>Date & time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
+              </div><div className="food-portion-save"><label className="field"><span>Save serving size</span><input value={portionLabel} onChange={(event) => setPortionLabel(event.target.value)} maxLength={40} placeholder="Medium dosa, large cup…" /></label><button type="button" className="button button-secondary" disabled={portionBusy || savedPortionCount >= 20 || !portionLabel.trim()} onClick={() => void savePortion()}>{portionBusy ? "Saving…" : "Save size"}</button></div></details>
+              {selectedFood.recipe ? <details className="recipe-details"><summary>Recipe</summary><ul>{selectedFood.recipe.ingredients.map((ingredient, index) => <li key={`${ingredient.foodSource}:${ingredient.foodId}:${index}`}><span>{ingredient.foodName}</span><strong>{formatNumber(ingredient.quantityGrams)} g</strong></li>)}</ul>{selectedFood.recipe.instructions?.length ? <ol className="recipe-instructions">{selectedFood.recipe.instructions.map((instruction, index) => <li key={index}>{instruction}</li>)}</ol> : null}<button type="button" className="button button-secondary recipe-edit-button" onClick={() => { setRecipeToEdit(selectedFood); setShowRecipe(true); setShowCustomFood(false); selectFood(null); }}>Edit recipe</button></details> : null}
+              {portionError ? <p className="form-error" role="alert">{portionError}</p> : null}
+              {error ? <p className="form-error" role="alert">{error}</p> : null}
+              {!validAmount ? <p className="form-error" role="alert">Choose a quantity up to 5,000 g.</p> : null}
+              <div className="sheet-action"><button className="button button-primary button-wide" type="submit" disabled={busy || !preview || !validAmount}>{busy ? "Adding…" : `Add to ${mealType} · ${formatNumber(preview?.calories ?? 0)} kcal`}</button></div>
+            </form>
+          </dialog> : message ? <p className="form-message" role="status">{message}</p> : null}
         </div>
 
         <DailyFoodPanel day={day} onChanged={onSaved} />
@@ -623,8 +638,7 @@ function CustomFoodForm({ onCreated, onCancel }: { onCreated: (food: FoodOption)
       <label className="field"><span>Carbs (g)</span><input type="number" min="0" max="100" step="0.1" value={carbs} onChange={(event) => setCarbs(event.target.value)} required /></label>
       <label className="field"><span>Fat (g)</span><input type="number" min="0" max="100" step="0.1" value={fat} onChange={(event) => setFat(event.target.value)} required /></label>
     </div>
-    <label className="field"><span>Where did these values come from?</span><input value={sourceNote} onChange={(event) => setSourceNote(event.target.value)} maxLength={160} placeholder="Package label, recipe, or estimate" required /></label>
-    <p className="source-note">Personal foods are visible only in your account and are not marked as reviewed.</p>
+    <label className="field"><span>Source</span><input value={sourceNote} onChange={(event) => setSourceNote(event.target.value)} maxLength={160} placeholder="Package label, recipe, or estimate" required /></label>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     <div className="button-row"><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Save food"}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
   </form>;
@@ -804,7 +818,7 @@ function RecipeComposer({ initialRecipe, onCreated, onCancel }: { initialRecipe?
     </div>
     {searchResults.length ? <div className="food-results recipe-candidates" role="list" aria-label="Ingredient search results">
       {searchResults.slice(0, 8).map((food) => <button type="button" className="food-result-select" role="listitem" key={`${food.source}:${food.id}`} onClick={() => { setSelectedIngredient(food); setError(""); }}>
-        <span className="food-result-main"><strong>{food.name}</strong><small>{food.source === "shared_catalog" ? food.sourceNote : "Personal food"}{food.reviewed ? " · reviewed" : " · not reviewed"}</small></span>
+        <span className="food-result-main"><strong>{food.name}</strong><small>{food.source === "personal" ? "My food" : "Food"}</small></span>
         <span className="food-result-kcal">{formatNumber(food.caloriesKcalPer100g)}<small> kcal / 100 g</small></span>
       </button>)}
     </div> : null}
@@ -815,16 +829,15 @@ function RecipeComposer({ initialRecipe, onCreated, onCancel }: { initialRecipe?
     </div> : null}
     {ingredients.length ? <div className="recipe-ingredient-list" aria-label="Recipe ingredients">
       {ingredients.map((ingredient, index) => <div className="recipe-ingredient-row" key={`${ingredient.food.source}:${ingredient.food.id}:${index}`}>
-        <span><strong>{ingredient.food.name}</strong><small>{ingredient.food.source === "shared_catalog" ? ingredient.food.sourceNote : "Personal food"}</small></span>
+        <span><strong>{ingredient.food.name}</strong></span>
         <span>{formatNumber(ingredient.quantityGrams)} g</span>
         <button type="button" className="quiet-button entry-delete" aria-label={`Remove ${ingredient.food.name}`} onClick={() => setIngredients((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
       </div>)}
     </div> : null}
     <label className="field"><span>Cooking steps (one per line, optional)</span><textarea rows={4} maxLength={9000} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="Add the cooking steps you want to remember…" /></label>
     <label className="field"><span>Finished recipe weight (grams)</span><input type="number" min="1" max="50000" step="1" value={yieldGrams} onChange={(event) => setYieldGrams(event.target.value)} required /></label>
-    <p className="source-note">Include added water and oil as ingredients. The finished weight cannot exceed the combined ingredient weight.</p>
+    <p className="source-note">Include water and oil in the ingredients.</p>
     {preview ? <div className="nutrition-preview"><strong>{formatNumber(preview.caloriesKcal)} kcal / 100 g</strong><span>Protein {formatNumber(preview.proteinG, 1)} g</span><span>Carbs {formatNumber(preview.carbohydrateG, 1)} g</span><span>Fat {formatNumber(preview.fatG, 1)} g</span></div> : null}
-    <p className="source-note">Nutrition is calculated from the selected foods and the finished recipe weight. Cooking and water loss can change actual values.</p>
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     <div className="button-row"><button className="button button-primary" disabled={busy || ingredients.length < 2 || !preview}>{busy ? "Saving…" : initialRecipe ? "Save new version" : "Save recipe"}</button><button className="button button-secondary" type="button" onClick={onCancel}>Cancel</button></div>
   </form>;
@@ -922,11 +935,10 @@ function DailyFoodPanel({ day, onChanged }: { day: DaySummary; onChanged: () => 
       </div> : null}
     </div>
     <div className="food-day-status">
-      <span className={day.foodDayComplete ? "food-day-status-complete" : "food-day-status-incomplete"}>{day.foodDayComplete ? "Day complete" : "Logs may be partial"}</span>
+      <span className={day.foodDayComplete ? "food-day-status-complete" : "food-day-status-incomplete"}>{day.foodDayComplete ? "Day complete" : "Tracking today"}</span>
       <button type="button" className="quiet-button" onClick={() => void toggleComplete()} disabled={statusBusy} aria-pressed={day.foodDayComplete}>{statusBusy ? "Saving…" : day.foodDayComplete ? "Mark incomplete" : "Mark day complete"}</button>
     </div>
     {statusError ? <p className="form-error" role="alert">{statusError}</p> : null}
-    <p className="source-note">Totals include only entries you logged. Completion records whether tracking for this day is finished.</p>
   </section>;
 }
 
@@ -981,13 +993,13 @@ function FoodLogEntry({ item, onChanged }: { item: FoodLog; onChanged: () => Pro
   return <div className="food-log-entry">
     <div className="daily-entry">
       <span className="meal-badge">{item.data.mealType.slice(0, 1).toUpperCase()}</span>
-      <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams)} g{item.data.portionLabel ? ` (${item.data.portionLabel})` : ""} · {formatClock(item.data.occurredAt)}</small></span>
+      <span className="daily-entry-main"><strong>{item.data.foodName}</strong><small>{item.data.mealType} · {formatNumber(item.data.quantityGrams, 2)} g{item.data.portionLabel ? ` (${item.data.portionCount && item.data.portionCount !== 1 ? `${item.data.portionCount} × ` : ""}${item.data.portionLabel})` : ""} · {formatClock(item.data.occurredAt)}</small></span>
       <strong>{formatNumber(item.data.nutritionTotal.caloriesKcal)}<small> kcal</small></strong>
       <div className="entry-actions"><button type="button" className="quiet-button" onClick={() => { setError(""); setEditing((current) => !current); }} disabled={busy}>{editing ? "Close" : "Edit"}</button><button type="button" className="quiet-button entry-delete" onClick={() => void remove()} disabled={busy}>Delete</button></div>
     </div>
     {editing ? <form className="food-log-edit" onSubmit={(event) => void save(event)}>
       <div className="form-grid">
-        <label className="field"><span>Quantity (grams)</span><input type="number" min="1" max="5000" step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label>
+        <label className="field"><span>Quantity (grams)</span><input type="number" min="0.01" max="5000" step="any" inputMode="decimal" value={quantity} onChange={(event) => setQuantity(event.target.value)} required /></label>
         <label className="field"><span>Meal</span><select value={mealType} onChange={(event) => setMealType(event.target.value as (typeof meals)[number])}>{meals.map((meal) => <option key={meal} value={meal}>{meal[0].toUpperCase() + meal.slice(1)}</option>)}</select></label>
         <label className="field"><span>Date and time</span><input type="datetime-local" value={occurredAt} onChange={(event) => setOccurredAt(event.target.value)} required /></label>
       </div>
@@ -1009,6 +1021,7 @@ function emptyExercise(): ExerciseDraft {
 }
 
 export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDays, homeWorkoutDays, onSaved }: SavedViewProps & { unitSystem: "metric" | "imperial"; equipment: string[]; gymWorkoutDays: number; homeWorkoutDays: number }) {
+  const [activityView, setActivityView] = useState<"log" | "plan">("log");
   const [viewDate, setViewDate] = useState(day.date);
   const [loadedHistoryDay, setLoadedHistoryDay] = useState<DaySummary>(day);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -1133,6 +1146,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
   }
 
   function startPlannedSession(plan: WorkoutPlanVersion, session: WorkoutPlanSession) {
+    setActivityView("log");
     setEditingId(null);
     setEditingVersion(null);
     setActivityType("strength");
@@ -1153,7 +1167,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
       }];
     }));
     setError("");
-    setMessage("Plan targets loaded. Enter what you actually complete; saving links the workout to this plan session.");
+    setMessage("Routine loaded. Enter your completed sets.");
     window.requestAnimationFrame(() => document.getElementById("activity-entry-form")?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
@@ -1234,9 +1248,10 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
   }
 
   return <>
-    <div className="page-heading"><div><span className="eyebrow">ACTIVITY TRACKING</span><h1>Record your movement</h1><p>Enter steps or a workout. Health Connect is not available in this web app.</p></div><span className="date-chip">{viewDate}</span></div>
-    <WorkoutPlansPanel unitSystem={unitSystem} equipment={equipment} gymWorkoutDays={gymWorkoutDays} homeWorkoutDays={homeWorkoutDays} onStartSession={startPlannedSession} />
-    <section className="tracking-grid">
+    <div className="page-heading"><div><h1>Activity</h1></div><span className="date-chip">{viewDate}</span></div>
+    <div className="food-section-switch" role="tablist" aria-label="Activity tools">{(["log", "plan"] as const).map((view) => <button key={view} type="button" role="tab" aria-selected={activityView === view} className={activityView === view ? "food-section-tab food-section-tab-active" : "food-section-tab"} onClick={() => setActivityView(view)}>{view === "log" ? "Activity log" : "My routine"}</button>)}</div>
+    {activityView === "plan" ? <WorkoutPlansPanel unitSystem={unitSystem} equipment={equipment} gymWorkoutDays={gymWorkoutDays} homeWorkoutDays={homeWorkoutDays} onStartSession={startPlannedSession} /> : null}
+    {activityView === "log" ? <section className="tracking-grid">
       <form id="activity-entry-form" className="panel activity-entry-panel" onSubmit={(event) => void submit(event)}>
         <div className="panel-heading"><div><span className="eyebrow">{editingId ? "EDIT ENTRY" : "ADD AN ENTRY"}</span><h2>{editingId ? "Edit activity" : viewDate === day.date ? "Today’s activity" : "Activity for this day"}</h2></div><span className="panel-symbol">↗</span></div>
         <div className="form-grid">
@@ -1266,7 +1281,6 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
               return <li key={target.exerciseId}><span>{libraryExercise?.name ?? target.exerciseId}</span><small>{target.sets} × {range} · {target.restSeconds}s rest</small></li>;
             })}</ul>
             <button type="button" className="button button-secondary" onClick={applySelectedTemplate}>Load this session</button>
-            <p className="field-note">Loading adds blank workout fields. Record what you actually complete; targets are not saved as completed sets.</p>
           </div> : null}
           <div className="workout-exercise-builder">
             {exercises.map((exercise, exerciseIndex) => {
@@ -1312,7 +1326,6 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           <label className="field"><span>Steps</span><input type="number" min="0" max="200000" step="1" value={steps} onChange={(event) => setSteps(event.target.value)} placeholder={activityType === "steps" ? "Required for step entry" : "Optional"} required={activityType === "steps"} /></label>
         </div>}
         <label className="field"><span>Notes</span><input value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} placeholder="Optional details" /></label>
-        <p className="source-note">{activityType === "strength" ? "Strength sessions save reps or timed holds, optional load, and your actual session duration. Calories burned are not estimated." : "Steps and duration are entered manually. Calories burned are not estimated."}</p>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {message ? <p className="form-message" role="status">{message}</p> : null}
         <div className="activity-form-actions">
@@ -1331,7 +1344,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           if (editingId) resetForm();
           setOccurredAt(dateTimeForDay(nextDate, day.date));
         }} /></label>
-        <div className="daily-calorie-total"><strong>{formatNumber(viewDay.steps)}</strong><span>manual steps logged</span></div>
+        <div className="daily-calorie-total"><strong>{formatNumber(viewDay.steps)}</strong><span>steps</span></div>
         <p className="muted-copy">{viewDay.workoutsCompleted} walk, cardio, or strength sessions logged.</p>
         {historyError ? <p className="form-error" role="alert">{historyError}</p> : null}
         {historyLoading ? <p className="muted-copy" role="status">Loading activity history…</p> : viewDay.activityLogs.length ? <div className="daily-entry-list">{[...viewDay.activityLogs].reverse().map((item) => {
@@ -1343,7 +1356,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           }).join(", ")})`).join(" · ");
           return <div className="daily-entry" key={item.id}>
             <span className="meal-badge">↗</span>
-            <span className="daily-entry-main"><strong>{title}</strong><small>Manual entry · {item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
+            <span className="daily-entry-main"><strong>{title}</strong><small>{item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
             {item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}
             <div className="entry-actions">
               <button type="button" className="quiet-button" onClick={() => editingId === item.id ? resetForm() : beginEdit(item)} disabled={busy || deletingId !== null}>{editingId === item.id ? "Editing" : "Edit"}</button>
@@ -1352,6 +1365,6 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           </div>;
         })}</div> : <div className="empty-inline"><strong>No activity logged on this day</strong><span>Choose another date or add an entry for this day.</span></div>}
       </section>
-    </section>
+    </section> : null}
   </>;
 }

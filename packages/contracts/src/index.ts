@@ -138,6 +138,7 @@ export const createFoodLogRequestSchema = z.object({
   logId: uuidSchema,
   foodId: uuidSchema,
   portionId: uuidSchema.nullable().optional(),
+  portionCount: z.number().min(0.5).max(50).multipleOf(0.5).optional(),
   occurredAt: isoDateTime,
   mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
   quantityGrams: z.number().finite().positive().max(5000),
@@ -253,7 +254,8 @@ export const foodLogRecordSchema = z.object({
   mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
   quantityGrams: z.number().finite().positive().max(5000),
   portionId: uuidSchema.nullable().optional(),
-  portionLabel: z.string().trim().min(1).max(40).nullable().optional(),
+  portionLabel: z.string().trim().min(1).max(80).nullable().optional(),
+  portionCount: z.number().min(0.5).max(50).multipleOf(0.5).nullable().optional(),
   nutritionPer100g: nutritionSnapshotSchema,
   nutritionTotal: nutritionSnapshotSchema,
 }).strict();

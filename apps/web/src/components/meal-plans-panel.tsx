@@ -364,16 +364,14 @@ export function MealPlansPanel({ startDate, foodPreferences }: { startDate: stri
     <section className="meal-plans-panel" aria-labelledby="meal-plans-title">
       <div className="meal-plan-intro">
         <div>
-          <span className="eyebrow">A WEEK THAT FITS YOUR TARGET</span>
+
           <h2 id="meal-plans-title">Meal plan</h2>
-          <p>Get a seven-day draft from your food catalog, check portions, and approve it when it looks right.</p>
-          <p className="field-note">Dietary filters use reviewed catalog tags. Check current food labels and recipes; these tags do not guarantee allergy safety or prevent cross-contamination.</p>
         </div>
         <span className="meal-plan-mark" aria-hidden="true">7</span>
       </div>
 
       {!draft && !activePlan ? <div className="panel meal-plan-create">
-        <div><strong>Start with a weekly plan</strong><span>It uses your accepted calorie target and reviewed catalog foods.</span></div>
+        <div><strong>Start with a weekly plan</strong></div>
         <label className="field"><span>First day</span><input type="date" value={planStartDate} min={startDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label>
         <button className="button button-primary" type="button" disabled={busy} onClick={() => void generatePlan()}>
           {busy ? "Building your week…" : "Build my week"}
@@ -452,13 +450,12 @@ export function MealPlansPanel({ startDate, foodPreferences }: { startDate: stri
           </div>
         </div> : null}
 
-        {draft ? <div className="meal-plan-review-note"><span aria-hidden="true">i</span><p>Swap foods or adjust portions, then save. The server recalculates nutrition and checks the plan ranges. Approval never adds meals to your food log.</p></div> : null}
         {draft ? <div className="meal-plan-actions">
           {dirty ? <button className="button button-secondary" type="button" disabled={busy || saveVersionConflict} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft edits"}</button> : null}
           <button className="button button-secondary" type="button" disabled={busy || dirty} onClick={() => void decide("reject")}>Reject draft</button>
           <button className="button button-primary" type="button" disabled={busy || dirty} onClick={() => void decide("approve")}>{busy ? "Saving…" : "Approve plan"}</button>
         </div> : null}
-        {dirty ? <p className="field-note">Save to confirm the catalog foods and nutrition ranges on the server before approval.</p> : null}
+        {dirty ? <p className="field-note">Save changes before approving.</p> : null}
       </div> : null}
 
       {activePlan && !draft ? <div className="panel meal-plan-create meal-plan-create-compact"><div><strong>Create a revision</strong><span>The approved plan stays active until you approve the new draft.</span></div><label className="field"><span>First day</span><input type="date" value={planStartDate} min={startDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label><button className="button button-primary" type="button" disabled={busy} onClick={() => void generatePlan()}>{busy ? "Building…" : "Create draft"}</button></div> : null}
@@ -466,7 +463,7 @@ export function MealPlansPanel({ startDate, foodPreferences }: { startDate: stri
       {history.length ? <details className="meal-plan-history"><summary>Past meal plans <span>{history.length}</span></summary><div>{history.map((plan) => <article key={plan.id}><strong>{plan.data.name}</strong><span>Version {plan.version} · {plan.status === "archived" ? "Archived" : "Replaced"} · {dateLabel(plan.data.startDate, { month: "short", day: "numeric", year: "numeric" })}</span></article>)}</div></details> : null}
       {error ? <div className="meal-plan-error" role="alert"><p>{error}</p>{saveVersionConflict ? <button className="text-button" type="button" disabled={busy} onClick={() => void reloadSavedDraft()}>Discard local edits and reload the saved draft</button> : null}</div> : null}
       {notice ? <p className="form-message" role="status">{notice}</p> : null}
-      <p className="field-note">These are general food-planning suggestions. Review portions and current labels. Dietary filters use reviewed catalog tags and cannot guarantee allergy safety.</p>
+      <details className="settings-info"><summary>Dietary information</summary><p>Check ingredients for allergies. Food labels and preparation can vary.</p></details>
     </section>
   );
 }

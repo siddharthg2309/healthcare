@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { AppIcon } from "./app-icon";
 import { exerciseProgressResponseSchema, goalSchema, profileSchema, weeklyProgressReviewResponseSchema, type ExerciseProgressResponse, type GoalRecord, type Profile, type WeeklyProgressReviewResponse } from "@healthcare/contracts";
 import { exerciseCatalog } from "@healthcare/domain";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
@@ -17,12 +18,12 @@ type Measurement = { id: string; data: { measuredAt: string; weightKg: number } 
 type ProfileResponse = { profile: unknown | null };
 type GoalsResponse = { current: (Record<string, unknown> & { id: string }) | null; versions: unknown[]; measurements: Measurement[] };
 
-const tabs: { key: Tab; label: string; glyph: string }[] = [
-  { key: "home", label: "Home", glyph: "⌂" },
-  { key: "food", label: "Food", glyph: "◉" },
-  { key: "activity", label: "Activity", glyph: "↗" },
-  { key: "progress", label: "Progress", glyph: "⌁" },
-  { key: "settings", label: "Settings", glyph: "⚙" },
+const tabs: { key: Tab; label: string }[] = [
+  { key: "home", label: "Home" },
+  { key: "food", label: "Food" },
+  { key: "activity", label: "Activity" },
+  { key: "progress", label: "Progress" },
+  { key: "settings", label: "You" },
 ];
 
 function friendlyError(error: unknown): string {
@@ -40,9 +41,12 @@ export function DashboardApp() {
   const [daySummary, setDaySummary] = useState<DaySummary | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
+  const loadVersion = useRef(0);
 
   const reloadData = useCallback(async () => {
     if (!session?.user.id) return;
+    const version = ++loadVersion.current;
     setLoadingData(true);
     setLoadError("");
     try {
@@ -50,6 +54,7 @@ export function DashboardApp() {
         requestJson<ProfileResponse>("/v1/me"),
         requestJson<GoalsResponse>("/v1/goals"),
       ]);
+      if (version !== loadVersion.current) return;
       const parsedProfile = profileSchema.safeParse(profileData.profile);
       const { id: currentGoalId, ...currentGoalData } = goalData.current ?? {};
       const parsedGoal = goalData.current ? goalSchema.safeParse(currentGoalData) : null;
@@ -66,20 +71,23 @@ export function DashboardApp() {
       if (parsedProfile.success) {
         const date = dateInTimezone(parsedProfile.data.timezone);
         const summary = await requestJson<DaySummary>(`/v1/days/${date}`);
-        setDaySummary(summary);
+        if (version === loadVersion.current) setDaySummary(summary);
       } else {
         setDaySummary(null);
       }
     } catch (error) {
-      setLoadError(friendlyError(error));
+      if (version === loadVersion.current) setLoadError(friendlyError(error));
     } finally {
-      setLoadingData(false);
+      if (version === loadVersion.current) {
+        setLoadedUserId(session.user.id);
+        setLoadingData(false);
+      }
     }
   }, [session?.user.id]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reloadData(), 0);
-    return () => window.clearTimeout(timer);
+    return () => { window.clearTimeout(timer); loadVersion.current += 1; };
   }, [reloadData]);
 
   useEffect(() => {
@@ -90,7 +98,7 @@ export function DashboardApp() {
 
   if (isPending) return <LoadingPage label="Opening your account" />;
   if (!session?.user) return <AuthPage onComplete={() => void refetch()} />;
-  if (loadingData) return <LoadingPage label="Loading your health data" />;
+  if (loadedUserId !== session.user.id || (loadingData && (!profile || !goal))) return <LoadingPage label="Loading your health data" />;
   if (loadError) {
     return (
       <main className="center-page">
@@ -110,47 +118,33 @@ export function DashboardApp() {
   return (
     <div className="app-shell">
       <ReminderNotificationRunner userId={session.user.id} />
-      <aside className="sidebar" aria-label="Main navigation">
-        <a className="brand-lockup" href="#home" onClick={() => setTab("home")}>
-          <span className="brand-mark">GH</span>
-          <span><strong>Goal Health</strong><small>Daily, at your pace</small></span>
-        </a>
-        <nav className="side-nav">
-          {tabs.map((item) => <NavButton key={item.key} tab={item.key} current={tab} label={item.label} glyph={item.glyph} onClick={setTab} />)}
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="account-pill"><span className="avatar">{(profile.displayName[0] ?? "G").toUpperCase()}</span><span><strong>{profile.displayName}</strong><small>Personal space</small></span></div>
-          <button className="quiet-button" onClick={async () => { await authClient.signOut(); await refetch(); }}>Sign out</button>
-        </div>
-      </aside>
 
       <main className="main-area">
         <header className="topbar">
           <div className="mobile-brand"><span className="brand-mark">GH</span><strong>Goal Health</strong></div>
-          <div className="topbar-date">{new Intl.DateTimeFormat("en-IN", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</div>
-          <div className="topbar-user"><span className="avatar">{(profile.displayName[0] ?? "G").toUpperCase()}</span><span>{profile.displayName}</span><button className="quiet-button desktop-signout" onClick={async () => { await authClient.signOut(); await refetch(); }}>Sign out</button></div>
+          <button className="profile-shortcut" type="button" aria-label="Open your settings" onClick={() => setTab("settings")}><span className="avatar">{(profile.displayName[0] ?? "G").toUpperCase()}</span></button>
         </header>
 
         <div className="content-wrap">
-          {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} /> : null}
+          {tab === "home" ? <HomeView profile={profile} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} onWeighIn={() => { setTab("progress"); window.setTimeout(() => document.getElementById("weigh-in-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }} onFood={() => setTab("food")} onActivity={() => setTab("activity")} /> : null}
           {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} foodPreferences={profile.foodPreferences} onSaved={reloadData} /> : null}
           {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} unitSystem={profile.unitSystem} equipment={profile.equipment} gymWorkoutDays={profile.gymWorkoutDays ?? 0} homeWorkoutDays={profile.homeWorkoutDays ?? profile.availableWorkoutDays} onSaved={reloadData} /> : null}
           {tab === "progress" ? <ProgressView goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} unitSystem={profile.unitSystem} onMeasurementAdded={reloadData} /> : null}
-          {tab === "settings" ? <SettingsView userId={session.user.id} onAccountDeleted={refetch} /> : null}
+          {tab === "settings" ? <SettingsView userId={session.user.id} displayName={profile.displayName} email={session.user.email} onSignOut={async () => { await authClient.signOut(); await refetch(); }} onAccountDeleted={refetch} /> : null}
         </div>
       </main>
 
       <nav className="bottom-nav" aria-label="Main navigation">
-        {tabs.map((item) => <NavButton key={item.key} tab={item.key} current={tab} label={item.label} glyph={item.glyph} onClick={setTab} />)}
+        {tabs.map((item) => <NavButton key={item.key} tab={item.key} current={tab} label={item.label} onClick={setTab} />)}
       </nav>
     </div>
   );
 }
 
-function NavButton({ tab, current, label, glyph, onClick }: { tab: Tab; current: Tab; label: string; glyph: string; onClick: (tab: Tab) => void }) {
+function NavButton({ tab, current, label, onClick }: { tab: Tab; current: Tab; label: string; onClick: (tab: Tab) => void }) {
   return (
-    <button className={current === tab ? "nav-item nav-item-active" : "nav-item"} aria-current={current === tab ? "page" : undefined} onClick={() => onClick(tab)}>
-      <span className="nav-glyph" aria-hidden="true">{glyph}</span><span>{label}</span>
+    <button className={current === tab ? "nav-item nav-item-active" : "nav-item"} aria-current={current === tab ? "page" : undefined} onClick={() => { onClick(tab); window.scrollTo({ top: 0, behavior: "instant" }); }}>
+      <span className="nav-glyph"><AppIcon name={tab} /></span><span>{label}</span>
     </button>
   );
 }
@@ -239,9 +233,7 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
         <div className="auth-graph-preview" aria-hidden="true"><span /><span /><span /><span /><span /><div className="auth-graph-line" /></div>
       </div>
       <section className="auth-card" aria-labelledby="auth-title">
-        <span className="eyebrow">PRIVATE BY ACCOUNT</span>
         <h2 id="auth-title">{mode === "sign_up" ? "Create your account" : "Welcome back"}</h2>
-        <p>{mode === "sign_up" ? "Email and password sign-up requires an invitation." : "Each account is private. Sign in with your email or Google."}</p>
         {googleAvailable ? <>
           <button className="button button-google button-wide" type="button" disabled={busy} onClick={() => void continueWithGoogle()}>
             <span className="google-mark" aria-hidden="true">G</span>
@@ -260,7 +252,6 @@ function AuthPage({ onComplete }: { onComplete: () => void }) {
         <button className="text-button" onClick={() => { setMode(mode === "sign_up" ? "sign_in" : "sign_up"); setError(""); }}>
           {mode === "sign_up" ? "Already have an account? Sign in" : "Have an invitation? Create an account"}
         </button>
-        <small className="auth-footnote">{googleAvailable ? "Any verified Google account can sign up. Email and password sign-up requires an invitation." : "Health data is personal. Never use someone else’s account."}</small>
       </section>
     </main>
   );
@@ -284,43 +275,43 @@ function LoadingPage({ label }: { label: string }) {
   return <main className="center-page"><div className="loading-mark"><span className="brand-mark">GH</span><p>{label}…</p></div></main>;
 }
 
-function HomeView({ profile, goal, measurements, day, onProgress }: { profile: Profile; goal: StoredGoal; measurements: Measurement[]; day: DaySummary | null; onProgress: () => void }) {
+function HomeView({ profile, goal, measurements, day, onProgress, onWeighIn, onFood, onActivity }: { profile: Profile; goal: StoredGoal; measurements: Measurement[]; day: DaySummary | null; onProgress: () => void; onWeighIn: () => void; onFood: () => void; onActivity: () => void }) {
   const kcal = goal.dailyCaloriesKcal;
   const latest = [...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt))[0];
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">TODAY’S OVERVIEW</span><h1>Good {dayGreeting()}, {profile.displayName.split(" ")[0]}.</h1><p>One day at a time. Your plan is here when you need it.</p></div></div>
+      <div className="page-heading home-heading"><div><span className="today-date">{new Intl.DateTimeFormat("en-IN", { weekday: "long", month: "short", day: "numeric" }).format(new Date())}</span><h1>Good {dayGreeting()},<br />{profile.displayName.split(" ")[0]}.</h1></div><span className="greeting-dot" aria-hidden="true">✳</span></div>
       <button className="goal-hero" onClick={onProgress}>
-        <div className="goal-hero-copy"><span className="eyebrow">YOUR GOAL PATH · VERSION {goal.goalVersion}</span><strong>{goal.startWeightKg.toFixed(1)} <span>→</span> {goal.targetWeightKg.toFixed(1)} <small>kg</small></strong><span>Target date · {formatDate(goal.targetDate)}</span></div>
-        <div className="goal-ring"><span>{goal.direction === "lose" ? "−" : goal.direction === "gain" ? "+" : "="}</span><small>{goal.direction}</small></div>
+        <div className="goal-hero-copy"><span className="eyebrow">YOUR GOAL</span><strong>{goal.startWeightKg.toFixed(1)} <span>→</span> {goal.targetWeightKg.toFixed(1)} <small>kg</small></strong><span>Target date · {formatDate(goal.targetDate)}</span></div>
+        <span className="goal-open"><AppIcon name="progress" size={26} /></span>
       </button>
 
+      <div className="home-quick-actions"><button type="button" onClick={onFood}><AppIcon name="food" /><span>Log food</span></button><button type="button" onClick={onActivity}><AppIcon name="activity" /><span>Add activity</span></button><button type="button" onClick={onWeighIn}><AppIcon name="progress" /><span>Weigh in</span></button></div>
       <section className="dashboard-grid">
         <article className="panel progress-panel">
-          <div className="panel-heading"><div><span className="eyebrow">THE MAIN THING</span><h2>Your progress</h2></div><button className="inline-link" onClick={onProgress}>View graph <span aria-hidden="true">↗</span></button></div>
+          <div className="panel-heading"><div><h2>Your progress</h2></div><button className="inline-link" onClick={onProgress}>Details <span aria-hidden="true">↗</span></button></div>
           <GoalChart goal={goal} measurements={measurements} timezone={profile.timezone} compact />
-          <div className="chart-legend"><span><i className="legend-plan" /> Goal path</span><span><i className="legend-trend" /> 3-weigh-in trend</span><span><i className="legend-actual" /> Your weigh-ins</span></div>
+          <div className="chart-legend"><span><i className="legend-plan" /> Goal path</span><span><i className="legend-trend" /> Trend</span><span><i className="legend-actual" /> Weigh-ins</span></div>
         </article>
         <article className="panel intake-panel">
-          <div className="panel-heading"><div><span className="eyebrow">DAILY TARGET</span><h2>Food</h2></div><span className="panel-symbol">◉</span></div>
+          <div className="panel-heading"><div><h2>Food</h2></div><span className="panel-symbol">◉</span></div>
           <div className="metric-main">{day?.foodTotals.caloriesKcal.toLocaleString("en-IN") ?? "—"}<small> / {kcal?.toLocaleString("en-IN") ?? "—"} kcal</small></div>
-          <p className="muted-copy">{day ? day.foodDayComplete ? day.foodLogs.length ? "Food log marked complete" : "Complete day · no food logged" : day.foodLogs.length ? "Food log may be partial · total may be incomplete" : "No food logged · total may be incomplete" : "Today’s food log is unavailable"}</p>
+          <p className="muted-copy">{day ? day.foodDayComplete ? "Day complete" : day.foodLogs.length ? `${day.foodLogs.length} foods logged` : "No food logged yet" : "Unable to load today"}</p>
           {kcal ? <div className="intake-progress" role="progressbar" aria-label="Calories logged toward daily target" aria-valuenow={Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))} aria-valuemin={0} aria-valuemax={100}><span style={{ width: `${Math.min(100, Math.round((day?.foodTotals.caloriesKcal ?? 0) / kcal * 100))}%` }} /></div> : null}
-          {goal.macrosGrams ? <div className="macro-mini"><Macro label="Protein" value={goal.macrosGrams.protein} color="green" /><Macro label="Carbs" value={goal.macrosGrams.carbohydrate} color="gold" /><Macro label="Fat" value={goal.macrosGrams.fat} color="blue" /></div> : <p className="note-box">No macros estimated for this manual target.</p>}
+          {goal.macrosGrams ? <div className="macro-mini"><Macro label="Protein" value={goal.macrosGrams.protein} color="green" /><Macro label="Carbs" value={goal.macrosGrams.carbohydrate} color="gold" /><Macro label="Fat" value={goal.macrosGrams.fat} color="blue" /></div> : null}
         </article>
         <article className="panel movement-panel">
-          <div className="panel-heading"><div><span className="eyebrow">TODAY’S MOVEMENT</span><h2>Activity</h2></div><span className="panel-symbol">↗</span></div>
+          <div className="panel-heading"><div><h2>Activity</h2></div><span className="panel-symbol">↗</span></div>
           <div className="metric-main">{day?.steps.toLocaleString("en-IN") ?? "—"}<small> steps today</small></div>
-          <p className="muted-copy">{day ? day.activityLogs.length ? `Manual logging · ${day.activityLogs.length} activity entries` : "No activity logged · manual entry" : "Today’s activity is unavailable"}</p>
+          <p className="muted-copy">{day ? day.activityLogs.length ? `${day.activityLogs.length} activities` : "No activity yet" : "Today’s activity is unavailable"}</p>
         </article>
         <article className="panel checkin-panel">
-          <div className="panel-heading"><div><span className="eyebrow">LATEST MEASUREMENT</span><h2>Weight</h2></div><span className="panel-symbol">↕</span></div>
+          <div className="panel-heading"><div><h2>Weight</h2></div><span className="panel-symbol">↕</span></div>
           <div className="metric-main">{latest ? latest.data.weightKg.toFixed(1) : goal.startWeightKg.toFixed(1)}<small> kg</small></div>
           <p className="muted-copy">{latest ? `Updated ${formatDate(dateAtTimezone(latest.data.measuredAt, profile.timezone))}` : "Baseline measurement"}</p>
-          <button className="inline-link" onClick={onProgress}>Add a weigh-in <span aria-hidden="true">＋</span></button>
+          <button className="inline-link" onClick={onWeighIn}>Add a weigh-in <span aria-hidden="true">＋</span></button>
         </article>
       </section>
-      <div className="privacy-note"><span className="privacy-check">✓</span><span>Your information is stored in your account. Friends using the app cannot see your data.</span></div>
     </>
   );
 }
@@ -371,7 +362,7 @@ function ProgressView({ goal, goalVersions, measurements, timezone, unitSystem, 
 
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">ACTUAL VS PLAN</span><h1>Your progress</h1><p>The dashed line is your chosen target path. Dots are measurements you recorded.</p></div></div>
+      <div className="page-heading"><div><h1>Progress</h1></div></div>
       <section className="panel large-chart-panel">
         <div className="progress-chart-toolbar">
           <div className="panel-heading"><div><span className="eyebrow">WEIGHT · KG</span><h2>{goal.startWeightKg.toFixed(1)} <span className="heading-arrow">→</span> {goal.targetWeightKg.toFixed(1)}</h2></div><span className="date-chip">{formatDate(rangeStart)} — {formatDate(rangeEnd)}</span></div>
@@ -380,15 +371,12 @@ function ProgressView({ goal, goalVersions, measurements, timezone, unitSystem, 
           </div>
         </div>
         <GoalChart goal={goal} goalRevisions={revisions} measurements={measurements} timezone={timezone} rangeStart={rangeStart} rangeEnd={rangeEnd} />
-        <div className="chart-legend"><span><i className="legend-plan" /> Target path</span><span><i className="legend-trend" /> 3-weigh-in trend</span><span><i className="legend-actual" /> Recorded weigh-ins</span><span><i className="legend-point" /> Measurement</span><span><i className="legend-revision" /> Plan update</span></div>
+        <div className="chart-legend"><span><i className="legend-plan" /> Target path</span><span><i className="legend-trend" /> Trend</span><span><i className="legend-actual" /> Weigh-ins</span>{revisions.length ? <span><i className="legend-revision" /> Plan update</span> : null}</div>
         {revisions.length ? <div className="chart-revisions" role="list" aria-label="Goal plan updates">{revisions.map((revision) => <p key={revision.id} role="listitem"><strong>Plan v{revision.goalVersion}</strong> updated {formatDate(revision.date)} · target {revision.previousTargetKg === null ? "set to " : `${revision.previousTargetKg.toFixed(1)} → `}{revision.targetWeightKg.toFixed(1)} kg by {formatDate(revision.targetDate)}</p>)}</div> : null}
         <p className="chart-summary" aria-live="polite">{graphSummary}</p>
-        <p className="chart-caption">The target line is a schedule, not a prediction. Day-to-day body weight can vary.</p>
       </section>
-      <ExerciseProgressPanel unitSystem={unitSystem} />
-      <WeeklyProgressReviewPanel />
       <section className="progress-lower-grid">
-        <form className="panel weigh-in-form" onSubmit={(event) => void submit(event)}>
+        <form id="weigh-in-form" className="panel weigh-in-form" onSubmit={(event) => void submit(event)}>
           <div className="panel-heading"><div><span className="eyebrow">KEEP THE GRAPH CURRENT</span><h2>Add a weigh-in</h2></div></div>
           <div className="form-grid"><Field label="Weight (kg)" type="number" step="0.1" min="25" max="400" value={weight} onChange={setWeight} /><Field label="Date and time" type="datetime-local" value={measuredAt} onChange={setMeasuredAt} /></div>
           {message ? <p className="form-message" role="status">{message}</p> : null}
@@ -398,6 +386,8 @@ function ProgressView({ goal, goalVersions, measurements, timezone, unitSystem, 
           {measurements.length ? <div className="measurement-list">{[...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt)).slice(0, 8).map((item) => <div className="measurement-row" key={item.id}><span>{formatDate(dateAtTimezone(item.data.measuredAt, timezone))}</span><strong>{item.data.weightKg.toFixed(1)} kg</strong></div>)}</div> : <p className="muted-copy">Your first measurement is saved as the baseline.</p>}
         </section>
       </section>
+      <ExerciseProgressPanel unitSystem={unitSystem} />
+      <WeeklyProgressReviewPanel />
     </>
   );
 }
@@ -553,7 +543,6 @@ function ExerciseProgressPanel({ unitSystem }: { unitSystem: "metric" | "imperia
         <ExerciseProgressChart response={response} metric={activeMetric} unitSystem={unitSystem} />
         <p className="chart-summary" aria-live="polite">{latest ? `${metricLabel}: ${formatExerciseMetric(latest.value, activeMetric, unitSystem)} on ${formatDate(latest.point.date)}. ${latest.point.sessions} session${latest.point.sessions === 1 ? "" : "s"} across ${latest.point.setCount} set${latest.point.setCount === 1 ? "" : "s"} recorded that day.` : "No values for this metric are recorded in this range."}</p>
       </> : <div className="empty-inline"><strong>No {metricLabel.toLowerCase()} recorded in this range</strong><span>Log this catalog exercise with that value to create a graph.</span></div>}
-      <p className="chart-caption">Each point shows the best recorded value for that exercise on a day. It summarizes logged sessions; it does not estimate calories burned.</p>
     </> : loading ? <p className="muted-copy" role="status">Loading exercise progress…</p>
       : error ? <p className="form-error" role="alert">{error}</p>
         : <div className="empty-inline"><strong>Select an exercise</strong><span>Log catalog-linked sets to build its progress line.</span></div>}
@@ -589,8 +578,8 @@ function ExerciseProgressChart({ response, metric, unitSystem }: { response: Exe
     return value === null ? [] : [{ point, value }];
   });
   if (!values.length) return null;
-  const width = 720;
-  const height = 260;
+  const width = 360;
+  const height = 240;
   const left = 58;
   const right = 20;
   const top = 24;
@@ -620,8 +609,8 @@ function ExerciseProgressChart({ response, metric, unitSystem }: { response: Exe
 }
 
 function GoalChart({ goal, goalRevisions = [], measurements, timezone, compact = false, rangeStart = goal.startDate, rangeEnd = goal.targetDate }: { goal: StoredGoal; goalRevisions?: GoalRevision[]; measurements: Measurement[]; timezone: string; compact?: boolean; rangeStart?: string; rangeEnd?: string }) {
-  const width = 720;
-  const height = compact ? 218 : 340;
+  const width = 360;
+  const height = compact ? 205 : 285;
   const left = 48;
   const right = 18;
   const top = 18;
@@ -666,7 +655,7 @@ function GoalChart({ goal, goalRevisions = [], measurements, timezone, compact =
         {validMeasurements.map((item) => <circle key={item.id} cx={xAt(dateAtTimezone(item.data.measuredAt, timezone))} cy={yAt(item.data.weightKg)} r={compact ? 4.5 : 6} className="chart-actual-dot"><title>{`${item.data.weightKg.toFixed(1)} kg on ${formatDate(dateAtTimezone(item.data.measuredAt, timezone))}`}</title></circle>)}
         {trendPoints.map((point) => <circle key={`trend-${point.date}`} cx={xAt(point.date)} cy={yAt(point.weightKg)} r="3" className="chart-trend-dot"><title>{`Average across up to three weigh-in days: ${point.weightKg.toFixed(1)} kg on ${formatDate(point.date)}`}</title></circle>)}
         {showTargetMarker ? <circle cx={xAt(goal.targetDate)} cy={yAt(goal.targetWeightKg)} r="5" className="chart-target-dot"><title>{`Target weight ${goal.targetWeightKg.toFixed(1)} kg by ${formatDate(goal.targetDate)}`}</title></circle> : null}
-        {labelDates.map((date, index) => <text key={`${date}-${index}`} x={xAt(date)} y={height - 7} textAnchor={index === 0 ? "start" : index === 2 ? "end" : "middle"} className="chart-axis-label">{compact ? formatShortDate(date) : formatDate(date)}</text>)}
+        {labelDates.map((date, index) => <text key={`${date}-${index}`} x={xAt(date)} y={height - 7} textAnchor={index === 0 ? "start" : index === 2 ? "end" : "middle"} className="chart-axis-label">{formatShortDate(date)}</text>)}
       </svg>
     </div>
   );

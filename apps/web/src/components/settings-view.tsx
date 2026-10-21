@@ -20,7 +20,7 @@ type GoogleCalendarStatus = {
   linkedEvents: number;
 };
 
-export function SettingsView({ userId, onAccountDeleted }: { userId: string; onAccountDeleted: () => Promise<unknown> }) {
+export function SettingsView({ userId, displayName, email, onSignOut, onAccountDeleted }: { userId: string; displayName: string; email: string; onSignOut: () => Promise<void>; onAccountDeleted: () => Promise<unknown> }) {
   const [preferences, setPreferences] = useState<ReminderPreferences | null>(null);
   const [draft, setDraft] = useState<ReminderPreferences | null>(null);
   const [loading, setLoading] = useState(true);
@@ -246,17 +246,18 @@ export function SettingsView({ userId, onAccountDeleted }: { userId: string; onA
   return (
     <>
       <div className="page-heading">
-        <div><span className="eyebrow">YOUR PREFERENCES</span><h1>Settings</h1><p>Choose reminder times for your local time zone.</p></div>
+        <div><h1>You</h1></div>
       </div>
+      <section className="panel account-card"><span className="avatar">{displayName[0]?.toUpperCase()}</span><div><strong>{displayName}</strong><span>{email}</span></div><button className="quiet-button" type="button" onClick={() => void onSignOut()}>Sign out</button></section>
       <section className="panel settings-panel" aria-labelledby="reminder-settings-title">
         <div className="panel-heading">
-          <div><span className="eyebrow">REMINDERS</span><h2 id="reminder-settings-title">Daily check-ins</h2></div>
+          <div><h2 id="reminder-settings-title">Reminders</h2></div>
           <span className="panel-symbol" aria-hidden="true">◷</span>
         </div>
         {loading ? <p className="muted-copy">Loading preferences…</p> : null}
         {error && !draft ? <p className="form-error" role="alert">{error}</p> : null}
         {draft ? <>
-          <p className="muted-copy settings-timezone">Times use <strong>{draft.timezone}</strong>. Notifications can appear while Goal Health is open. The browser may delay them when the app is in the background.</p>
+          <p className="muted-copy settings-timezone"><strong>{draft.timezone}</strong> · while the app is open</p>
           <div className="reminder-list">
             {draft.rules.map((rule) => <label className="reminder-row" key={rule.kind}>
               <span className="reminder-toggle"><input type="checkbox" checked={rule.enabled} onChange={(event) => updateRule(rule.kind, { enabled: event.target.checked })} /><span><strong>{labels[rule.kind]}</strong><small>{rule.enabled ? "Reminder on" : "Reminder off"}</small></span></span>
@@ -264,7 +265,7 @@ export function SettingsView({ userId, onAccountDeleted }: { userId: string; onA
             </label>)}
           </div>
           <div className="reminder-notification-option">
-            <div><strong>Browser notifications</strong><p>Show a simple reminder when the app is open and the selected time arrives.</p></div>
+            <div><strong>Notifications</strong></div>
             {draft.browserNotificationsEnabled
               ? <button className="button button-secondary" type="button" disabled={busy} onClick={() => { const next = { ...draft, browserNotificationsEnabled: false }; setDraft(next); void save(next); }}>Turn off</button>
               : <button className="button button-secondary" type="button" disabled={busy} onClick={() => void enableNotifications()}>Enable</button>}
@@ -277,13 +278,13 @@ export function SettingsView({ userId, onAccountDeleted }: { userId: string; onA
         </> : null}
       </section>
       <section className="panel settings-calendar-panel">
-        <div className="panel-heading"><div><span className="eyebrow">SEPARATE GOOGLE PERMISSION</span><h2>Google Calendar</h2></div><span className="panel-symbol" aria-hidden="true">▦</span></div>
-        <p className="muted-copy">Calendar sync is optional because Google sign-in only shares your basic account details. Connect it separately if you want approved workouts copied to a Goal Health calendar. Food, activity, progress, and in-app reminders work without Calendar access.</p>
+        <div className="panel-heading"><div><h2>Google Calendar</h2></div><span className="panel-symbol" aria-hidden="true">▦</span></div>
+        <p className="muted-copy">Sync workout reminders with Google Calendar.</p>
         {calendar?.connected ? <>
           <div className="calendar-connection-status"><strong>{calendar.calendarName}</strong><span>{calendar.lastSyncedAt ? `Last synced ${new Date(calendar.lastSyncedAt).toLocaleString()}` : "Connected · not synced yet"}</span><span>{calendar.linkedEvents} linked events</span></div>
           <div className="calendar-actions"><button className="button button-primary" type="button" disabled={calendarBusy} onClick={() => void syncCalendar()}>{calendarBusy ? "Syncing…" : "Sync approved workouts"}</button><button className="text-button" type="button" disabled={calendarBusy} onClick={() => void disconnectCalendar()}>Disconnect</button></div>
         </> : <>
-          {calendar && !calendar.configured ? <p className="note-box">To enable this, the app owner must enable Google Calendar API and set GOOGLE_REDIRECT_URI and TOKEN_ENCRYPTION_KEY in Vercel. The existing Google sign-in client ID and secret can be reused.</p> : null}
+          {calendar && !calendar.configured ? <p className="note-box">Calendar setup is pending.</p> : null}
           {calendar?.configured
             ? <form action="/v1/connections/google/start" method="get"><button className="button button-secondary" type="submit">Connect Google Calendar</button></form>
             : <button className="button button-secondary" type="button" disabled>Connect Google Calendar</button>}
@@ -292,14 +293,15 @@ export function SettingsView({ userId, onAccountDeleted }: { userId: string; onA
         {calendarMessage ? <p className="form-message" role="status">{calendarMessage}</p> : null}
       </section>
       <section className="panel privacy-panel">
-        <div className="panel-heading"><div><span className="eyebrow">YOUR DATA</span><h2>Privacy and account</h2></div><span className="panel-symbol" aria-hidden="true">⌑</span></div>
-        <p className="muted-copy">Download your profile, logs, plans, reminders, and AI planning history as JSON. The export excludes authentication and Google access tokens.</p>
+        <div className="panel-heading"><div><h2>Privacy and account</h2></div><span className="panel-symbol" aria-hidden="true">⌑</span></div>
+        <p className="muted-copy">Download a copy of your data.</p>
+        <details className="settings-info"><summary>Data & connections</summary><p>Food photos are sent to the AI provider for recognition. Google Calendar needs its own permission to sync workouts.</p></details>
         <button className="button button-secondary" type="button" disabled={exportBusy} onClick={() => void downloadExport()}>{exportBusy ? "Preparing export…" : "Download my data"}</button>
         <div className="account-delete-block">
           <strong>Delete account</strong>
-          <p>This removes your app records and planning checkpoints and attempts to revoke Google access. The Goal Health calendar and synced events may remain in Google; remove that calendar there if you want those events deleted too.</p>
+          <p>Permanently delete your account and app data. Synced Google Calendar events may remain.</p>
           {!deleteOpen ? <button className="button button-danger" type="button" onClick={() => { setDeleteOpen(true); setPrivacyError(""); }}>Delete my account</button> : <form className="account-delete-form" onSubmit={(event) => void deleteAccount(event)}>
-            <label className="field"><span>Password (optional)</span><input type="password" minLength={deletePassword ? 12 : undefined} maxLength={128} autoComplete="current-password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} /><small>Use this for an email/password account. Google accounts have no password. If you leave this blank, your sign-in must be less than 24 hours old.</small></label>
+            <label className="field"><span>Password (optional)</span><input type="password" minLength={deletePassword ? 12 : undefined} maxLength={128} autoComplete="current-password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} /><small>Google sign-in: leave blank. A recent sign-in is required.</small></label>
             <label className="field"><span>Type DELETE to confirm</span><input autoComplete="off" required value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} /></label>
             <div className="calendar-actions"><button className="button button-danger" type="submit" disabled={deleteBusy}>{deleteBusy ? "Deleting…" : "Permanently delete account"}</button><button className="text-button" type="button" disabled={deleteBusy} onClick={() => { setDeleteOpen(false); setDeletePassword(""); setDeleteConfirmation(""); }}>Cancel</button></div>
           </form>}

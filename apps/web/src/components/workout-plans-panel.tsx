@@ -307,7 +307,6 @@ export function WorkoutPlansPanel({ unitSystem, equipment, gymWorkoutDays, homeW
 
   return <section className="panel workout-plans-panel">
     <div className="panel-heading"><div><span className="eyebrow">WEEKLY ROUTINE</span><h2>Workout plans</h2></div><span className="panel-symbol">▦</span></div>
-    <p className="muted-copy">Plan sessions for the week, review a draft, then activate it. Planned targets stay separate from completed activity logs.</p>
     <div className="workout-plan-create-row">
       <label className="field"><span>Start from a template</span><select value={templateId} onChange={(event) => setTemplateId(event.target.value)}>
         {workoutTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
@@ -334,7 +333,7 @@ export function WorkoutPlansPanel({ unitSystem, equipment, gymWorkoutDays, homeW
         </div> : active ? <div className="workout-plan-actions"><button type="button" className="button button-secondary" onClick={() => void revisePlan(active)} disabled={busy}>Create revision</button></div> : null}
         {versions.length > 1 ? <details className="plan-history"><summary>Version history ({versions.length})</summary><ul>{versions.map((version) => <li key={version.id}>Version {version.version} · {version.status} · updated {new Date(version.updatedAt).toLocaleDateString()}</li>)}</ul></details> : null}
       </article>;
-    })}</div> : <p className="muted-copy">No saved plans yet. Create a draft from a starter routine to begin.</p>}
+    })}</div> : <p className="muted-copy">No workout plan yet.</p>}
 
     {editingPlan && data ? <div className="workout-plan-editor">
       <div className="panel-heading"><div><span className="eyebrow">DRAFT · VERSION {editingPlan.version}</span><h3>Edit weekly plan</h3></div><button type="button" className="quiet-button" onClick={() => { setEditingPlan(null); setData(null); setDirty(false); }}>Close</button></div>
@@ -382,7 +381,7 @@ export function WorkoutPlansPanel({ unitSystem, equipment, gymWorkoutDays, homeW
       {unavailableHomeEquipment ? <p className="field-note">A home session uses equipment you did not select. Replace that exercise or move the session to the gym.</p> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="workout-plan-actions"><button type="button" className="button button-secondary" disabled={busy || !dirty} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft"}</button>{editingPlan.source === "ai" ? <button type="button" className="button button-secondary" disabled={busy} onClick={() => void rejectPlan(editingPlan)}>Reject suggestion</button> : null}<button type="button" className="button button-primary" disabled={busy || dirty || !parsedData?.success || parsedData.success && !parsedData.data.sessions.length || locationDaysExceeded || unavailableHomeEquipment} onClick={() => void approvePlan(editingPlan)}>Activate plan</button></div>
-      <p className="field-note">{dirty ? "Save your changes before activation." : "Activation replaces the current version for this routine. Previous versions stay in history."}</p>
+      <p className="field-note">{dirty ? "Save your changes before activation." : "Your plan is ready to activate."}</p>
     </div> : null}
     {error && !editingPlan ? <p className="form-error" role="alert">{error}</p> : null}
     {notice ? <p className="form-message" role="status">{notice}</p> : null}

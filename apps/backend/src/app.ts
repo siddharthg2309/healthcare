@@ -1435,7 +1435,8 @@ app.post("/v1/food-logs", async (c) => {
         && prior.data.occurredAt === parsed.data.occurredAt
         && prior.data.mealType === parsed.data.mealType
         && prior.data.quantityGrams === parsed.data.quantityGrams
-        && (prior.data.portionId ?? null) === (parsed.data.portionId ?? null);
+        && (prior.data.portionId ?? null) === (parsed.data.portionId ?? null)
+        && (prior.data.portionCount ?? 1) === (parsed.data.portionCount ?? 1);
       return { status: same ? "saved" as const : "conflict" as const, data: existing.data, version: existing.version, idempotent: same };
     }
 
@@ -1450,22 +1451,23 @@ app.post("/v1/food-logs", async (c) => {
     const food = shared ?? personal;
     if (!food) return { status: "food_not_found" as const };
     let portionLabel: string | null = null;
+    const portionCount = parsed.data.portionCount ?? 1;
+    if (!parsed.data.portionId && parsed.data.portionCount !== undefined) return { status: "portion_invalid" as const };
     if (parsed.data.portionId) {
       const foodSource = shared ? "shared_catalog" : "personal";
-      const [savedPortion] = await tx.select({ label: foodPortions.label }).from(foodPortions).where(and(
+      const [savedPortion] = await tx.select({ label: foodPortions.label, grams: foodPortions.grams }).from(foodPortions).where(and(
         eq(foodPortions.id, parsed.data.portionId),
         eq(foodPortions.userId, userId),
         eq(foodPortions.foodSource, foodSource),
         eq(foodPortions.foodId, parsed.data.foodId),
-        eq(foodPortions.grams, parsed.data.quantityGrams),
       )).limit(1);
-      const [catalogPortion] = shared && !savedPortion ? await tx.select({ label: catalogFoodPortions.label }).from(catalogFoodPortions).where(and(
+      const [catalogPortion] = shared && !savedPortion ? await tx.select({ label: catalogFoodPortions.label, grams: catalogFoodPortions.grams }).from(catalogFoodPortions).where(and(
         eq(catalogFoodPortions.id, parsed.data.portionId),
         eq(catalogFoodPortions.foodId, parsed.data.foodId),
-        eq(catalogFoodPortions.grams, parsed.data.quantityGrams),
       )).limit(1) : [];
-      portionLabel = savedPortion?.label ?? catalogPortion?.label ?? null;
-      if (!portionLabel) return { status: "portion_invalid" as const };
+      const portion = savedPortion ?? catalogPortion;
+      if (!portion || roundNutrition(Number(portion.grams) * portionCount) !== roundNutrition(parsed.data.quantityGrams)) return { status: "portion_invalid" as const };
+      portionLabel = portion.label;
     }
     const nutritionPer100g = {
       caloriesKcal: nutritionValue(food.caloriesKcalPer100g),
@@ -1484,6 +1486,7 @@ app.post("/v1/food-logs", async (c) => {
       quantityGrams: parsed.data.quantityGrams,
       portionId: parsed.data.portionId ?? null,
       portionLabel,
+      portionCount: parsed.data.portionId ? portionCount : null,
       nutritionPer100g,
       nutritionTotal: {
         caloriesKcal: roundNutrition(nutritionPer100g.caloriesKcal * multiplier),
@@ -1632,6 +1635,7 @@ app.patch("/v1/food-logs/:id", async (c) => {
       quantityGrams,
       portionId: quantityChanged ? null : prior.data.portionId ?? null,
       portionLabel: quantityChanged ? null : prior.data.portionLabel ?? null,
+      portionCount: quantityChanged ? null : prior.data.portionCount ?? null,
       nutritionTotal: {
         caloriesKcal: roundNutrition(prior.data.nutritionPer100g.caloriesKcal * factor),
         proteinG: roundNutrition(prior.data.nutritionPer100g.proteinG * factor),

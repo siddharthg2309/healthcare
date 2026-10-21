@@ -16,6 +16,12 @@ The app is under implementation. The current build includes account setup, goal 
 - Server-only OpenRouter integration using MiniMax M3 for food-photo candidates and meal/workout plans; only the OpenRouter key is required, with the model defaulted in the server
 - Two bounded LangGraph workflows for meal and workout plans, with database-backed state and explicit user review
 
+## Phone interface
+
+The PWA uses a phone-width layout on every screen, with bottom navigation, safe-area spacing, readable input text, and thumb-sized controls. Food selection opens a bottom sheet: choose a saved serving size, adjust its count with − / + / +2, and add the total to a meal. Custom gram amounts and timestamps stay under **Custom amount & time**. Food and activity each separate their daily log from weekly plans.
+
+Serving counts use the existing JSON food-log records and do not require a database migration. The API validates the chosen portion against its owner and food, checks the total grams against the count, and calculates nutrition. Existing gram-only logs remain supported.
+
 ## Run locally
 
 ### Requirements

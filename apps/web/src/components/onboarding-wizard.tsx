@@ -221,7 +221,6 @@ export function OnboardingWizard({
       <div className="onboarding-heading">
         <span className="eyebrow">YOUR STARTING POINT</span>
         <h1 id="onboarding-title">{step === "profile" ? "Build your profile" : step === "goal" ? "Choose your goal" : "Review your plan"}</h1>
-        <p>Set a baseline first. You can update your profile and goal later.</p>
       </div>
 
       <div className="step-track" aria-label={`Step ${step === "profile" ? 1 : step === "goal" ? 2 : 3} of 3`}>
@@ -242,7 +241,6 @@ export function OnboardingWizard({
               <SelectField label="Preferred display units" value={draft.unitSystem} onChange={(value) => update("unitSystem", value as Draft["unitSystem"])} options={[["metric", "Metric"], ["imperial", "Imperial"]]} />
               <Field label="Time zone" value={draft.timezone} onChange={(value) => update("timezone", value)} />
             </div>
-            <p className="field-note">Measurements are entered in centimetres and kilograms. Your unit preference applies to app displays.</p>
           </div>
 
           <div className="form-section">
@@ -260,7 +258,7 @@ export function OnboardingWizard({
               </div>
               {draft.gymEnabled ? <Field label="Gym days per week" type="number" value={draft.gymWorkoutDays} onChange={(value) => update("gymWorkoutDays", value)} min="0" max="7" /> : null}
               {draft.homeEnabled ? <Field label="Home days per week" type="number" value={draft.homeWorkoutDays} onChange={(value) => update("homeWorkoutDays", value)} min="0" max="7" /> : null}
-              <p className="field-note availability-note">Gym and home days together can add up to seven days per week.</p>
+              <p className="field-note availability-note">Up to 7 workout days in total.</p>
               <SelectField label="Strength-training experience" value={draft.trainingExperience} onChange={(value) => update("trainingExperience", value as Draft["trainingExperience"])} options={[["beginner", "New or returning"], ["intermediate", "Some experience"], ["advanced", "Experienced"]]} />
               <Field label="Preferred workout length (minutes)" type="number" value={draft.preferredWorkoutMinutes} onChange={(value) => update("preferredWorkoutMinutes", value)} min="10" max="180" />
               {draft.homeEnabled ? <fieldset className="field home-equipment-field">
@@ -302,19 +300,17 @@ export function OnboardingWizard({
                         </label>
                       ))}
                     </div>
-                    <small>Choose one to six days. The planner will use vegetarian foods on those days and non-vegetarian dishes on the remaining days when the catalog supports them.</small>
+                    <small>Choose 1–6 vegetarian days.</small>
                   </fieldset>
                 ) : draft.foodPattern === "vegetarian" ? (
-                  <small className="food-pattern-note">Every day will use reviewed vegetarian-tagged foods.</small>
+                  <small className="food-pattern-note">Vegetarian every day.</small>
                 ) : draft.foodPattern === "non_vegetarian" ? (
-                  <small className="food-pattern-note">Meat, fish, or eggs may be included on any day.</small>
-                ) : <small className="food-pattern-note">All foods are available unless you set other restrictions.</small>}
+                  <small className="food-pattern-note">Meat, fish, and eggs allowed.</small>
+                ) : <small className="food-pattern-note">Choose any food.</small>}
               </fieldset>
               <Field label="Cuisine and other preferences" value={draft.dietaryPreferences} onChange={(value) => update("dietaryPreferences", value)} placeholder="South Indian, high protein" />
-              <p className="field-note">Set vegetarian and non-vegetarian days above. Use this field for cuisine and meal style.</p>
               <Field label="Allergies or foods to avoid" value={draft.restrictions} onChange={(value) => update("restrictions", value)} placeholder="Peanuts, shellfish" />
             </div>
-            <p className="field-note">Workout suggestions use your experience, available equipment, and preferred session length. If you list a movement limitation, use a reviewed template until that limitation can be safely reviewed.</p>
           </div>
 
           <div className="form-section">
@@ -354,7 +350,7 @@ export function OnboardingWizard({
             }} min="800" max="5000" />
             {draft.manualDailyCalories ? (
               <SelectField label="Target source" value={draft.manualTargetSource ?? "self"} onChange={(value) => update("manualTargetSource", value as Draft["manualTargetSource"])} options={[["self", "Entered by me"], ["clinician", "Provided by a clinician"]]} />
-            ) : <p className="field-note">Leave this blank to set a weight goal without a calorie or macro target. You can still track your food and daily totals.</p>}
+            ) : <p className="field-note">Leave blank for weight tracking only.</p>}
           </div>
 
           {error ? <p className="form-error" role="alert">{error}</p> : null}
@@ -392,10 +388,10 @@ export function OnboardingWizard({
                   <p>To add a calorie target, choose “Add calorie target” and enter one yourself or use a clinician-provided target. Changing your activity level or date alone will not create an estimate for this profile.</p>
                 </div>
               ) : null}
-              <div className="rationale-list">
+              <details className="plan-explanation"><summary>Plan details</summary><div className="rationale-list">
                 {proposal.goal.rationale.map((item) => <p key={item}>{item}</p>)}
                 {proposal.notes.map((item) => <p key={item}>{item}</p>)}
-              </div>
+              </div></details>
             </>
           ) : (
             <div className="manual-review">
