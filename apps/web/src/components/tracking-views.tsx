@@ -9,7 +9,7 @@ import type {
   ActivityLogRecord,
   ActivityEnergyKind,
 } from "@healthcare/contracts";
-import { activityEnergyOptions, defaultActivityEnergyKind, estimateActivityEnergy, exerciseCatalog, findExerciseById, selectActivityWeight } from "@healthcare/domain";
+import { activityEnergyOptions, defaultActivityEnergyKind, estimateActivityEnergy, exerciseCatalog, findExerciseById, selectActivityWeight, summarizeActivityEnergy } from "@healthcare/domain";
 import type { WorkoutPlanSession, WorkoutPlanVersion } from "@healthcare/contracts";
 import {
   ApiError,
@@ -82,6 +82,7 @@ export type DaySummary = {
   foodTotals: { caloriesKcal: number; proteinG: number; carbohydrateG: number; fatG: number };
   steps: number;
   workoutsCompleted: number;
+  activityEnergy?: ReturnType<typeof summarizeActivityEnergy>;
   foodDayComplete: boolean;
 };
 
@@ -1090,8 +1091,8 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
     && priorEntry.energyKind === selectedEnergyKind ? priorEntry.energyEstimate
     : selectActivityWeight(measurements.map((item) => item.data), profileWeightKg, occurredAtIso);
   const energyPreview = estimateActivityEnergy({ activityType, energyKind: selectedEnergyKind, durationMinutes: durationMinutes ? Number(durationMinutes) : null, weight });
-  const estimatedEntries = viewDay.activityLogs.filter((item) => item.data.energyEstimate !== null && item.data.energyEstimate !== undefined);
-  const estimatedActiveKcal = estimatedEntries.reduce((sum, item) => sum + (item.data.energyEstimate?.caloriesKcal ?? 0), 0);
+  const activityEnergy = viewDay.activityEnergy ?? summarizeActivityEnergy(viewDay.activityLogs.map((item) => item.data));
+  const validEnergyDuration = Number.isInteger(Number(durationMinutes)) && Number(durationMinutes) >= 1 && Number(durationMinutes) <= 1440;
 
   function updateExercise(index: number, update: (exercise: ExerciseDraft) => ExerciseDraft) {
     setExercises((current) => current.map((exercise, exerciseIndex) => exerciseIndex === index ? update(exercise) : exercise));
@@ -1312,7 +1313,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
         </div>}
         {energyChoices.length ? <>
           <label className="field"><span>{activityType === "walk" ? "Pace" : activityType === "strength" ? "Training style" : "Cardio type"}</span><select value={selectedEnergyKind} onChange={(event) => setEnergyKind(event.target.value as ActivityEnergyKind)}>{energyChoices.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
-          <div className="activity-energy-preview" role="status"><span>Estimated active calories</span><strong>{energyPreview ? `${formatNumber(energyPreview.caloriesKcal)} kcal` : durationMinutes ? "Add your weight" : "Enter minutes"}</strong></div>
+          <div className="activity-energy-preview" role="status"><span>Calories burned · estimated</span><strong>{energyPreview ? `${formatNumber(energyPreview.caloriesKcal)} kcal` : validEnergyDuration ? "Add your weight" : durationMinutes ? "Check minutes" : "Enter minutes"}</strong></div>
         </> : null}
         <details className="activity-note-details"><summary>Notes</summary><label className="field"><span>Notes · optional</span><input value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} /></label></details>
         {error ? <p className="form-error" role="alert">{error}</p> : null}
@@ -1333,8 +1334,8 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           if (editingId) resetForm();
           setOccurredAt(dateTimeForDay(nextDate, day.date));
         }} /></label>
-        <div className="daily-calorie-total"><strong>{formatNumber(viewDay.steps)}</strong><span>steps</span></div>
-        <div className="activity-history-totals"><span>{viewDay.workoutsCompleted} sessions</span>{estimatedEntries.length ? <strong>{formatNumber(estimatedActiveKcal)} estimated active kcal</strong> : null}</div>
+        <div className="daily-calorie-total" aria-label="Estimated activity calories burned"><strong>{activityEnergy.caloriesKcal === null ? "—" : formatNumber(activityEnergy.caloriesKcal)}</strong><span>kcal burned · estimated</span></div>
+        <div className="activity-history-totals"><span>{formatNumber(viewDay.steps)} steps · {viewDay.workoutsCompleted} sessions</span>{activityEnergy.sessionsMissingEstimate ? <span>{activityEnergy.sessionsMissingEstimate} {activityEnergy.sessionsMissingEstimate === 1 ? "session needs" : "sessions need"} minutes or weight</span> : null}</div>
         {historyError ? <p className="form-error" role="alert">{historyError}</p> : null}
         {historyLoading ? <p className="muted-copy" role="status">Loading activity history…</p> : viewDay.activityLogs.length ? <div className="daily-entry-list">{[...viewDay.activityLogs].reverse().map((item) => {
           const title = item.data.workoutTitle ?? (item.data.activityType === "steps" ? "Step count" : item.data.activityType[0].toUpperCase() + item.data.activityType.slice(1));
@@ -1346,7 +1347,7 @@ export function ActivityTrackingView({ day, unitSystem, equipment, gymWorkoutDay
           return <div className="daily-entry" key={item.id}>
             <span className="meal-badge">↗</span>
             <span className="daily-entry-main"><strong>{title}</strong><small>{item.data.plannedSession ? `Plan: ${item.data.plannedSession.label} · ` : ""}{formatClock(item.data.occurredAt)}{item.data.durationMinutes ? ` · ${item.data.durationMinutes} min` : ""}{exerciseDetails ? ` · ${exerciseDetails}` : ""}{item.data.notes ? ` · ${item.data.notes}` : ""}</small></span>
-            <div className="activity-entry-totals">{item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}{item.data.energyEstimate ? <strong>{formatNumber(item.data.energyEstimate.caloriesKcal)}<small> kcal est.</small></strong> : null}</div>
+            <div className="activity-entry-totals">{item.data.steps !== null ? <strong>{formatNumber(item.data.steps)}<small> steps</small></strong> : null}{item.data.energyEstimate ? <strong>{formatNumber(item.data.energyEstimate.caloriesKcal)}<small> kcal burned · est.</small></strong> : ["walk", "cardio", "strength"].includes(item.data.activityType) ? <span className="activity-calorie-missing">{item.data.durationMinutes ? "Needs weight" : "Add minutes"}</span> : null}</div>
             <div className="entry-actions">
               <button type="button" className="quiet-button" onClick={() => editingId === item.id ? resetForm() : beginEdit(item)} disabled={busy || deletingId !== null}>{editingId === item.id ? "Editing" : "Edit"}</button>
               <button type="button" className="quiet-button entry-delete" onClick={() => void removeActivity(item)} disabled={busy || deletingId !== null}>{deletingId === item.id ? "Deleting…" : "Delete"}</button>

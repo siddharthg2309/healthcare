@@ -51,6 +51,7 @@ import {
 import {
   buildGoalProposal,
   isActivityEnergyKindAllowed,
+  summarizeActivityEnergy,
   deriveMealPlanFoodSafetyRequirements,
   findExerciseById,
   isFoodAllowedByReviewedMetadata,
@@ -62,7 +63,7 @@ import { env, isAllowedWebOrigin } from "./env.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
 import { FoodVisionError, recognizeFoodPhoto } from "./services/food-vision.js";
-import { buildActivityEnergyEstimate } from "./services/activity-energy.js";
+import { buildActivityEnergyEstimate, createActivityEnergyEstimator } from "./services/activity-energy.js";
 import { hasAiOperationCapacity, lockAiUsageWindow } from "./services/ai-usage.js";
 import { buildMealPlanningContext, hashMealPlanningContext, mealPlanningVersions, recalculateMealPlanEdit, resumeMealPlan, runMealPlan } from "./services/meal-planning.js";
 import { buildWorkoutPlanningContext, hashWorkoutPlanningContext, resumeWorkoutPlan, runWorkoutPlan, workoutPlanningVersions } from "./services/workout-planning.js";
@@ -1903,11 +1904,17 @@ app.get("/v1/days/:date", async (c) => {
       eq(userRecords.entity, "activity_log"),
       eq(userRecords.deleted, false),
     ));
+    const measurementRecords = await tx.select({ id: userRecords.recordId, data: userRecords.data }).from(userRecords).where(and(
+      eq(userRecords.userId, userId),
+      eq(userRecords.entity, "body_measurement"),
+      eq(userRecords.deleted, false),
+    ));
+    const estimateEnergy = createActivityEnergyEstimator(profile?.data, measurementRecords);
     const [status] = await tx.select({ complete: foodDayStatuses.complete }).from(foodDayStatuses).where(and(
       eq(foodDayStatuses.userId, userId),
       eq(foodDayStatuses.localDate, date),
     )).limit(1);
-    return { timezone, foodRecords, activityRecords, foodDayComplete: status?.complete ?? false };
+    return { timezone, foodRecords, activityRecords, estimateEnergy, foodDayComplete: status?.complete ?? false };
   });
   let timezone = result.timezone;
   try {
@@ -1923,9 +1930,15 @@ app.get("/v1/days/:date", async (c) => {
   }).sort((a, b) => a.data.occurredAt.localeCompare(b.data.occurredAt));
   const activityLogs = result.activityRecords.flatMap((record) => {
     const parsed = activityLogRecordSchema.safeParse(record.data);
-    return parsed.success && localDateInZone(parsed.data.occurredAt, timezone) === date
-      ? [{ id: record.id, version: record.version, data: parsed.data }]
-      : [];
+    if (!parsed.success || localDateInZone(parsed.data.occurredAt, timezone) !== date) return [];
+    // Old entries gain a response-only estimate; never rewrite saved history on a GET.
+    const energyEstimate = parsed.data.energyEstimate ?? result.estimateEnergy(parsed.data);
+    return [{
+      id: record.id,
+      version: record.version,
+      data: { ...parsed.data, energyEstimate },
+      energyEstimateSource: parsed.data.energyEstimate ? "saved" : energyEstimate ? "calculated" : null,
+    }];
   }).sort((a, b) => a.data.occurredAt.localeCompare(b.data.occurredAt));
   const foodTotals = foodLogs.reduce((totals, item) => ({
     caloriesKcal: roundNutrition(totals.caloriesKcal + item.data.nutritionTotal.caloriesKcal),
@@ -1936,7 +1949,8 @@ app.get("/v1/days/:date", async (c) => {
   const steps = activityLogs.filter((item) => item.data.activityType === "steps")
     .reduce((total, item) => total + (item.data.steps ?? 0), 0);
   const workoutsCompleted = activityLogs.filter((item) => ["strength", "cardio", "walk"].includes(item.data.activityType)).length;
-  return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted, foodDayComplete: result.foodDayComplete });
+  const activityEnergy = summarizeActivityEnergy(activityLogs.map((item) => item.data));
+  return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted, activityEnergy, foodDayComplete: result.foodDayComplete });
 });
 
 app.get("/v1/progress/weekly-review", async (c) => {

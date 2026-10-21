@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import Link from "next/link";
 import { AppIcon } from "./app-icon";
 import { exerciseProgressResponseSchema, goalSchema, profileSchema, weeklyProgressReviewResponseSchema, type ExerciseProgressResponse, type GoalRecord, type Profile, type WeeklyProgressReviewResponse } from "@healthcare/contracts";
-import { exerciseCatalog } from "@healthcare/domain";
+import { exerciseCatalog, summarizeActivityEnergy } from "@healthcare/domain";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { ActivityTrackingView, FoodTrackingView, type DaySummary } from "@/components/tracking-views";
 import { ReminderNotificationRunner, SettingsView } from "@/components/settings-view";
@@ -278,6 +278,7 @@ function LoadingPage({ label }: { label: string }) {
 function HomeView({ profile, goal, measurements, day, onProgress, onWeighIn, onFood, onActivity }: { profile: Profile; goal: StoredGoal; measurements: Measurement[]; day: DaySummary | null; onProgress: () => void; onWeighIn: () => void; onFood: () => void; onActivity: () => void }) {
   const kcal = goal.dailyCaloriesKcal;
   const latest = [...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt))[0];
+  const activityEnergy = day ? day.activityEnergy ?? summarizeActivityEnergy(day.activityLogs.map((item) => item.data)) : null;
   return (
     <>
       <div className="page-heading home-heading"><div><span className="today-date">{new Intl.DateTimeFormat("en-IN", { weekday: "long", month: "short", day: "numeric" }).format(new Date())}</span><h1>Good {dayGreeting()},<br />{profile.displayName.split(" ")[0]}.</h1></div><span className="greeting-dot" aria-hidden="true">✳</span></div>
@@ -302,8 +303,9 @@ function HomeView({ profile, goal, measurements, day, onProgress, onWeighIn, onF
         </article>
         <article className="panel movement-panel">
           <div className="panel-heading"><div><h2>Activity</h2></div><span className="panel-symbol">↗</span></div>
-          <div className="metric-main">{day?.steps.toLocaleString("en-IN") ?? "—"}<small> steps today</small></div>
-          <p className="muted-copy">{day ? day.activityLogs.length ? `${day.activityLogs.length} activities` : "No activity yet" : "Today’s activity is unavailable"}</p>
+          <div className="metric-main">{activityEnergy?.caloriesKcal?.toLocaleString("en-IN") ?? "—"}<small>kcal burned · estimated</small></div>
+          <p className="muted-copy">{day ? `${day.steps.toLocaleString("en-IN")} steps · ${day.workoutsCompleted} sessions` : "Today’s activity is unavailable"}</p>
+          {activityEnergy?.sessionsMissingEstimate ? <button type="button" className="text-button" onClick={onActivity}>Complete {activityEnergy.sessionsMissingEstimate} {activityEnergy.sessionsMissingEstimate === 1 ? "activity" : "activities"}</button> : null}
         </article>
         <article className="panel checkin-panel">
           <div className="panel-heading"><div><h2>Weight</h2></div><span className="panel-symbol">↕</span></div>

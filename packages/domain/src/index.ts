@@ -9,6 +9,7 @@ export {
   estimateActivityEnergy,
   isActivityEnergyKindAllowed,
   selectActivityWeight,
+  summarizeActivityEnergy,
 } from "./activity-energy.js";
 export {
   EXERCISE_CATALOG_VERSION,

@@ -784,3 +784,5 @@ a { color: inherit; text-decoration: none; }
 .activity-history-totals strong { color: #3e542b; }
 .activity-entry-totals { display: grid; gap: 4px; text-align: right; font-size: 14px; }
 .activity-entry-totals small { font-size: 12px; font-weight: 400; color: var(--muted); }
+
+.activity-calorie-missing { max-width: 100px; color: var(--muted); font-size: 12px; }

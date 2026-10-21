@@ -1,4 +1,4 @@
-import type { ActivityEnergyEstimate, ActivityEnergyKind } from "@healthcare/contracts";
+import type { ActivityEnergyEstimate, ActivityEnergyKind, ActivityLogRecord } from "@healthcare/contracts";
 
 // 2024 Adult Compendium: https://pacompendium.com/adult-compendium/
 export const activityEnergyOptions: ReadonlyArray<{
@@ -68,5 +68,16 @@ export function estimateActivityEnergy(input: {
     weightKg: input.weight.weightKg,
     weightSource: input.weight.weightSource,
     weightMeasuredAt: input.weight.weightMeasuredAt,
+  };
+}
+
+/** Daily activity burn is separate from food intake and resting expenditure. */
+export function summarizeActivityEnergy(records: ReadonlyArray<Pick<ActivityLogRecord, "activityType" | "energyEstimate">>) {
+  const sessions = records.filter((record) => ["walk", "cardio", "strength"].includes(record.activityType));
+  const estimates = sessions.flatMap((record) => record.energyEstimate ? [record.energyEstimate] : []);
+  return {
+    caloriesKcal: estimates.length ? estimates.reduce((sum, estimate) => sum + estimate.caloriesKcal, 0) : sessions.length ? null : 0,
+    estimatedSessions: estimates.length,
+    sessionsMissingEstimate: sessions.length - estimates.length,
   };
 }
