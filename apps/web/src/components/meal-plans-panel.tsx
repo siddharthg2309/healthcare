@@ -41,7 +41,9 @@ function mealPlanError(error: unknown): string {
       meal_plan_food_not_available: "That food no longer matches your saved dietary filters. Choose another reviewed catalog food.",
       meal_plan_catalog_coverage_insufficient: "The reviewed catalog needs more foods before it can build a useful week. Add more reviewed entries and try again.",
       meal_plan_edit_invalid: "This change puts a day outside the plan's nutrition range. Try a different food or adjust its portion.",
-      meal_plan_version_conflict: "This draft changed elsewhere. Reload your meal plans before making more edits.",
+      meal_plan_version_conflict: "Another session saved a newer draft. Your unsaved edits are still on screen; reload the saved version before continuing.",
+      meal_plan_review_stale: "Your goal, profile, or food-safety data changed after this draft was created. The draft was archived; review the refreshed plans and create a new draft if needed.",
+      meal_plan_review_not_available: "This draft can no longer be approved. The latest saved plans have been refreshed.",
       meal_planning_not_configured: "Meal planning is not enabled on the server yet. Add the OpenRouter key in Vercel environment settings.",
       ai_daily_limit_reached: "You have reached the shared AI limit for the last 24 hours. Manual food and activity logging still work; try again later.",
       meal_plan_provider_unavailable: "The meal planner could not reach the model. Try again in a little while.",
@@ -109,6 +111,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
   const [selectedDate, setSelectedDate] = useState(startDate);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [saveVersionConflict, setSaveVersionConflict] = useState(false);
   const [swapTarget, setSwapTarget] = useState<SwapTarget | null>(null);
   const [swapQuery, setSwapQuery] = useState("");
   const [swapResults, setSwapResults] = useState<SwapFoodOption[]>([]);
@@ -263,6 +266,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
     setBusy(true);
     setError("");
     setNotice("");
+    setSaveVersionConflict(false);
     try {
       const input = {
         baseEditVersion: draft.editVersion,
@@ -291,6 +295,25 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
       await loadPlans();
       setNotice("Draft saved. Review it again before approval.");
     } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "meal_plan_version_conflict") {
+        setSaveVersionConflict(true);
+        setError("Another session saved a newer version of this draft. Your unsaved edits are still on screen, but they cannot be saved over the newer version.");
+      } else {
+        setError(mealPlanError(caught));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reloadSavedDraft() {
+    setBusy(true);
+    try {
+      await loadPlans();
+      setError("");
+      setSaveVersionConflict(false);
+      setNotice("Loaded the latest saved draft. The unsaved edits from this screen were discarded.");
+    } catch (caught) {
       setError(mealPlanError(caught));
     } finally {
       setBusy(false);
@@ -302,6 +325,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
     setBusy(true);
     setError("");
     setNotice("");
+    setSaveVersionConflict(false);
     try {
       const response = await postJson<{ status: string }>(`/v1/meal-plans/${draft.id}/approve`, {
         baseEditVersion: draft.editVersion,
@@ -310,7 +334,19 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
       await loadPlans();
       setNotice(response.status === "completed" ? "Meal plan approved. It is still separate from your food log." : "Draft rejected and archived.");
     } catch (caught) {
-      setError(mealPlanError(caught));
+      if (caught instanceof ApiError && ["meal_plan_review_stale", "meal_plan_review_not_available", "meal_plan_version_conflict"].includes(caught.code)) {
+        try {
+          await loadPlans();
+          setError("");
+          setNotice(caught.code === "meal_plan_review_stale"
+            ? "Your planning inputs or food-safety data changed. The old draft was archived; the refreshed plan list is shown below."
+            : "The draft changed in another session. The latest saved version is loaded; review it again before approving.");
+        } catch (refreshError) {
+          setError(`${mealPlanError(caught)} ${mealPlanError(refreshError)}`);
+        }
+      } else {
+        setError(mealPlanError(caught));
+      }
     } finally {
       setBusy(false);
     }
@@ -408,7 +444,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
 
         {draft ? <div className="meal-plan-review-note"><span aria-hidden="true">i</span><p>Swap foods or adjust portions, then save. The server recalculates nutrition and checks the plan ranges. Approval never adds meals to your food log.</p></div> : null}
         {draft ? <div className="meal-plan-actions">
-          {dirty ? <button className="button button-secondary" type="button" disabled={busy} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft edits"}</button> : null}
+          {dirty ? <button className="button button-secondary" type="button" disabled={busy || saveVersionConflict} onClick={() => void saveDraft()}>{busy ? "Saving…" : "Save draft edits"}</button> : null}
           <button className="button button-secondary" type="button" disabled={busy || dirty} onClick={() => void decide("reject")}>Reject draft</button>
           <button className="button button-primary" type="button" disabled={busy || dirty} onClick={() => void decide("approve")}>{busy ? "Saving…" : "Approve plan"}</button>
         </div> : null}
@@ -418,7 +454,7 @@ export function MealPlansPanel({ startDate }: { startDate: string }) {
       {activePlan && !draft ? <div className="panel meal-plan-create meal-plan-create-compact"><div><strong>Create a revision</strong><span>The approved plan stays active until you approve the new draft.</span></div><label className="field"><span>First day</span><input type="date" value={planStartDate} min={startDate} onChange={(event) => setPlanStartDate(event.target.value)} /></label><button className="button button-primary" type="button" disabled={busy} onClick={() => void generatePlan()}>{busy ? "Building…" : "Create draft"}</button></div> : null}
 
       {history.length ? <details className="meal-plan-history"><summary>Past meal plans <span>{history.length}</span></summary><div>{history.map((plan) => <article key={plan.id}><strong>{plan.data.name}</strong><span>Version {plan.version} · {plan.status === "archived" ? "Archived" : "Replaced"} · {dateLabel(plan.data.startDate, { month: "short", day: "numeric", year: "numeric" })}</span></article>)}</div></details> : null}
-      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      {error ? <div className="meal-plan-error" role="alert"><p>{error}</p>{saveVersionConflict ? <button className="text-button" type="button" disabled={busy} onClick={() => void reloadSavedDraft()}>Discard local edits and reload the saved draft</button> : null}</div> : null}
       {notice ? <p className="form-message" role="status">{notice}</p> : null}
       <p className="field-note">These are general food-planning suggestions. Review portions and current labels. Dietary filters use reviewed catalog tags and cannot guarantee allergy safety.</p>
     </section>
