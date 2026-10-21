@@ -46,7 +46,7 @@ const fnddsAliases: Record<number, string[]> = {
   2709128: ["uppuma", "uppumavu", "uppittu"],
   2709129: ["dosa with filling", "dosai with filling", "masala dosa", "masala dosai"],
   2709130: ["vadai", "medu vada", "medhu vadai"],
-  2709309: ["chutni", "chatni"],
+  2709309: ["tamarind chutney", "imli chutney", "sweet tamarind chutney"],
   2709631: ["palak paneer"],
   2709632: ["chana saag", "channa saag", "chana shaag", "channa shaag"],
   2710066: ["pakora", "pakoda", "bhajiya"],
