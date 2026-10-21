@@ -8,7 +8,11 @@ export type GoalProposal =
       goal: Omit<GoalRecord, "goalVersion" | "acceptedAt">;
       notes: string[];
     }
-  | { status: "manual_required"; reasons: string[] }
+  | {
+      status: "manual_required";
+      reasonCode: "timeline_too_fast" | "clinician_target_required" | "estimate_out_of_range";
+      reasons: string[];
+    }
   | { status: "invalid"; reason: string };
 
 const activityMultipliers: Record<Profile["activityLevel"], number> = {
@@ -120,6 +124,7 @@ export function buildGoalProposal(
   if (fastChange && request.manualTargetSource !== "clinician") {
     return {
       status: "manual_required",
+      reasonCode: "timeline_too_fast",
       reasons: ["This timeline is faster than the app's automatic planning limit. Choose a clinician-provided target or revise the timeline."],
     };
   }
@@ -127,6 +132,7 @@ export function buildGoalProposal(
   if (needsClinicianSuppliedTarget && (request.manualDailyCalories === null || request.manualTargetSource !== "clinician")) {
     return {
       status: "manual_required",
+      reasonCode: "clinician_target_required",
       reasons: ["This profile needs a clinician-provided calorie target. The app can still track food, activity, and measurements."],
     };
   }
@@ -147,6 +153,7 @@ export function buildGoalProposal(
     if (needsClinicianSuppliedTarget && request.manualTargetSource !== "clinician") {
       return {
         status: "manual_required",
+        reasonCode: "clinician_target_required",
         reasons: ["A clinician-provided target is required for this profile."],
       };
     }
@@ -166,6 +173,7 @@ export function buildGoalProposal(
     if (needsClinicianSuppliedTarget) {
       return {
         status: "manual_required",
+        reasonCode: "clinician_target_required",
         reasons: ["This profile needs a clinician-provided calorie target. The app can still track food, activity, and measurements."],
       };
     }
@@ -183,6 +191,7 @@ export function buildGoalProposal(
       if (dailyCaloriesKcal < minimumAutomaticCalories || dailyCaloriesKcal > maximumAutomaticCalories) {
         return {
           status: "manual_required",
+          reasonCode: "estimate_out_of_range",
           reasons: ["The estimate is outside the app's automatic calorie range. Enter a target supplied by you or a clinician."],
         };
       }

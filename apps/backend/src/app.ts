@@ -2920,7 +2920,7 @@ app.post("/v1/goals/accept", async (c) => {
 
     const proposal = buildGoalProposal(profile.data, parsed.data.request);
     if (proposal.status === "manual_required") {
-      return { status: "manual_required" as const, reasons: proposal.reasons };
+      return { status: "manual_required" as const, reasonCode: proposal.reasonCode, reasons: proposal.reasons };
     }
     if (proposal.status === "invalid") return { status: "invalid" as const, message: proposal.reason };
 
@@ -2987,7 +2987,7 @@ app.post("/v1/goals/accept", async (c) => {
   });
 
   if (result.status === "profile_required") return c.json({ error: "profile_required" }, 409);
-  if (result.status === "manual_required") return c.json({ error: "manual_target_required", reasons: result.reasons }, 422);
+  if (result.status === "manual_required") return c.json({ error: "manual_target_required", reasonCode: result.reasonCode, reasons: result.reasons }, 422);
   if (result.status === "invalid") return c.json({ error: "invalid_goal", message: result.message }, 422);
   if (result.status === "conflict") return c.json({ error: "goal_id_conflict" }, 409);
   return c.json(result, result.idempotent ? 200 : 201);

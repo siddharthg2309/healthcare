@@ -6,7 +6,7 @@ import { ApiError, postJson, putJson } from "@/lib/api";
 
 type ProposalResponse =
   | { status: "ready"; goal: Omit<GoalRecord, "goalVersion" | "acceptedAt">; notes: string[] }
-  | { status: "manual_required"; reasons: string[] };
+  | { status: "manual_required"; reasonCode: "timeline_too_fast" | "clinician_target_required" | "estimate_out_of_range"; reasons: string[] };
 
 type Draft = {
   displayName: string;
@@ -326,6 +326,14 @@ export function OnboardingWizard({
                   </>
                 ) : null}
               </div>
+              {proposal.goal.calculationMode === "weight_only" ? (
+                <div className="manual-review weight-only-review">
+                  <span className="eyebrow">NO CALORIE TARGET</span>
+                  <h2>Continue with weight tracking?</h2>
+                  <p>An automatic calorie estimate is not available with the current profile settings. You can still save this weight and date goal, log meals, and see your food totals.</p>
+                  <p>To add a calorie target, choose “Add calorie target” and enter one yourself or use a clinician-provided target. Changing your activity level or date alone will not create an estimate for this profile.</p>
+                </div>
+              ) : null}
               <div className="rationale-list">
                 {proposal.goal.rationale.map((item) => <p key={item}>{item}</p>)}
                 {proposal.notes.map((item) => <p key={item}>{item}</p>)}
@@ -333,25 +341,44 @@ export function OnboardingWizard({
             </>
           ) : (
             <div className="manual-review">
-              <span className="eyebrow">MANUAL REVIEW NEEDED</span>
-              <h2>No automatic calorie plan for this profile</h2>
+              <span className="eyebrow">NEXT STEP</span>
+              <h2>{proposal.reasonCode === "timeline_too_fast" ? "Choose a later target date" : proposal.reasonCode === "clinician_target_required" ? "Add a clinician-provided target" : "Review the calorie estimate"}</h2>
               {proposal.reasons.map((reason) => <p key={reason}>{reason}</p>)}
-              <p>You can still use food and activity tracking. Add a suitable manual target or revise your profile and goal.</p>
+              {proposal.reasonCode === "timeline_too_fast" ? <p>Move the target date later to bring the planned pace within the app’s automatic limit. Activity level does not change this pace check.</p> : null}
+              {proposal.reasonCode === "clinician_target_required" ? <p>Enter the calorie target provided by your clinician. Food and activity tracking are still available.</p> : null}
+              {proposal.reasonCode === "estimate_out_of_range" ? <p>If your activity level does not match your usual routine, correct it in your profile. Otherwise, enter a calorie target you have chosen or received from a clinician.</p> : null}
             </div>
           )}
 
-          <label className="acknowledgment">
-            <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />
-            <span>I reviewed this goal. I understand it is for general tracking and is not medical advice.</span>
-          </label>
+          {proposal.status === "ready" ? (
+            <label className="acknowledgment">
+              <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />
+              <span>I reviewed this goal. I understand it is for general tracking and is not medical advice.</span>
+            </label>
+          ) : null}
           {error ? <p className="form-error" role="alert">{error}</p> : null}
-          <div className="button-row">
-            <button className="button button-secondary" type="button" onClick={() => setStep("goal")}>Edit goal</button>
-            <button className="button button-primary" type="button" disabled={busy || proposal.status !== "ready" || !acknowledged} onClick={() => void acceptProposal()}>
-              {busy ? "Saving…" : "Accept goal"}
-            </button>
-          </div>
-          <button className="text-button" type="button" onClick={() => setStep("profile")}>Edit profile</button>
+          {proposal.status === "ready" ? (
+            <>
+              <div className="button-row">
+                <button className="button button-secondary" type="button" onClick={() => setStep("goal")}>{proposal.goal.calculationMode === "weight_only" ? "Add calorie target" : "Edit goal"}</button>
+                <button className="button button-primary" type="button" disabled={busy || !acknowledged} onClick={() => void acceptProposal()}>
+                  {busy ? "Saving…" : proposal.goal.calculationMode === "weight_only" ? "Continue with weight tracking" : "Accept goal"}
+                </button>
+              </div>
+              <button className="text-button" type="button" onClick={() => setStep("profile")}>Edit profile</button>
+            </>
+          ) : (
+            <div className="button-row">
+              {proposal.reasonCode === "estimate_out_of_range" ? <button className="button button-secondary" type="button" onClick={() => setStep("profile")}>Check activity level</button> : null}
+              {proposal.reasonCode === "clinician_target_required" ? <button className="button button-secondary" type="button" onClick={() => setStep("profile")}>Review profile</button> : null}
+              <button className="button button-primary" type="button" onClick={() => {
+                if (proposal.reasonCode === "clinician_target_required") update("manualTargetSource", "clinician");
+                setStep("goal");
+              }}>
+                {proposal.reasonCode === "timeline_too_fast" ? "Change target date" : proposal.reasonCode === "clinician_target_required" ? "Enter clinician target" : "Enter manual target"}
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
     </section>
