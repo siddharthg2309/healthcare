@@ -134,6 +134,13 @@
       "when": 1792556635215,
       "tag": "0018_catalog_food_portions",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792559471318,
+      "tag": "0019_force_recipe_version_rls",
+      "breakpoints": true
     }
   ]
 }
