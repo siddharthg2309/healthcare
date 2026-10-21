@@ -69,6 +69,21 @@ function safeTokenCount(value: unknown): number {
   return Number.isSafeInteger(count) && count >= 0 ? count : 0;
 }
 
+function providerFailure(status: number, usage: FoodVisionUsage | null = null): FoodVisionError {
+  switch (status) {
+    case 401: return new FoodVisionError("ai_authentication_failed", 503, usage);
+    case 402: return new FoodVisionError("ai_credits_exhausted", 503, usage);
+    case 403: return new FoodVisionError("ai_access_denied", 503, usage);
+    case 404: return new FoodVisionError("ai_model_unavailable", 503, usage);
+    case 400:
+    case 422: return new FoodVisionError("ai_request_rejected", 502, usage);
+    case 408:
+    case 504: return new FoodVisionError("ai_timeout", 504, usage);
+    case 429: return new FoodVisionError("ai_rate_limited", 429, usage);
+    default: return new FoodVisionError("ai_provider_unavailable", 503, usage);
+  }
+}
+
 export async function recognizeFoodPhoto(
   image: FoodPhotoRecognitionRequest,
 ): Promise<FoodVisionResult> {
@@ -142,10 +157,10 @@ export async function recognizeFoodPhoto(
       signal: controller.signal,
     });
 
-    if (response.status === 429) throw new FoodVisionError("ai_rate_limited", 429);
-    if (!response.ok) throw new FoodVisionError("ai_provider_unavailable", 503);
+    if (!response.ok) throw providerFailure(response.status);
     const body = await response.json().catch(() => null) as {
       choices?: unknown;
+      error?: { code?: unknown };
       usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; cost?: unknown };
     } | null;
     const usage: FoodVisionUsage = {
@@ -153,6 +168,10 @@ export async function recognizeFoodPhoto(
       outputTokens: safeTokenCount(body?.usage?.completion_tokens),
       costUsdMicros: openRouterCostToMicros(body?.usage?.cost),
     };
+    // OpenRouter can also report a provider error inside an HTTP 200 body.
+    if (body?.error) {
+      throw providerFailure(typeof body.error.code === "number" ? body.error.code : 502, usage);
+    }
     const text = responseText(body);
     if (!text) throw new FoodVisionError("ai_invalid_response", 502, usage);
     try {

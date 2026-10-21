@@ -270,15 +270,22 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
       const result = await postJson<FoodPhotoRecognitionResponse>("/v1/foods/recognize-photo", image);
       setPhotoResult(result);
     } catch (caught) {
-      if (caught instanceof ApiError && caught.code === "ai_not_configured") {
-        setPhotoError("Photo search is unavailable. Search by name for now.");
-      } else if (caught instanceof ApiError && caught.code === "ai_rate_limited") {
-        setPhotoError("The AI service is busy. Try again shortly or search by name.");
-      } else if (caught instanceof ApiError && caught.code === "ai_daily_limit_reached") {
-        setPhotoError("You have reached the shared AI limit for the last 24 hours. Search by name or try again later.");
-      } else {
-        setPhotoError(caught instanceof Error ? caught.message : "Could not recognize this photo.");
-      }
+      const messages: Record<string, string> = {
+        ai_not_configured: "Photo search is unavailable. Search by name for now.",
+        ai_credits_exhausted: "Photo search is paused. The app’s AI account needs more credits.",
+        ai_authentication_failed: "Photo search needs its AI connection updated. Search by name for now.",
+        ai_access_denied: "The AI account cannot process this photo. Search by name for now.",
+        ai_model_unavailable: "The photo model is unavailable. Search by name for now.",
+        ai_request_rejected: "The photo could not be processed. Try another photo or search by name.",
+        ai_timeout: "Photo search took too long. Try again.",
+        ai_invalid_response: "Could not read this photo. Try another angle or search by name.",
+        ai_provider_unavailable: "Photo search is temporarily unavailable. Try again later.",
+        ai_rate_limited: "Photo search is busy. Try again shortly.",
+        ai_daily_limit_reached: "You’ve reached today’s AI limit. Search by name or try again later.",
+      };
+      setPhotoError(caught instanceof ApiError
+        ? messages[caught.code] ?? "Could not recognize this photo. Try again."
+        : caught instanceof Error ? caught.message : "Could not recognize this photo.");
     } finally {
       setPhotoBusy(false);
     }
