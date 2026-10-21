@@ -7,8 +7,9 @@ import type {
   FoodLogRecord,
   ActivityLogRecord,
   ActivityEnergyKind,
+  DailyGoalEnergy,
 } from "@healthcare/contracts";
-import { activityEnergyOptions, defaultActivityEnergyKind, estimateActivityEnergy, exerciseCatalog, findExerciseById, selectActivityWeight, summarizeActivityEnergy } from "@healthcare/domain";
+import { activityEnergyOptions, defaultActivityEnergyKind, estimateActivityEnergy, exerciseCatalog, findExerciseById, getLocalDate, localNoonInstant, selectActivityWeight, summarizeActivityEnergy } from "@healthcare/domain";
 import type { WorkoutPlanSession, WorkoutPlanVersion } from "@healthcare/contracts";
 import {
   postJson,
@@ -58,6 +59,8 @@ export type ActivityLog = {
 };
 
 export type DaySummary = {
+  checkIn?: DailyGoalEnergy["checkIn"];
+  checkInVersion?: number;
   date: string;
   timezone: string;
   foodLogs: FoodLog[];
@@ -137,7 +140,7 @@ export function FoodTrackingView({ day, foodPreferences, onSaved }: FoodTracking
   const [portionBusy, setPortionBusy] = useState(false);
   const [quantity, setQuantity] = useState("100");
   const [mealType, setMealType] = useState<(typeof meals)[number]>("lunch");
-  const [occurredAt, setOccurredAt] = useState(dateTimeLocalNow);
+  const [occurredAt, setOccurredAt] = useState(() => day.date === getLocalDate(new Date(), day.timezone) ? dateTimeLocalNow() : toLocalInput(localNoonInstant(day.date, day.timezone)));
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

@@ -336,7 +336,7 @@ Below the chart, show calorie/protein target adherence, workouts completed, step
 
 Allow the person to mark a food day complete. Report observed adherence only over sufficiently complete days. A graph point can show same-day logged food/activity context without claiming that one meal caused a same-day weight change.
 
-The weekly review should prioritize measured change, coverage of logs and weigh-ins, consistency, and the next action. A short Gemini explanation is optional; every numerical statement must come from a computed summary payload.
+Decision 0011 implements a Monday–Sunday consistency review with per-day consumed/target calories, macros, weights, activity/steps, eligible energy balance, completeness, owner-selected cheat-day labels, planned rest, and notes. It separates logging streaks from weight loss or eating less, excludes unknown/future/pre-tracking dates from inappropriate comparisons, and offers a concrete next missing check-in. Historical food and weigh-in actions use the selected account-local date. All summaries are deterministic and private notes are not sent to Gemini. See [Decision 0011](decisions/0011-weekly-accountability.md) for storage, concurrency, migration, and verification limits.
 
 ## 8. Technology stack and architecture
 
@@ -765,7 +765,8 @@ The browser calls the Vercel deployment at the same origin. Resolve identity fro
 | POST /v1/workout-sessions | Actual workout, exercises, and sets |
 | POST /v1/activity-entries | Manual walking/cardio/step entry |
 | GET /v1/days/:date | Daily summary with timezone/completeness |
-| GET /v1/progress/overview | Versioned daily energy summaries, milestones, weekly comparisons, and eligible recent-pace forecasts |
+| GET /v1/progress/overview | Versioned daily energy summaries, milestones, weekly comparisons, and eligible recent-pace forecasts; `?view=checkins` adds daily accountability fields |
+| PUT /v1/days/:date/check-in | Owner-controlled cheat/regular label, planned rest, and bounded private note with optimistic version |
 | POST /v1/uploads | Scoped temporary authorization for a food image |
 | POST /v1/food-recognition/runs | Start a photo-recognition operation |
 | POST /v1/plans/meal/runs | Start meal planning |
@@ -961,7 +962,7 @@ The sequence delivers tracking and the signature progress graph before AI featur
 
 ### Phase 5 — Signature progress graph and daily dashboard
 
-**Current status:** Decision 0010 adds date/intake-based goal budgets, explicit acceptance and immutable revision history, a phone-focused plan-versus-measured graph, local-date energy inspection, milestone cards, and daily/weekly comparisons that exclude incomplete food/energy days. Six measured days spanning fourteen days within the latest 28 days, plus a recent weigh-in, unlock a bounded recent-pace arrival estimate when suitable. The shaded band represents variation between recent rates, not statistical confidence. Original accepted goals remain unchanged and can be compared with newer versions. The implementation uses existing JSON records and needs no migration or new environment values. Builds, typecheck, tests, browser checks, numerical validation, and live endpoint verification were not run for this upgrade at the owner's request.
+**Current status:** Decision 0010 adds date/intake-based goal budgets, explicit acceptance and immutable revision history, a phone-focused plan-versus-measured graph, local-date energy inspection, milestone cards, and daily/weekly comparisons that exclude incomplete food/energy days. Six measured days spanning fourteen days within the latest 28 days, plus a recent weigh-in, unlock a bounded recent-pace arrival estimate when suitable. The shaded band represents variation between recent rates, not statistical confidence. Original accepted goals remain unchanged and can be compared with newer versions. The goal-budget calculations use existing JSON records. Daily accountability under Decision 0011 adds migration 0020, applied to the configured Neon database; no new environment values are needed. Builds, typecheck, tests, browser checks, numerical validation, and live endpoint verification were not run for this upgrade at the owner's request.
 
 - Add accessible textual summaries and a weekly review payload. Gate forecasts until sufficient measurements exist. **Implemented in code; live verification remains.**
 
@@ -1308,3 +1309,8 @@ Generic foodEstimate metadata records text/photo origin, portion uncertainty, co
 ### 21 October 2026 — Goal budgets and measured progress
 
 Decision 0010 replaces the disconnected fixed calorie adjustment with date/intake planning, a versioned approximate energy scenario, explicit baseline-versus-exercise accounting, unknown states for incomplete logs, weekly same-day comparisons, and a measured recent-pace forecast. Home and Progress use the authenticated `/v1/progress/overview` response; no LLM participates in calculations. Acceptance uses a preview fingerprint and same-request retry hash, preserves prior versions, and creates no new weigh-in for a revision. Existing records remain compatible without migration or environment changes. The full NIH physiological model, clinical validation, and calibration against longitudinal measurements are not implemented. Builds, tests, typecheck, browser checks, and live/numerical verification remain skipped at the owner's request.
+
+
+### 21 October 2026 — Daily and weekly accountability
+
+Decision 0011 adds a daily check-in, logging streaks, full calendar-week reviews, owner-marked cheat/rest days, private notes, missing-entry actions, and historical food logging. Daily summaries retain accepted per-date targets and show macros, weights, sessions, steps, and eligible energy balance. Near/above/below-plan classification is separate from the owner's cheat-day label and never changes targets or rewards eating less. Migration 0020 was generated and applied successfully to the configured Neon database; different databases need normal application migrations. The original parameter-free progress response is preserved for older open PWA clients. No new environment variables or AI calls are needed. Builds, tests, typecheck, browser checks, and live/UI verification remain skipped at the owner's request.

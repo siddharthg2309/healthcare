@@ -6,12 +6,13 @@ import { AppIcon } from "./app-icon";
 import { exerciseProgressResponseSchema, goalSchema, profileSchema, weeklyProgressReviewResponseSchema, progressOverviewResponseSchema, type ExerciseProgressResponse, type GoalRecord, type Profile, type WeeklyProgressReviewResponse, type ProgressOverview } from "@healthcare/contracts";
 import { exerciseCatalog, summarizeActivityEnergy } from "@healthcare/domain";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
-import { ActivityTrackingView, FoodTrackingView, type DaySummary } from "@/components/tracking-views";
+import { ActivityTrackingView, type DaySummary } from "@/components/tracking-views";
 import { ReminderNotificationRunner, SettingsView } from "@/components/settings-view";
 import { ApiError, postJson, requestJson } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { GoalBudgetDetails, GoalPlanner } from "./goal-planner";
-import { GoalChart, GoalProgressSummary, GoalWeeklyReview, TodayEnergyPanel } from "./goal-progress";
+import { FoodDayView } from "./food-day-view";
+import { DailyAccountability, GoalChart, GoalProgressSummary, GoalWeeklyReview, TodayEnergyPanel } from "./goal-progress";
 
 type Tab = "home" | "food" | "activity" | "progress" | "settings";
 type StoredGoal = GoalRecord & { id: string };
@@ -36,6 +37,7 @@ function friendlyError(error: unknown): string {
 export function DashboardApp() {
   const { data: session, isPending, refetch } = authClient.useSession();
   const [tab, setTab] = useState<Tab>("home");
+  const [foodDate, setFoodDate] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [goal, setGoal] = useState<StoredGoal | null>(null);
   const [goalVersions, setGoalVersions] = useState<StoredGoal[]>([]);
@@ -56,7 +58,7 @@ export function DashboardApp() {
       const [profileData, goalData, progressData] = await Promise.all([
         requestJson<ProfileResponse>("/v1/me"),
         requestJson<GoalsResponse>("/v1/goals"),
-        requestJson<unknown>("/v1/progress/overview").catch(() => null),
+        requestJson<unknown>("/v1/progress/overview?view=checkins").catch(() => null),
       ]);
       if (version !== loadVersion.current) return;
       const parsedOverview = progressOverviewResponseSchema.safeParse(progressData);
@@ -132,10 +134,10 @@ export function DashboardApp() {
         </header>
 
         <div className="content-wrap">
-          {tab === "home" ? <HomeView profile={profile} overview={overview} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} onWeighIn={() => { setTab("progress"); window.setTimeout(() => document.getElementById("weigh-in-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }} onFood={() => setTab("food")} onActivity={() => setTab("activity")} /> : null}
-          {tab === "food" && daySummary ? <FoodTrackingView day={daySummary} foodPreferences={profile.foodPreferences} onSaved={reloadData} /> : null}
+          {tab === "home" ? <HomeView onWeeklyReview={() => { setTab("progress"); window.setTimeout(() => document.getElementById("weekly-accountability")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }} onSaved={reloadData} profile={profile} overview={overview} goal={goal} measurements={measurements} day={daySummary} onProgress={() => setTab("progress")} onWeighIn={() => { setTab("progress"); window.setTimeout(() => document.getElementById("weigh-in-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }} onFood={() => { setFoodDate(null); setTab("food"); }} onActivity={() => setTab("activity")} /> : null}
+          {tab === "food" && daySummary ? <FoodDayView initialDate={foodDate ?? daySummary.date} day={daySummary} foodPreferences={profile.foodPreferences} onSaved={reloadData} /> : null}
           {tab === "activity" && daySummary ? <ActivityTrackingView day={daySummary} profileWeightKg={profile.currentWeightKg} measurements={measurements} unitSystem={profile.unitSystem} equipment={profile.equipment} gymWorkoutDays={profile.gymWorkoutDays ?? 0} homeWorkoutDays={profile.homeWorkoutDays ?? profile.availableWorkoutDays} onSaved={reloadData} /> : null}
-          {tab === "progress" ? <ProgressView profile={profile} overview={overview} goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} unitSystem={profile.unitSystem} onMeasurementAdded={reloadData} /> : null}
+          {tab === "progress" ? <ProgressView onFoodDate={(date) => { setFoodDate(date); setTab("food"); window.scrollTo({ top: 0, behavior: "smooth" }); }} profile={profile} overview={overview} goal={goal} goalVersions={goalVersions} measurements={measurements} timezone={profile.timezone} unitSystem={profile.unitSystem} onMeasurementAdded={reloadData} /> : null}
           {tab === "settings" ? <SettingsView userId={session.user.id} displayName={profile.displayName} email={session.user.email} onSignOut={async () => { await authClient.signOut(); await refetch(); }} onAccountDeleted={refetch} /> : null}
         </div>
       </main>
@@ -281,7 +283,7 @@ function LoadingPage({ label }: { label: string }) {
   return <main className="center-page"><div className="loading-mark"><span className="brand-mark">GH</span><p>{label}…</p></div></main>;
 }
 
-function HomeView({ profile, overview, goal, measurements, day, onProgress, onWeighIn, onFood, onActivity }: { profile: Profile; overview: ProgressOverview | null; goal: StoredGoal; measurements: Measurement[]; day: DaySummary | null; onProgress: () => void; onWeighIn: () => void; onFood: () => void; onActivity: () => void }) {
+function HomeView({ onWeeklyReview, onSaved, profile, overview, goal, measurements, day, onProgress, onWeighIn, onFood, onActivity }: { onWeeklyReview: () => void; onSaved: () => Promise<void>; profile: Profile; overview: ProgressOverview | null; goal: StoredGoal; measurements: Measurement[]; day: DaySummary | null; onProgress: () => void; onWeighIn: () => void; onFood: () => void; onActivity: () => void }) {
   const kcal = goal.dailyCaloriesKcal;
   const latest = [...measurements].sort((a, b) => b.data.measuredAt.localeCompare(a.data.measuredAt))[0];
   const today = dateInTimezone(profile.timezone);
@@ -298,6 +300,7 @@ function HomeView({ profile, overview, goal, measurements, day, onProgress, onWe
 
       <div className="home-quick-actions"><button type="button" onClick={onFood}><AppIcon name="food" /><span>Log food</span></button><button type="button" onClick={onActivity}><AppIcon name="activity" /><span>Add activity</span></button><button type="button" onClick={onWeighIn}><AppIcon name="progress" /><span>Weigh in</span></button></div>
       {overview ? <div className="home-goal-status"><strong>{goal.direction === "maintain" ? "Following your maintenance goal" : `${overview.progressPercent}% of your goal`}</strong><span>{overview.remainingKg.toFixed(1)} kg {goal.direction === "maintain" ? "from target" : "remaining"}{overview.forecast.arrivalDate ? ` · recent pace: ${formatDate(overview.forecast.arrivalDate)}` : ""}</span></div> : null}
+      {overview ? <DailyAccountability onWeeklyReview={onWeeklyReview} overview={overview} onFood={onFood} onWeight={onWeighIn} onActivity={onActivity} onSaved={onSaved} /> : null}
       <section className="dashboard-grid">
         <article className="panel progress-panel">
           <div className="panel-heading"><div><h2>Your progress</h2></div><button className="inline-link" onClick={onProgress}>Details <span aria-hidden="true">↗</span></button></div>
@@ -329,7 +332,7 @@ function HomeView({ profile, overview, goal, measurements, day, onProgress, onWe
   );
 }
 
-function ProgressView({ profile, overview, goal, goalVersions, measurements, timezone, unitSystem, onMeasurementAdded }: { profile: Profile; overview: ProgressOverview | null; goal: StoredGoal; goalVersions: StoredGoal[]; measurements: Measurement[]; timezone: string; unitSystem: "metric" | "imperial"; onMeasurementAdded: () => Promise<void> }) {
+function ProgressView({ onFoodDate, profile, overview, goal, goalVersions, measurements, timezone, unitSystem, onMeasurementAdded }: { onFoodDate: (date: string) => void; profile: Profile; overview: ProgressOverview | null; goal: StoredGoal; goalVersions: StoredGoal[]; measurements: Measurement[]; timezone: string; unitSystem: "metric" | "imperial"; onMeasurementAdded: () => Promise<void> }) {
   const [editingGoal, setEditingGoal] = useState(false);
   const [viewedGoalId, setViewedGoalId] = useState<string | null>(null);
   const chartGoal = goalVersions.find((version) => version.id === viewedGoalId) ?? goal;
@@ -380,9 +383,10 @@ function ProgressView({ profile, overview, goal, goalVersions, measurements, tim
   return (
     <>
       <div className="page-heading"><div><h1>Your goal, in view.</h1></div></div>
+      <nav className="progress-shortcuts" aria-label="Progress sections"><button type="button" onClick={() => document.getElementById("goal-progress-chart")?.scrollIntoView({ behavior: "smooth" })}>Graph</button><button type="button" onClick={() => document.getElementById("weekly-accountability")?.scrollIntoView({ behavior: "smooth" })}>Weekly review</button><button type="button" onClick={() => document.getElementById("weigh-in-form")?.scrollIntoView({ behavior: "smooth" })}>Weigh in</button></nav>
       {editingGoal ? <GoalPlanner profile={profile} currentGoal={goal} currentWeightKg={overview?.currentWeightKg} onCancel={() => setEditingGoal(false)} onAccepted={async () => { await onMeasurementAdded(); setEditingGoal(false); setViewedGoalId(null); }} /> : null}
       <GoalProgressSummary goal={goal} overview={overview} onReload={onMeasurementAdded} onEdit={() => { setEditingGoal(true); window.scrollTo({ top: 0, behavior: "smooth" }); }} />
-      <section className="panel large-chart-panel">
+      <section id="goal-progress-chart" className="panel large-chart-panel">
         {goalVersions.length > 1 ? <label className="field plan-version-picker"><span>Compare an accepted plan</span><select value={chartGoal.id} onChange={(event) => { setViewedGoalId(event.target.value); setRange("all"); }}>{[...goalVersions].reverse().map((version) => <option key={version.id} value={version.id}>Plan v{version.goalVersion}{version.id === goal.id ? " · current" : ""} · {formatDate(version.startDate)}</option>)}</select></label> : null}
         <div className="progress-chart-toolbar">
           <div className="panel-heading"><div><span className="eyebrow">WEIGHT · KG</span><h2>{chartGoal.startWeightKg.toFixed(1)} <span className="heading-arrow">→</span> {chartGoal.targetWeightKg.toFixed(1)}</h2></div><span className="date-chip">{formatDate(rangeStart)} — {formatDate(rangeEnd)}</span></div>
@@ -396,6 +400,7 @@ function ProgressView({ profile, overview, goal, goalVersions, measurements, tim
         <details className="chart-plan-summary"><summary>Measured comparison</summary><p className="chart-summary">{graphSummary}</p></details>
         {chartGoal.id !== goal.id ? <details className="accepted-budget"><summary>Plan v{chartGoal.goalVersion} budget</summary><GoalBudgetDetails goal={chartGoal} /></details> : null}
       </section>
+      {overview ? <GoalWeeklyReview overview={overview} onSaved={onMeasurementAdded} onFood={onFoodDate} onEdit={() => { setEditingGoal(true); window.scrollTo({ top: 0, behavior: "smooth" }); }} /> : null}
       <section className="progress-lower-grid">
         <form id="weigh-in-form" className="panel weigh-in-form" onSubmit={(event) => void submit(event)}>
           <div className="panel-heading"><div><span className="eyebrow">KEEP THE GRAPH CURRENT</span><h2>Add a weigh-in</h2></div></div>
@@ -408,7 +413,6 @@ function ProgressView({ profile, overview, goal, goalVersions, measurements, tim
         </section>
       </section>
       <ExerciseProgressPanel unitSystem={unitSystem} />
-      {overview ? <GoalWeeklyReview overview={overview} onEdit={() => { setEditingGoal(true); window.scrollTo({ top: 0, behavior: "smooth" }); }} /> : null}
       <details className="progress-extra-details"><summary>Food, steps & weigh-ins</summary><WeeklyProgressReviewPanel key={`${goal.goalVersion}-${measurements.length}`} /></details>
     </>
   );

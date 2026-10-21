@@ -355,6 +355,9 @@ export const foodDayStatuses = pgTable("food_day_statuses", {
   userId: text("user_id").notNull(),
   localDate: text("local_date").notNull(),
   complete: boolean("complete").default(false).notNull(),
+  checkIn: jsonb("check_in").$type<{ dayType: "regular" | "cheat"; note: string; plannedRest: boolean }>()
+    .default({ dayType: "regular", note: "", plannedRest: false }).notNull(),
+  checkInVersion: integer("check_in_version").default(0).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   primaryKey({ columns: [table.userId, table.localDate] }),

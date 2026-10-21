@@ -899,6 +899,90 @@ a { color: inherit; text-decoration: none; }
 .plan-version-picker { margin-bottom: 20px; }
 .plan-version-picker > span, .chart-plan-summary > summary { font-size: 12px; color: var(--muted); }
 .chart-plan-summary > summary { padding: 14px 0; cursor: pointer; }
+
+/* Daily accountability and a seven-day phone review. */
+.daily-accountability, .weekly-accountability { margin-bottom: 18px; }
+.accountability-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.accountability-checks button { display: grid; place-items: center; gap: 6px; min-height: 76px; border: 1px solid #e4e8dd; border-radius: 15px; background: #f8f9f5; font: inherit; color: #78816f; }
+.accountability-checks b { font-size: 23px; line-height: 1; font-weight: 400; }
+.accountability-checks span { font-size: 12px; }
+.accountability-checks .check-done { background: #eff7df; border-color: #cce39f; color: #3d6124; }
+.logging-streaks { display: flex; flex-wrap: wrap; gap: 7px 18px; margin: 14px 0 5px; font-size: 12px; color: var(--muted); }
+.logging-streaks strong { color: var(--ink); font-size: 16px; margin-right: 3px; }
+.check-in-encouragement { font-size: 13px; color: #4b672f; margin: 13px 0; }
+.daily-accountability > details > summary, .food-check-in-details > summary, .consistency-day > details > summary, .week-review-method > summary { min-height: 44px; padding: 12px 0; font-size: 12px; cursor: pointer; color: #536147; }
+.day-check-in-form { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 4px; }
+.day-check-in-form fieldset { display: grid; gap: 14px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.day-check-in-form .field > span, .day-check-in-form .toggle-row { font-size: 12px; }
+.day-check-in-form textarea { resize: vertical; min-height: 72px; }
+.week-review-navigation, .week-review-navigation > div { min-width: 0; }
+.week-review-navigation, .week-review-navigation > div, .week-review-navigation button { font: inherit; }
+.week-review-navigation, .week-review-navigation > div { display: grid; }
+.week-review-navigation { grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 8px; align-items: center; margin-bottom: 18px; }
+.week-review-navigation > div { gap: 5px; text-align: center; }
+.week-review-navigation strong { font-size: 15px; font-weight: 600; }
+.week-review-navigation span { font-size: 11px; color: var(--muted); }
+.week-review-navigation button { min-width: 44px; min-height: 44px; border: 1px solid var(--line); border-radius: 50%; font-size: 19px; }
+.week-review-navigation button:disabled { opacity: .3; cursor: default; }
+.weekly-showing-up { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; padding: 16px; background: #f1f7e7; border-radius: 17px; }
+.weekly-showing-up > div { display: grid; gap: 5px; }
+.weekly-showing-up strong { font-size: 29px; line-height: 1.1; font-weight: 600; letter-spacing: -.045em; }
+.weekly-showing-up strong small { color: #839372; font-size: 17px; font-weight: 400; }
+.weekly-showing-up span { font-size: 11px; color: #536448; }
+.weekly-coaching-message { margin: 15px 0; font-size: 13px; line-height: 1.65; color: #4b5940; }
+.week-nutrition-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-block: 4px 16px; }
+.week-nutrition-summary > span { display: grid; gap: 5px; font-size: 11px; color: var(--muted); }
+.week-nutrition-summary strong { font-size: 16px; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.week-plan-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 17px; }
+.week-plan-counts > span { background: #f2f4ed; border-radius: 8px; padding: 6px 8px; font-size: 10px; color: #65725a; }
+.consistency-days { display: grid; gap: 12px; }
+.consistency-day { border: 1px solid #e3e8dc; border-radius: 16px; padding: 13px; min-width: 0; }
+.consistency-day > header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.consistency-day header > div:first-child { display: grid; gap: 4px; }
+.consistency-day header strong { font-size: 13px; font-weight: 600; }
+.consistency-day header > div:first-child > span { font-size: 11px; color: var(--muted); }
+.day-labels { display: flex; flex-wrap: wrap; gap: 5px; }
+.day-tag { display: inline-flex; align-items: center; border-radius: 7px; background: #eff1eb; color: #67735d; padding: 5px 7px; font-size: 9px; font-weight: 500; line-height: 1; }
+.day-tag-cheat { background: #e9eddd; color: #4e5a37; }
+.day-tag-near_plan { background: #eaf5d8; color: #45682b; }
+.day-tag-above_plan, .day-tag-below_plan { background: #f2f0e8; color: #7a6b43; }
+.consistency-day-main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; margin: 17px 0 12px; }
+.consistency-day-main > div { display: grid; gap: 5px; }
+.consistency-day-main > div:last-child { text-align: right; }
+.consistency-day-main span, .consistency-day-main > div > small { font-size: 10px; color: var(--muted); }
+.consistency-day-main strong { font-size: 21px; font-weight: 600; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.consistency-day-main strong > small { font-size: 10px; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+.consistency-day-secondary { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 10px; color: #707a65; line-height: 1.5; }
+.check-in-note { font-size: 12px; line-height: 1.55; color: #647050; overflow-wrap: anywhere; padding: 9px 11px; background: #f6f8f1; border-radius: 10px; margin: 12px 0 0; }
+.consistency-day > details > summary { margin-bottom: -5px; }
+.day-review-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.day-review-actions .button { min-height: 42px; font-size: 12px; }
+.quick-weigh-in { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 14px; margin-block: 14px; }
+.quick-weigh-in .field > span { font-size: 12px; }
+.consistency-empty-day { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 13px; border: 1px dashed #e3e7db; border-radius: 14px; color: #959d8e; font-size: 11px; }
+.consistency-empty-day strong { font-weight: 500; }
+.consistency-empty-day strong span { display: block; margin-top: 4px; font-size: 10px; font-weight: 400; }
+.week-review-method { margin-top: 12px; }
+.week-review-method p { font-size: 12px; line-height: 1.65; color: var(--muted); }
+.food-date-toolbar { display: flex; align-items: end; gap: 14px; margin-bottom: 18px; }
+.food-date-toolbar > .field { flex: 1; min-width: 0; }
+.food-date-toolbar > .field > span { font-size: 12px; }
+.food-check-in-details { margin-top: 16px; }
+.progress-shortcuts { display: flex; gap: 8px; margin: -4px 0 18px; }
+.progress-shortcuts button { border: 1px solid #dfe7d5; border-radius: 99px; min-height: 40px; background: #f5f8ef; padding: 8px 13px; color: #4c633b; font: inherit; font-size: 12px; }
+#weekly-accountability, #goal-progress-chart { scroll-margin-top: 20px; }
+.choose-review-week > summary, .weekly-energy-comparison > summary { cursor: pointer; font-size: 12px; min-height: 40px; padding: 9px 0; color: #536147; }
+.choose-review-week { margin-bottom: 12px; }
+.choose-review-week .field { margin-block: 5px 14px; }
+.choose-review-week .field > span { font-size: 12px; }
+.daily-balance-line { display: flex; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 10px; color: #7a836e; }
+.daily-balance-line strong { font-weight: 500; color: #526343; }
+.weekly-next-action { margin-bottom: 12px; text-align: left; font-size: 12px; line-height: 1.5; }
+.consistency-day { scroll-margin-top: 20px; }
+.day-tag { font-size: 11px; }
+.consistency-day header strong { font-size: 14px; }
+.consistency-day-main span, .consistency-day-main > div > small, .consistency-day-secondary { font-size: 12px; }
+.consistency-day-main strong > small, .daily-balance-line { font-size: 11px; }
 @media (max-width: 350px) {
   .budget-details dl > div, .energy-breakdown > div { flex-wrap: wrap; gap: 4px; }
   .goal-progress-stats strong { font-size: 21px; }

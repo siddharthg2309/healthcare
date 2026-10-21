@@ -5,6 +5,7 @@ export {
 } from "./goals.js";
 export * from "./goal-energy.js";
 export * from "./goal-progress.js";
+export * from "./weekly-consistency.js";
 export {
   activityEnergyOptions,
   defaultActivityEnergyKind,

@@ -33,14 +33,7 @@ export function TodayEnergyPanel({ day, onFood }: { day: DailyGoalEnergy; onFood
   </article>;
 }
 
-export function GoalWeeklyReview({ overview, onEdit }: { overview: ProgressOverview; onEdit: () => void }) {
-  const week = overview.weekly;
-  return <section className="panel goal-weekly-review"><div className="panel-heading"><div><span className="eyebrow">LAST 7 DAYS</span><h2>Your plan check-in</h2></div><span className="date-chip">{week.completeFoodDays}/7 food days</span></div>
-    <div className="goal-progress-stats"><div><span>Average food intake</span><strong>{number(week.averageIntakeKcal)} <small>kcal/day</small></strong></div><div><span>Average estimated deficit</span><strong>{number(week.averageDeficitKcal)} <small>kcal/day</small></strong></div><div><span>Recorded energy balance</span><strong>{number(week.recordedDeficitKcal)} <small>kcal</small></strong></div><div><span>Plan for those days</span><strong>{number(week.plannedDeficitForRecordedDaysKcal)} <small>kcal</small></strong></div></div>
-    <p>{week.message}</p><button type="button" className="text-button" onClick={onEdit}>Review intake, activity, or date</button>
-    <details><summary>Daily details · {week.energyDays} complete energy days</summary><p>Positive balance means an estimated deficit; negative means a surplus. Missing food days are excluded, not counted as zero. These totals do not measure fat loss.</p><div className="goal-review-days">{overview.days.slice(-7).map((day) => <article key={day.date}><strong>{shortDate(day.date)}</strong><span>{number(day.intakeCaloriesKcal)} kcal food · {day.foodDayComplete ? "complete" : "incomplete"}</span><span>{day.activitiesMissingEnergy ? "Activity details missing" : `${number(day.activityCaloriesKcal)} kcal exercise`} · balance {number(day.deficitCaloriesKcal)} kcal</span><small>Plan v{day.goalVersion ?? "—"} · {day.weightKg === null ? "No weigh-in" : `${day.weightKg.toFixed(1)} kg`}</small></article>)}</div></details>
-  </section>;
-}
+export { WeeklyAccountability as GoalWeeklyReview, DailyAccountability } from "./weekly-accountability";
 
 export function GoalChart({ goal, goalRevisions = [], measurements, timezone, compact = false, rangeStart = goal.startDate, rangeEnd = goal.targetDate, overview }: {
   goal: GoalRecord; goalRevisions?: Revision[]; measurements: Measurement[]; timezone: string; compact?: boolean; rangeStart?: string; rangeEnd?: string; overview?: ProgressOverview | null;

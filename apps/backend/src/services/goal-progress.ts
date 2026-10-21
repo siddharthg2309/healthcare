@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@healthcare/database";
 import { foodDayStatuses, userProfiles, userRecords } from "@healthcare/database/schema";
-import { activityLogRecordSchema, createMeasurementRequestSchema, foodLogRecordSchema, goalSchema, profileSchema, progressOverviewResponseSchema, type Profile } from "@healthcare/contracts";
+import { activityLogRecordSchema, createMeasurementRequestSchema, dailyCheckInSchema, foodLogRecordSchema, goalSchema, profileSchema, progressOverviewResponseSchema, type Profile } from "@healthcare/contracts";
 import { buildProgressOverview, getLocalDate } from "@healthcare/domain";
 import { createActivityEnergyEstimator } from "./activity-energy.js";
 
@@ -32,7 +32,8 @@ export async function readProgressOverview(userId: string) {
       eq(userRecords.userId, userId), eq(userRecords.deleted, false),
       sql`${userRecords.entity} in ('goal', 'food_log', 'activity_log', 'body_measurement')`,
     ));
-    const statuses = await tx.select({ localDate: foodDayStatuses.localDate, complete: foodDayStatuses.complete }).from(foodDayStatuses).where(eq(foodDayStatuses.userId, userId));
+    const statusRows = await tx.select({ localDate: foodDayStatuses.localDate, complete: foodDayStatuses.complete, checkIn: foodDayStatuses.checkIn, checkInVersion: foodDayStatuses.checkInVersion }).from(foodDayStatuses).where(eq(foodDayStatuses.userId, userId));
+    const statuses = statusRows.map((row) => ({ ...row, checkIn: dailyCheckInSchema.parse(row.checkIn) }));
     const measurementRows = rows.filter((row) => row.entity === "body_measurement");
     const estimateEnergy = createActivityEnergyEstimator(profile.data, measurementRows);
     const goals = rows.filter((row) => row.entity === "goal").flatMap((row) => { const value = goalSchema.safeParse(row.data); return value.success ? [value.data] : []; });

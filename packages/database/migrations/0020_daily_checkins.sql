@@ -1,0 +1,2 @@
+ALTER TABLE "food_day_statuses" ADD COLUMN "check_in" jsonb DEFAULT '{"dayType":"regular","note":"","plannedRest":false}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "food_day_statuses" ADD COLUMN "check_in_version" integer DEFAULT 0 NOT NULL;

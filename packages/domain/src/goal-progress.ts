@@ -60,7 +60,7 @@ export function buildWeightForecast(goal: GoalRecord, dailyWeights: Array<{ date
 
 export function buildProgressOverview(input: {
   goals: GoalRecord[]; measurements: Measurement[]; foods: FoodLogRecord[]; activities: ActivityLogRecord[];
-  foodStatuses: Array<{ localDate: string; complete: boolean }>; timezone: string; today: string;
+  foodStatuses: Array<{ localDate: string; complete: boolean; checkIn?: DailyGoalEnergy["checkIn"]; checkInVersion?: number }>; timezone: string; today: string;
 }): ProgressOverview | null {
   const goals = [...input.goals].sort((a, b) => a.goalVersion - b.goalVersion);
   const goal = goals.at(-1);
@@ -77,10 +77,12 @@ export function buildProgressOverview(input: {
   const currentWeightKg = latest?.weightKg ?? goal.startWeightKg;
   const forecast = buildWeightForecast(goal, weights, input.today);
   const completeDates = new Set(input.foodStatuses.filter((row) => row.complete).map((row) => row.localDate));
-  const foodByDate = new Map<string, { count: number; calories: number }>();
+  const statuses = new Map(input.foodStatuses.map((row) => [row.localDate, row]));
+  const foodByDate = new Map<string, { count: number; calories: number; protein: number; carbohydrate: number; fat: number }>();
   for (const food of input.foods) {
-    const date = dateOf(food.occurredAt), prior = foodByDate.get(date) ?? { count: 0, calories: 0 };
-    foodByDate.set(date, { count: prior.count + 1, calories: prior.calories + food.nutritionTotal.caloriesKcal });
+    const date = dateOf(food.occurredAt), prior = foodByDate.get(date) ?? { count: 0, calories: 0, protein: 0, carbohydrate: 0, fat: 0 };
+    foodByDate.set(date, { count: prior.count + 1, calories: prior.calories + food.nutritionTotal.caloriesKcal,
+      protein: prior.protein + food.nutritionTotal.proteinG, carbohydrate: prior.carbohydrate + food.nutritionTotal.carbohydrateG, fat: prior.fat + food.nutritionTotal.fatG });
   }
   const activityByDate = new Map<string, ActivityLogRecord[]>();
   for (const activity of input.activities) {
@@ -101,6 +103,11 @@ export function buildProgressOverview(input: {
     const expenditure = baseline === null ? null : roundEnergy(baseline + (energy.caloriesKcal ?? 0));
     const complete = completeDates.has(date) && Boolean(food?.count);
     days.push({ date, goalVersion: active?.goalVersion ?? null, targetCaloriesKcal: active?.dailyCaloriesKcal ?? null,
+      checkIn: statuses.get(date)?.checkIn ?? { dayType: "regular", note: "", plannedRest: false }, checkInVersion: statuses.get(date)?.checkInVersion ?? 0,
+      foodLogCount: food?.count ?? 0, proteinG: food ? roundWeight(food.protein) : null, carbohydrateG: food ? roundWeight(food.carbohydrate) : null, fatG: food ? roundWeight(food.fat) : null,
+      workoutSessions: activities.filter((activity) => ["walk", "cardio", "strength"].includes(activity.activityType)).length,
+      weightReadings: valuesByDate.get(date)?.length ?? 0,
+      steps: activities.some((activity) => activity.activityType === "steps" && activity.steps !== null) ? activities.reduce((sum, activity) => sum + (activity.activityType === "steps" ? activity.steps ?? 0 : 0), 0) : null,
       intakeCaloriesKcal: food ? roundEnergy(food.calories) : null, foodDayComplete: complete,
       activityCaloriesKcal: energy.caloriesKcal ?? 0, activitiesMissingEnergy: missingEnergy,
       baselineCaloriesKcal: baseline === null ? null : roundEnergy(baseline), expenditureCaloriesKcal: expenditure,

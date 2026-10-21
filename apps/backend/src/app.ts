@@ -28,6 +28,7 @@ import {
   confirmFoodPhotoRequestSchema,
   setFoodFavoriteRequestSchema,
   foodDayStatusRequestSchema,
+  dailyCheckInRequestSchema,
   foodLogRecordSchema,
   weeklyProgressReviewResponseSchema,
   goalProposalRequestSchema,
@@ -47,6 +48,7 @@ import {
   updateFoodRecipeRequestSchema,
   workoutPlanDataSchema,
   type GoalRecord,
+  type DailyGoalEnergy,
   type WeeklyProgressReviewResponse,
   type WorkoutPlanData,
 } from "@healthcare/contracts";
@@ -1945,11 +1947,12 @@ app.get("/v1/days/:date", async (c) => {
       eq(userRecords.deleted, false),
     ));
     const estimateEnergy = createActivityEnergyEstimator(profile?.data, measurementRecords);
-    const [status] = await tx.select({ complete: foodDayStatuses.complete }).from(foodDayStatuses).where(and(
+    const [status] = await tx.select({ complete: foodDayStatuses.complete, checkIn: foodDayStatuses.checkIn, checkInVersion: foodDayStatuses.checkInVersion }).from(foodDayStatuses).where(and(
       eq(foodDayStatuses.userId, userId),
       eq(foodDayStatuses.localDate, date),
     )).limit(1);
-    return { timezone, foodRecords, activityRecords, estimateEnergy, foodDayComplete: status?.complete ?? false };
+    return { timezone, foodRecords, activityRecords, estimateEnergy, foodDayComplete: status?.complete ?? false,
+      checkIn: status?.checkIn ?? { dayType: "regular", note: "", plannedRest: false }, checkInVersion: status?.checkInVersion ?? 0 };
   });
   let timezone = result.timezone;
   try {
@@ -1985,13 +1988,17 @@ app.get("/v1/days/:date", async (c) => {
     .reduce((total, item) => total + (item.data.steps ?? 0), 0);
   const workoutsCompleted = activityLogs.filter((item) => ["strength", "cardio", "walk"].includes(item.data.activityType)).length;
   const activityEnergy = summarizeActivityEnergy(activityLogs.map((item) => item.data));
-  return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted, activityEnergy, foodDayComplete: result.foodDayComplete });
+  return c.json({ date, timezone, foodLogs, activityLogs, foodTotals, steps, workoutsCompleted, activityEnergy, foodDayComplete: result.foodDayComplete, checkIn: result.checkIn, checkInVersion: result.checkInVersion });
 });
 
 app.get("/v1/progress/overview", async (c) => {
   const overview = await readProgressOverview(c.get("session").user.id);
   if (!overview) return c.json({ error: "accepted_goal_required" }, 409);
-  return c.json(overview);
+  if (c.req.query("view") === "checkins") return c.json(overview);
+  // Previously deployed PWAs validate the original response strictly.
+  const originalFields = ["date", "goalVersion", "targetCaloriesKcal", "intakeCaloriesKcal", "foodDayComplete", "activityCaloriesKcal", "activitiesMissingEnergy", "baselineCaloriesKcal", "expenditureCaloriesKcal", "deficitCaloriesKcal", "plannedDeficitCaloriesKcal", "weightKg", "weightSource", "energyWeightKg", "plannedWeightKg"] as const;
+  const originalDay = (day: DailyGoalEnergy) => Object.fromEntries(originalFields.map((key) => [key, day[key]]));
+  return c.json({ ...overview, todayEnergy: originalDay(overview.todayEnergy), days: overview.days.map(originalDay) });
 });
 
 app.get("/v1/progress/weekly-review", async (c) => {
@@ -2184,6 +2191,43 @@ app.get("/v1/progress/weekly-review", async (c) => {
   const validated = weeklyProgressReviewResponseSchema.safeParse(response);
   if (!validated.success) return c.json({ error: "weekly_progress_review_unavailable" }, 500);
   return c.json(validated.data);
+});
+
+app.put("/v1/days/:date/check-in", async (c) => {
+  const date = c.req.param("date");
+  if (!isLocalDate(date)) return c.json({ error: "invalid_local_date" }, 400);
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "invalid_request" }, 400); }
+  const parsed = dailyCheckInRequestSchema.safeParse(body);
+  if (!parsed.success) return c.json({ error: "invalid_check_in" }, 400);
+  const userId = c.get("session").user.id;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+    const [profileRow] = await tx.select({ data: userProfiles.data }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+    const profile = profileSchema.safeParse(profileRow?.data);
+    if (!profile.success) return { status: "profile_required" as const };
+    const today = localDateInZone(new Date().toISOString(), profile.data.timezone);
+    if (date > today || date < shiftLocalDate(today, -730)) return { status: "date_out_of_range" as const };
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${"check-in:" + userId + ":" + date}, 0))`);
+    const [prior] = await tx.select({ checkIn: foodDayStatuses.checkIn, version: foodDayStatuses.checkInVersion }).from(foodDayStatuses).where(and(
+      eq(foodDayStatuses.userId, userId), eq(foodDayStatuses.localDate, date),
+    )).limit(1);
+    const { baseVersion, ...checkIn } = parsed.data;
+    const version = prior?.version ?? 0;
+    if (version !== baseVersion) {
+      const same = Boolean(prior && version === baseVersion + 1 && prior.checkIn.dayType === checkIn.dayType && prior.checkIn.note === checkIn.note && prior.checkIn.plannedRest === checkIn.plannedRest);
+      return { status: same ? "saved" as const : "conflict" as const, version, checkIn: prior?.checkIn };
+    }
+    const [saved] = await tx.insert(foodDayStatuses).values({ userId, localDate: date, checkIn, checkInVersion: version + 1, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: [foodDayStatuses.userId, foodDayStatuses.localDate], set: { checkIn, checkInVersion: version + 1, updatedAt: new Date() } })
+      .returning({ version: foodDayStatuses.checkInVersion, checkIn: foodDayStatuses.checkIn });
+    if (!saved) throw new Error("check_in_save_failed");
+    return { status: "saved" as const, ...saved };
+  });
+  if (result.status === "profile_required") return c.json({ error: "profile_required" }, 409);
+  if (result.status === "date_out_of_range") return c.json({ error: "check_in_date_out_of_range" }, 422);
+  if (result.status === "conflict") return c.json({ error: "check_in_conflict", message: "This day changed elsewhere. Reload its check-in before saving.", version: result.version }, 409);
+  return c.json(result);
 });
 
 app.put("/v1/days/:date/food-status", async (c) => {

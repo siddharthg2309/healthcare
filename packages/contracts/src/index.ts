@@ -268,6 +268,15 @@ export const foodDayStatusRequestSchema = z.object({
   complete: z.boolean(),
 }).strict();
 
+export const dailyCheckInSchema = z.object({
+  dayType: z.enum(["regular", "cheat"]).default("regular"),
+  note: z.string().trim().max(280).default(""),
+  plannedRest: z.boolean().default(false),
+}).strict();
+export const dailyCheckInRequestSchema = dailyCheckInSchema.extend({
+  baseVersion: z.number().int().min(0),
+}).strict();
+
 export const createCustomFoodRequestSchema = z.object({
   foodId: uuidSchema,
   name: z.string().trim().min(1).max(120),
@@ -586,6 +595,15 @@ export const weeklyProgressReviewResponseSchema = z.object({
 
 export const dailyGoalEnergySchema = z.object({
   date: z.string().date(),
+  checkIn: dailyCheckInSchema,
+  checkInVersion: z.number().int().min(0),
+  foodLogCount: z.number().int().min(0),
+  proteinG: z.number().finite().min(0).nullable(),
+  carbohydrateG: z.number().finite().min(0).nullable(),
+  fatG: z.number().finite().min(0).nullable(),
+  workoutSessions: z.number().int().min(0),
+  weightReadings: z.number().int().min(0),
+  steps: z.number().int().min(0).nullable(),
   goalVersion: z.number().int().positive().nullable(),
   targetCaloriesKcal: z.number().finite().nullable(),
   intakeCaloriesKcal: z.number().finite().min(0).nullable(),
