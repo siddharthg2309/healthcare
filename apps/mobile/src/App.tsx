@@ -6,6 +6,16 @@ import { WebView } from "react-native-webview";
 
 import { colors, radius } from "@/constants/theme";
 
+function isPublicHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  const localSuffixes = [".localhost", ".local", ".lan", ".home.arpa", ".internal", ".test", ".invalid", ".example"];
+  const isIpLiteral = normalized.includes(":") || /^\d+(?:\.\d+){3}$/.test(normalized);
+
+  return normalized.includes(".")
+    && !isIpLiteral
+    && !localSuffixes.some((suffix) => normalized.endsWith(suffix));
+}
+
 function getAppUrl(): URL | null {
   const configured = process.env.EXPO_PUBLIC_APP_URL?.trim();
   if (!configured) return null;
@@ -14,7 +24,8 @@ function getAppUrl(): URL | null {
     const url = new URL(configured);
     const secure = url.protocol === "https:";
     const localDevelopment = __DEV__ && url.protocol === "http:";
-    if ((!secure && !localDevelopment) || url.username || url.password || url.search || url.hash) return null;
+    const productionHostIsPublic = __DEV__ || isPublicHostname(url.hostname);
+    if ((!secure && !localDevelopment) || !productionHostIsPublic || url.username || url.password || url.search || url.hash) return null;
     return url;
   } catch {
     return null;
