@@ -2246,7 +2246,7 @@ app.post("/v1/plans/meal/runs", async (c) => {
       )).limit(1);
     }) : [];
     const plan = planRow ? mealPlanResponse(planRow) : null;
-    if (result.terminalStatus === "failed") return c.json({ runId, status: "failed", plan: null, error: "workout_plan_invalid" }, 422);
+    if (result.terminalStatus === "failed") return c.json({ runId, status: "failed", plan: null, error: "meal_plan_invalid" }, 422);
     return c.json({ runId, status: "pending_review", plan }, 201);
   } catch (error) {
     const code = error instanceof Error && error.message.startsWith("openrouter_http_")

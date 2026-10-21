@@ -48,6 +48,7 @@ function mealPlanError(error: unknown): string {
       ai_daily_limit_reached: "You have reached the shared AI limit for the last 24 hours. Manual food and activity logging still work; try again later.",
       meal_plan_provider_unavailable: "The meal planner could not reach the model. Try again in a little while.",
       meal_plan_draft_exists: "Review or reject your current draft before creating another plan.",
+      meal_plan_invalid: "The model could not produce a valid meal plan within the nutrition and catalog rules. Try again or edit foods manually.",
       meal_plan_generation_failed: "The plan could not be completed. Your current plan has not changed.",
     };
     return messages[error.code] ?? error.message;
