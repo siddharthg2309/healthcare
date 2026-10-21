@@ -154,7 +154,7 @@ npm run catalog:publish -- --food-id <catalog-id-printed-by-import>
 npm run catalog:aliases -- --food-id <catalog-id> --aliases "dosai, thosai"
 ```
 
-After nutrition review and publication, record the product's dietary and allergen metadata. Use the package label or a reliable recipe/source, never infer tags from the food name alone:
+The publish command prints the selected food, source record, and per-100-g macros, then requires typing `REVIEW` in an interactive terminal. Check those values against the source and dish description first. It handles both unpublished FDC imports and active FNDDS seed rows; unreviewed rows remain available for manual search but are excluded from AI meal planning. After nutrition review and publication, record dietary and allergen metadata when you need those foods to qualify for saved diet filters. Use the package label or a reliable recipe/source, never infer tags from the food name alone:
 
 ```bash
 npm run catalog:safety:review -- --food-id <catalog-id> --dietary-tags vegetarian --contains-allergens milk --may-contain-allergens peanuts --source-note "Checked package label on 2026-10-21"

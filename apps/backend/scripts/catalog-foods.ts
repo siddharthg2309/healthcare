@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline/promises";
 import { readFile } from "node:fs/promises";
 import { and, eq } from "drizzle-orm";
 import { catalogFoods, catalogFoodPortions, catalogFoodSafetyReviews } from "@healthcare/database/schema";
@@ -375,12 +376,53 @@ async function publishFood() {
   if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
     throw new Error("Usage: npm run catalog:publish -- --food-id <catalog-uuid>");
   }
-  const [published] = await db.update(catalogFoods).set({ active: true, reviewed: true, updatedAt: new Date() }).where(and(
+  const [food] = await db.select({
+    id: catalogFoods.id,
+    name: catalogFoods.name,
+    category: catalogFoods.category,
+    calories: catalogFoods.caloriesKcalPer100g,
+    protein: catalogFoods.proteinGPer100g,
+    carbohydrates: catalogFoods.carbohydrateGPer100g,
+    fat: catalogFoods.fatGPer100g,
+    source: catalogFoods.source,
+    externalSourceId: catalogFoods.externalSourceId,
+    active: catalogFoods.active,
+    reviewed: catalogFoods.reviewed,
+    updatedAt: catalogFoods.updatedAt,
+  }).from(catalogFoods).where(eq(catalogFoods.id, id)).limit(1);
+  if (!food) throw new Error("Catalog food not found. Nothing was changed.");
+  if (food.reviewed) throw new Error("This food is already reviewed. Nothing was changed.");
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error("Catalog nutrition review requires an interactive terminal. Nothing was changed.");
+  }
+
+  console.log("Check this catalog record before approving it for shared use:");
+  console.log(`Name: ${food.name} (${food.category})`);
+  console.log(`Source: ${food.source}${food.externalSourceId ? `, source record ${food.externalSourceId}` : ""}`);
+  console.log(`Per 100 g: ${food.calories} kcal; protein ${food.protein} g; carbohydrate ${food.carbohydrates} g; fat ${food.fat} g.`);
+  console.log(`Current state: ${food.active ? "active and searchable" : "unpublished draft"}.`);
+  console.log("This marks the food as nutrition-reviewed and available for general meal planning. Dietary/allergen filters still require separate safety metadata.");
+
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  let confirmation: string;
+  try {
+    confirmation = await terminal.question('Type REVIEW after checking the description, source, and macros: ');
+  } finally {
+    terminal.close();
+  }
+  if (confirmation.trim() !== "REVIEW") {
+    console.log("No catalog changes were made.");
+    return;
+  }
+
+  const [reviewed] = await db.update(catalogFoods).set({ active: true, reviewed: true, updatedAt: new Date() }).where(and(
     eq(catalogFoods.id, id),
-    eq(catalogFoods.active, false),
+    eq(catalogFoods.reviewed, false),
+    eq(catalogFoods.active, food.active),
+    eq(catalogFoods.updatedAt, food.updatedAt),
   )).returning({ id: catalogFoods.id, name: catalogFoods.name });
-  if (!published) throw new Error("Unpublished catalog draft not found. Nothing was changed.");
-  console.log(`Reviewed catalog entry published: ${published.name} (${published.id}).`);
+  if (!reviewed) throw new Error("Catalog food changed during review. Reload it and try again.");
+  console.log(`Reviewed catalog entry is active and searchable: ${reviewed.name} (${reviewed.id}).`);
 }
 
 async function reviewFoodSafety() {
