@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { readFile } from "node:fs/promises";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { catalogFoods, catalogFoodPortions, catalogFoodSafetyReviews } from "@healthcare/database/schema";
 import { db, pool } from "@healthcare/database";
 import { foodAllergenTags, foodDietaryTags, validateFoodSafetyTagList } from "@healthcare/domain";
@@ -9,7 +9,17 @@ import { foodAllergenTags, foodDietaryTags, validateFoodSafetyTagList } from "@h
 const allowedDataTypes = ["Foundation", "SR Legacy", "Survey (FNDDS)"] as const;
 const allowedCategories = ["ingredient", "prepared_meal", "snack", "beverage", "restaurant", "other"] as const;
 type AllowedDataType = (typeof allowedDataTypes)[number];
+type AllowedCategory = (typeof allowedCategories)[number];
 const fnddsSource = "USDA FoodData Central (Survey (FNDDS))";
+const fnddsCategoryOverrides: Partial<Record<number, AllowedCategory>> = {
+  2707429: "snack",
+  2707613: "prepared_meal",
+  2707713: "prepared_meal",
+  2707714: "prepared_meal",
+  2707715: "prepared_meal",
+  2709128: "prepared_meal",
+  2709130: "snack",
+};
 
 type FnddsFood = {
   dataType?: string;
@@ -143,7 +153,9 @@ function aliasValues(canonicalName: string): string[] {
   });
 }
 
-function categoryForFnddsFood(food: FnddsFood): (typeof allowedCategories)[number] {
+function categoryForFnddsFood(food: FnddsFood): AllowedCategory {
+  const override = food.fdcId === undefined ? undefined : fnddsCategoryOverrides[food.fdcId];
+  if (override) return override;
   const category = food.wweiaFoodCategory?.wweiaFoodCategoryDescription?.toLocaleLowerCase() ?? "";
   const name = food.description?.toLocaleLowerCase() ?? "";
   const label = `${category} ${name}`;
@@ -260,6 +272,18 @@ async function seedFndds() {
         .returning({ id: catalogFoods.id });
       count += saved.length;
     }
+    let categoryUpdatedCount = 0;
+    for (const [fdcId, category] of Object.entries(fnddsCategoryOverrides)) {
+      if (!category) continue;
+      const updated = await tx.update(catalogFoods).set({ category, updatedAt: new Date() })
+        .where(and(
+          eq(catalogFoods.source, fnddsSource),
+          eq(catalogFoods.externalSourceId, fdcId),
+          ne(catalogFoods.category, category),
+        ))
+        .returning({ id: catalogFoods.id });
+      categoryUpdatedCount += updated.length;
+    }
     const foodRows = portionSeeds.size ? await tx.select({ id: catalogFoods.id, externalSourceId: catalogFoods.externalSourceId })
       .from(catalogFoods).where(eq(catalogFoods.source, fnddsSource)) : [];
     const idByFdcId = new Map(foodRows.filter((food) => food.externalSourceId !== null)
@@ -276,11 +300,11 @@ async function seedFndds() {
         .onConflictDoNothing().returning({ id: catalogFoodPortions.id });
       portionCount += saved.length;
     }
-    return { count, portionCount };
+    return { count, portionCount, categoryUpdatedCount };
   });
 
   console.log(`USDA FNDDS rows: ${surveyFoods.length}; valid foods: ${rows.length}; default portions: ${imported.portionCount}; skipped for missing or unsafe macros: ${skippedMissingOrInvalid}.`);
-  console.log(`${imported.count} foods added to the shared catalog; ${rows.length - imported.count} already existed and were left unchanged.`);
+  console.log(`${imported.count} foods added; ${imported.categoryUpdatedCount} existing source-category labels synchronized; ${rows.length - imported.count} records were already present.`);
   console.log("Imported foods are available for manual logging and remain marked not reviewed; they are excluded from AI meal-plan candidates until reviewed and published.");
 }
 
