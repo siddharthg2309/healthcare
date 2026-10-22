@@ -2,6 +2,8 @@
 
 Date: 21 October 2026
 
+Provider selection is superseded by [Decision 0013](0013-groq-provider.md): Groq is preferred when its key is configured; Gemini remains an explicit operator alternative.
+
 ## Decision
 
 Replace MiniMax through OpenRouter with direct Google AI Studio calls for food-photo naming and the meal/workout LangGraph workflows. Default to `gemini-3.1-flash-lite`, configured through optional `AI_MODEL`, and keep `GEMINI_API_KEY` server-only. This supersedes the model-provider selection in Decision 0001.

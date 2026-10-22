@@ -31,6 +31,15 @@ const environmentSchema = z.object({
   AUTH_TRUSTED_ORIGINS: z.string().optional(),
   JOB_DISPATCH_SECRET: optionalSecret,
   GEMINI_API_KEY: optionalText,
+  GROQ_API_KEY: optionalText,
+  AI_PROVIDER: z.preprocess(
+    (value) => typeof value === "string" && !value.trim() ? undefined : value,
+    z.enum(["groq", "gemini"]).optional(),
+  ),
+  GROQ_MODEL: z.preprocess(
+    (value) => typeof value === "string" && !value.trim() ? undefined : value,
+    z.literal("qwen/qwen3.8-27b").default("qwen/qwen3.8-27b"),
+  ),
   AI_MODEL: z.preprocess(
     // Migrate the previous default even if it remains in Vercel's settings.
     (value) => typeof value === "string" && (!value.trim() || value.trim() === "minimax/minimax-m3")

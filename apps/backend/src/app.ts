@@ -65,6 +65,7 @@ import {
 } from "@healthcare/domain";
 import { auth } from "./auth/config.js";
 import { env, isAllowedWebOrigin } from "./env.js";
+import { aiProvider, isAiConfigured } from "./services/ai-provider.js";
 import { redeemInvitation, releaseInvitation, reserveInvitation } from "./auth/invitations.js";
 import { claimJobs, completeJob, failJob } from "./services/jobs.js";
 import { FoodVisionError } from "./services/food-vision.js";
@@ -2302,7 +2303,7 @@ app.post("/v1/plans/meal/runs", async (c) => {
   const parsed = mealPlanRunRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_meal_plan_request" }, 400);
   if (!isLocalDate(parsed.data.startDate)) return c.json({ error: "invalid_start_date" }, 400);
-  if (!env.GEMINI_API_KEY) return c.json({ error: "meal_planning_not_configured" }, 503);
+  if (!isAiConfigured()) return c.json({ error: "meal_planning_not_configured" }, 503);
 
   const userId = c.get("session").user.id;
   let planning;
@@ -2357,7 +2358,7 @@ app.post("/v1/plans/meal/runs", async (c) => {
       status: "running",
       idempotencyKey: parsed.data.idempotencyKey,
       inputHash,
-      inputSnapshot: { ...planning.context },
+      inputSnapshot: { ...planning.context, provider: aiProvider },
       model: mealPlanningVersions.model,
       promptVersion: mealPlanningVersions.prompt,
       schemaVersion: mealPlanningVersions.schema,
@@ -2399,9 +2400,9 @@ app.post("/v1/plans/meal/runs", async (c) => {
     if (result.terminalStatus === "failed") return c.json({ runId, status: "failed", plan: null, error: "meal_plan_invalid" }, 422);
     return c.json({ runId, status: "pending_review", plan }, 201);
   } catch (error) {
-    const code = error instanceof Error && error.message.startsWith("gemini_http_")
+    const code = error instanceof Error && error.message.startsWith("ai_http_")
       ? "meal_plan_provider_unavailable"
-      : error instanceof Error && error.message === "gemini_not_configured"
+      : error instanceof Error && error.message === "ai_not_configured"
         ? "meal_planning_not_configured"
         : "meal_plan_generation_failed";
     await db.transaction(async (tx) => {
@@ -2800,7 +2801,7 @@ app.post("/v1/plans/workout/runs", async (c) => {
   }
   const parsed = workoutPlanRunRequestSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: "invalid_workout_plan_request" }, 400);
-  if (!env.GEMINI_API_KEY) return c.json({ error: "workout_planning_not_configured" }, 503);
+  if (!isAiConfigured()) return c.json({ error: "workout_planning_not_configured" }, 503);
 
   const userId = c.get("session").user.id;
   let planning;
@@ -2851,7 +2852,7 @@ app.post("/v1/plans/workout/runs", async (c) => {
       status: "running",
       idempotencyKey: parsed.data.idempotencyKey,
       inputHash,
-      inputSnapshot: { ...planning.context },
+      inputSnapshot: { ...planning.context, provider: aiProvider },
       model: workoutPlanningVersions.model,
       promptVersion: workoutPlanningVersions.prompt,
       schemaVersion: workoutPlanningVersions.schema,
@@ -2893,9 +2894,9 @@ app.post("/v1/plans/workout/runs", async (c) => {
     if (result.terminalStatus === "failed") return c.json({ runId, status: "failed", plan: null }, 422);
     return c.json({ runId, status: "pending_review", plan }, 201);
   } catch (error) {
-    const code = error instanceof Error && error.message.startsWith("gemini_http_")
+    const code = error instanceof Error && error.message.startsWith("ai_http_")
       ? "workout_plan_provider_unavailable"
-      : error instanceof Error && error.message === "gemini_not_configured"
+      : error instanceof Error && error.message === "ai_not_configured"
         ? "workout_planning_not_configured"
         : "workout_plan_generation_failed";
     await db.transaction(async (tx) => {

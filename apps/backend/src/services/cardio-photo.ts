@@ -3,8 +3,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@healthcare/database";
 import { aiRuns, userRecords } from "@healthcare/database/schema";
 import { cardioPhotoExtractionSchema, type ActivityLogRecord, type CardioPhotoResponse, type FoodPhotoRecognitionRequest } from "@healthcare/contracts";
-import { env } from "../env.js";
-import { geminiChatCompletion, GeminiConnectionError } from "./gemini.js";
+import { chatCompletion, AiConnectionError, isAiConfigured, aiModel, aiProvider } from "./ai-provider.js";
 import { hasAiOperationCapacity, lockAiUsageWindow, providerCostToMicros } from "./ai-usage.js";
 import { FoodVisionError, imageMatchesMimeType, providerFailure, responseText, safeTokenCount, type FoodVisionUsage } from "./food-vision.js";
 
@@ -32,7 +31,7 @@ async function extractCardioPhoto(image: FoodPhotoRecognitionRequest) {
   const timeout = setTimeout(() => controller.abort(), 40_000);
   let usage: FoodVisionUsage | null = null;
   try {
-    const response = await geminiChatCompletion({
+    const response = await chatCompletion({
       temperature: 0,
       max_tokens: 1500,
       messages: [
@@ -74,12 +73,12 @@ async function extractCardioPhoto(image: FoodPhotoRecognitionRequest) {
   } catch (error) {
     if (error instanceof FoodVisionError) throw error;
     if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) throw new FoodVisionError("ai_timeout", 504, usage);
-    throw new FoodVisionError(error instanceof GeminiConnectionError ? "ai_connection_failed" : "ai_provider_unavailable", 503, usage);
+    throw new FoodVisionError(error instanceof AiConnectionError ? "ai_connection_failed" : "ai_provider_unavailable", 503, usage);
   } finally { clearTimeout(timeout); }
 }
 
 export async function createCardioPhotoReading(userId: string, image: FoodPhotoRecognitionRequest): Promise<CardioPhotoResponse> {
-  if (!env.GEMINI_API_KEY) throw new FoodVisionError("ai_not_configured", 503);
+  if (!isAiConfigured()) throw new FoodVisionError("ai_not_configured", 503);
   const bytes = Buffer.from(image.base64, "base64");
   if (bytes.toString("base64") !== image.base64 || bytes.length < 128 || bytes.length > 2_500_000 || !imageMatchesMimeType(bytes, image.mimeType)) {
     throw new FoodVisionError("invalid_cardio_photo", 400);
@@ -92,8 +91,8 @@ export async function createCardioPhotoReading(userId: string, image: FoodPhotoR
     await tx.insert(aiRuns).values({
       id: runId, userId, kind: "food_vision", status: "running", idempotencyKey: randomUUID(),
       inputHash: createHash("sha256").update(runId).digest("hex"),
-      inputSnapshot: { inputType: "cardio_photo", mimeType: image.mimeType, base64Characters: image.base64.length },
-      model: env.AI_MODEL, promptVersion: "cardio-photo-v1", schemaVersion: "cardio-photo-v1",
+      inputSnapshot: { inputType: "cardio_photo", provider: aiProvider, mimeType: image.mimeType, base64Characters: image.base64.length },
+      model: aiModel, promptVersion: "cardio-photo-v1", schemaVersion: "cardio-photo-v1",
     });
     return true;
   });
@@ -110,7 +109,7 @@ export async function createCardioPhotoReading(userId: string, image: FoodPhotoR
         confidence: result.response.confidence,
       };
       await tx.update(aiRuns).set({ status: "completed", ...result.usage,
-        inputSnapshot: { inputType: "cardio_photo", ...readings }, updatedAt: new Date(),
+        inputSnapshot: { inputType: "cardio_photo", provider: aiProvider, ...readings }, updatedAt: new Date(),
       }).where(and(eq(aiRuns.id, runId), eq(aiRuns.userId, userId)));
     });
     return { ...result.response, photoRunId: runId };

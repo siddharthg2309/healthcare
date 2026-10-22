@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@healthcare/database";
 import { aiRuns } from "@healthcare/database/schema";
 import type { FoodPhotoRecognitionRequest, FoodTextEstimateRequest } from "@healthcare/contracts";
-import { env } from "../env.js";
+import { aiModel, aiProvider, isAiConfigured } from "./ai-provider.js";
 import { FoodVisionError, estimateFoodText, recognizeFoodPhoto } from "./food-vision.js";
 import { hasAiOperationCapacity, lockAiUsageWindow } from "./ai-usage.js";
 import { signFoodPhotoDraft } from "./food-photo-draft.js";
@@ -12,7 +12,7 @@ export const SAVED_AI_FOOD_PREFIX = "AI estimate (unverified).";
 
 /** Both input modes share the existing food-inference quota and review contract. */
 export async function createFoodEstimate(userId: string, input: FoodPhotoRecognitionRequest | FoodTextEstimateRequest) {
-  if (!env.GEMINI_API_KEY) throw new FoodVisionError("ai_not_configured", 503);
+  if (!isAiConfigured()) throw new FoodVisionError("ai_not_configured", 503);
   const inputType = "foodName" in input ? "text" as const : "photo" as const;
   const runId = randomUUID();
   const reserved = await db.transaction(async (tx) => {
@@ -25,10 +25,10 @@ export async function createFoodEstimate(userId: string, input: FoodPhotoRecogni
       kind: "food_vision", status: "running", idempotencyKey: randomUUID(),
       inputHash: createHash("sha256").update(runId).digest("hex"),
       inputSnapshot: {
-        inputType, contextCharacters: input.context?.length ?? 0,
+        inputType, provider: aiProvider, contextCharacters: input.context?.length ?? 0,
         ...("foodName" in input ? { foodNameCharacters: input.foodName.length } : { mimeType: input.mimeType, base64Characters: input.base64.length }),
       },
-      model: env.AI_MODEL,
+      model: aiModel,
       promptVersion: inputType === "text" ? "food-text-estimate-v1" : "food-photo-estimate-v3",
       schemaVersion: "food-estimate-v3",
     });

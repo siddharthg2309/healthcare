@@ -2,6 +2,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { foodPhotoEstimateSchema, foodLogRecordSchema, type ConfirmFoodPhotoRequest, type FoodPhotoEstimate } from "@healthcare/contracts";
 import { env } from "../env.js";
+import { aiModel } from "./ai-provider.js";
 
 const draftSchema = z.object({
   userId: z.string().min(1).max(200),
@@ -18,7 +19,7 @@ function signature(payload: string): Buffer {
 }
 
 export function signFoodPhotoDraft(userId: string, runId: string, estimate: FoodPhotoEstimate, inputType: "photo" | "text" = "photo", foodName?: string): string {
-  const payload = Buffer.from(JSON.stringify(draftSchema.parse({ userId, runId, inputType, foodName, model: env.AI_MODEL, expiresAt: Date.now() + 2 * 60 * 60 * 1000, estimate }))).toString("base64url");
+  const payload = Buffer.from(JSON.stringify(draftSchema.parse({ userId, runId, inputType, foodName, model: aiModel, expiresAt: Date.now() + 2 * 60 * 60 * 1000, estimate }))).toString("base64url");
   return `${payload}.${signature(payload).toString("base64url")}`;
 }
 

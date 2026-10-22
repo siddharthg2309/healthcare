@@ -70,6 +70,6 @@ export function CardioPhotoImport({ report, disabled, onChange, onReading, onBus
       <p className="cardio-photo-caption">{report.caloriesKcal === null || report.calorieBasis === "unknown" ? "Using the app estimate until the calorie reading is clear." : report.calorieBasis === "total" ? "Resting calories are deducted before adding to progress." : "Using your reviewed active-calorie reading."}</p>
       <button type="button" className="text-button" disabled={busy || disabled} onClick={() => { onChange(null); setQuestion(null); }}>Remove imported readings</button>
     </> : null}
-    <details className="activity-note-details"><summary>About photo imports</summary><p className="muted-copy">Check the minutes, activity type, and readings before saving. Device calories are estimates. Google AI reads the image; the app keeps the reviewed readings, not the image.</p></details>
+    <details className="activity-note-details"><summary>About photo imports</summary><p className="muted-copy">Check the minutes, activity type, and readings before saving. Device calories are estimates. The configured AI provider reads the image; the app keeps the reviewed readings, not the image.</p></details>
   </section>;
 }

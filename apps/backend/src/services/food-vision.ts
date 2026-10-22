@@ -4,8 +4,7 @@ import {
   type FoodPhotoEstimate,
   type FoodTextEstimateRequest,
 } from "@healthcare/contracts";
-import { env } from "../env.js";
-import { geminiChatCompletion, GeminiConnectionError } from "./gemini.js";
+import { chatCompletion, AiConnectionError, isAiConfigured, aiProvider } from "./ai-provider.js";
 import { providerCostToMicros } from "./ai-usage.js";
 
 export type FoodVisionStatus = 400 | 429 | 502 | 503 | 504;
@@ -106,14 +105,14 @@ export function estimateFoodText(input: FoodTextEstimateRequest): Promise<FoodVi
 
 async function requestFoodEstimate(input: FoodPhotoRecognitionRequest | FoodTextEstimateRequest): Promise<FoodVisionResult> {
   const image = "base64" in input ? input : null;
-  if (!env.GEMINI_API_KEY) throw new FoodVisionError("ai_not_configured", 503);
+  if (!isAiConfigured()) throw new FoodVisionError("ai_not_configured", 503);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 40_000);
   try {
-    const response = await geminiChatCompletion({
+    const response = await chatCompletion({
       temperature: 0.1,
-      max_tokens: 4096,
+      max_tokens: aiProvider === "groq" ? 2048 : 4096,
       messages: [
         {
           role: "system",
@@ -189,7 +188,7 @@ async function requestFoodEstimate(input: FoodPhotoRecognitionRequest | FoodText
     if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw new FoodVisionError("ai_timeout", 504);
     }
-    throw new FoodVisionError(error instanceof GeminiConnectionError ? "ai_connection_failed" : "ai_provider_unavailable", 503);
+    throw new FoodVisionError(error instanceof AiConnectionError ? "ai_connection_failed" : "ai_provider_unavailable", 503);
   } finally {
     clearTimeout(timeout);
   }
